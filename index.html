@@ -1,0 +1,980 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>LEDGER — 투자 분석</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300;0,9..144,500;0,9..144,600;1,9..144,500&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.4/chart.umd.min.js"></script>
+<style>
+  :root{
+    --ink:#0C0F14;
+    --panel:#12161D;
+    --panel-2:#161B23;
+    --line:#262B35;
+    --paper:#E9E6DC;
+    --muted:#8B92A0;
+    --muted-2:#5C6373;
+    --gain:#4CBE94;
+    --loss:#E0645A;
+    --gold:#C9A24B;
+    --gold-dim:#8A733A;
+    --radius:3px;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{
+    background:var(--ink);
+    color:var(--paper);
+    font-family:'Inter',sans-serif;
+    -webkit-font-smoothing:antialiased;
+    min-height:100vh;
+  }
+  h1,h2,h3,.display{
+    font-family:'Fraunces',serif;
+    font-weight:500;
+    letter-spacing:-0.01em;
+  }
+  .mono{ font-family:'IBM Plex Mono',monospace; }
+  a{color:inherit;}
+  ::selection{ background:var(--gold-dim); color:var(--ink); }
+
+  /* ---- Ticker Tape ---- */
+  .tape-wrap{
+    background:#08090C;
+    border-bottom:1px solid var(--line);
+    overflow:hidden;
+    white-space:nowrap;
+    position:relative;
+    height:40px;
+    display:flex;
+    align-items:center;
+  }
+  .tape-wrap::before{
+    content:"";
+    position:absolute; inset:0;
+    background:linear-gradient(90deg, #08090C 0%, transparent 4%, transparent 96%, #08090C 100%);
+    z-index:2; pointer-events:none;
+  }
+  .tape-track{
+    display:inline-flex;
+    align-items:center;
+    animation:tape-scroll 40s linear infinite;
+    will-change:transform;
+  }
+  .tape-track.paused{ animation-play-state:paused; }
+  @keyframes tape-scroll{
+    0%{ transform:translateX(0); }
+    100%{ transform:translateX(-50%); }
+  }
+  .tape-item{
+    font-family:'IBM Plex Mono',monospace;
+    font-size:12.5px;
+    padding:0 22px;
+    display:inline-flex;
+    align-items:center;
+    gap:8px;
+    color:var(--muted);
+    border-right:1px solid var(--line);
+  }
+  .tape-item b{ color:var(--paper); font-weight:600; letter-spacing:0.02em;}
+  .tape-item .up{ color:var(--gain); }
+  .tape-item .down{ color:var(--loss); }
+  .tape-empty{ font-size:12.5px; color:var(--muted-2); padding:0 20px; font-family:'IBM Plex Mono',monospace;}
+
+  /* ---- Header / Nav ---- */
+  header.top{
+    display:flex; align-items:center; justify-content:space-between;
+    padding:22px 32px 18px;
+    border-bottom:1px solid var(--line);
+    flex-wrap:wrap; gap:16px;
+  }
+  .brand{ display:flex; align-items:baseline; gap:10px; }
+  .brand .mark{
+    font-family:'Fraunces',serif; font-size:23px; font-weight:600;
+    letter-spacing:0.01em;
+  }
+  .brand .mark em{ color:var(--gold); font-style:normal; }
+  .brand .sub{ font-size:11px; color:var(--muted-2); font-family:'IBM Plex Mono',monospace; letter-spacing:0.14em; text-transform:uppercase; }
+
+  nav.tabs{ display:flex; gap:2px; background:var(--panel); border:1px solid var(--line); border-radius:var(--radius); padding:3px; }
+  nav.tabs button{
+    background:transparent; border:none; color:var(--muted);
+    font-family:'Inter',sans-serif; font-size:13px; font-weight:500;
+    padding:8px 16px; border-radius:2px; cursor:pointer;
+    transition:background .15s,color .15s;
+  }
+  nav.tabs button:hover{ color:var(--paper); }
+  nav.tabs button.active{ background:var(--line); color:var(--paper); }
+
+  main{ padding:32px; max-width:1180px; margin:0 auto; }
+  .view{ display:none; }
+  .view.active{ display:block; animation:fade-in .25s ease; }
+  @keyframes fade-in{ from{opacity:0; transform:translateY(4px);} to{opacity:1; transform:translateY(0);} }
+
+  .section-head{ display:flex; align-items:baseline; justify-content:space-between; margin-bottom:16px; flex-wrap:wrap; gap:10px;}
+  .section-head h2{ font-size:20px; margin:0; }
+  .section-head .eyebrow{ font-size:11px; letter-spacing:0.14em; text-transform:uppercase; color:var(--gold); font-family:'IBM Plex Mono',monospace; display:block; margin-bottom:4px;}
+
+  .panel{
+    background:var(--panel);
+    border:1px solid var(--line);
+    border-radius:var(--radius);
+  }
+  .panel + .panel{ margin-top:20px; }
+  .pad{ padding:20px; }
+
+  /* forms */
+  .row{ display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
+  input, select{
+    background:var(--panel-2);
+    border:1px solid var(--line);
+    color:var(--paper);
+    font-family:'IBM Plex Mono',monospace;
+    font-size:13px;
+    padding:9px 11px;
+    border-radius:var(--radius);
+    outline:none;
+  }
+  input::placeholder{ color:var(--muted-2); font-family:'Inter',sans-serif; }
+  input:focus, select:focus{ border-color:var(--gold-dim); }
+  label{ font-size:11.5px; color:var(--muted); display:block; margin-bottom:5px; font-family:'Inter',sans-serif; }
+  button.btn{
+    background:var(--gold); color:#1A1305; border:none;
+    font-family:'Inter',sans-serif; font-weight:600; font-size:13px;
+    padding:9px 16px; border-radius:var(--radius); cursor:pointer;
+    transition:opacity .15s;
+  }
+  button.btn:hover{ opacity:0.85; }
+  button.btn.ghost{
+    background:transparent; color:var(--paper); border:1px solid var(--line);
+  }
+  button.btn.ghost:hover{ border-color:var(--muted); }
+  button.btn.danger{ background:transparent; color:var(--loss); border:1px solid #4a2a28; }
+  button.btn:disabled{ opacity:0.4; cursor:not-allowed; }
+  button.icon-btn{
+    background:transparent; border:none; color:var(--muted-2); cursor:pointer; font-size:15px;
+    padding:4px 8px;
+  }
+  button.icon-btn:hover{ color:var(--loss); }
+
+  /* table */
+  table{ width:100%; border-collapse:collapse; }
+  th{
+    text-align:left; font-size:11px; text-transform:uppercase; letter-spacing:0.08em;
+    color:var(--muted-2); font-weight:500; padding:0 14px 10px; font-family:'Inter',sans-serif;
+    border-bottom:1px solid var(--line);
+  }
+  td{
+    padding:13px 14px; font-family:'IBM Plex Mono',monospace; font-size:13.5px;
+    border-bottom:1px solid var(--line); vertical-align:middle;
+  }
+  tr:last-child td{ border-bottom:none; }
+  tr.clickable{ cursor:pointer; transition:background .12s; }
+  tr.clickable:hover{ background:var(--panel-2); }
+  td.sym{ font-family:'Fraunces',serif; font-weight:600; font-size:14.5px; color:var(--paper); }
+  td.sym span{ display:block; font-family:'Inter',sans-serif; font-weight:400; font-size:11px; color:var(--muted-2); margin-top:2px;}
+  .up{ color:var(--gain); }
+  .down{ color:var(--loss); }
+  .flat{ color:var(--muted); }
+
+  .empty-state{
+    text-align:center; padding:48px 20px; color:var(--muted-2);
+  }
+  .empty-state .glyph{ font-size:26px; margin-bottom:10px; font-family:'Fraunces',serif; color:var(--gold-dim); }
+  .empty-state p{ font-size:13px; max-width:340px; margin:6px auto 0; line-height:1.6; }
+
+  .stat-grid{ display:grid; grid-template-columns:repeat(auto-fit, minmax(150px,1fr)); gap:1px; background:var(--line); border:1px solid var(--line); border-radius:var(--radius); overflow:hidden; }
+  .stat{ background:var(--panel); padding:16px 18px; }
+  .stat .k{ font-size:11px; color:var(--muted-2); text-transform:uppercase; letter-spacing:0.08em; margin-bottom:6px; }
+  .stat .v{ font-family:'IBM Plex Mono',monospace; font-size:19px; font-weight:600; }
+
+  .banner{
+    border:1px solid var(--gold-dim); background:rgba(201,162,75,0.07);
+    border-radius:var(--radius); padding:13px 16px; font-size:12.5px; color:var(--paper);
+    line-height:1.6; margin-bottom:20px;
+  }
+  .banner b{ color:var(--gold); }
+  .banner.err{ border-color:#4a2a28; background:rgba(224,101,90,0.08); }
+  .banner.hidden{ display:none; }
+
+  .chart-wrap{ position:relative; height:280px; }
+  .chart-wrap.small{ height:220px; }
+
+  footer{ text-align:center; padding:30px 20px 40px; color:var(--muted-2); font-size:11.5px; font-family:'IBM Plex Mono',monospace; letter-spacing:0.04em;}
+
+  .spinner{
+    width:14px; height:14px; border:2px solid var(--line); border-top-color:var(--gold);
+    border-radius:50%; display:inline-block; animation:spin 0.7s linear infinite; vertical-align:-2px;
+  }
+  @keyframes spin{ to{ transform:rotate(360deg); } }
+
+  @media (max-width:640px){
+    header.top{ padding:16px; }
+    main{ padding:18px; }
+    nav.tabs{ width:100%; overflow-x:auto; }
+  }
+</style>
+</head>
+<body>
+
+<div class="tape-wrap" id="tapeWrap">
+  <div class="tape-track" id="tapeTrack">
+    <span class="tape-empty">관심종목을 추가하면 여기 시세가 흐릅니다 —</span>
+  </div>
+</div>
+
+<header class="top">
+  <div class="brand">
+    <span class="mark">LEDGER<em>.</em></span>
+    <span class="sub">Personal Equity Desk</span>
+  </div>
+  <nav class="tabs" id="tabs">
+    <button data-view="dashboard" class="active">대시보드</button>
+    <button data-view="analysis">종목분석</button>
+    <button data-view="portfolio">포트폴리오</button>
+    <button data-view="settings">설정</button>
+  </nav>
+</header>
+
+<main>
+
+  <!-- DASHBOARD -->
+  <section class="view active" id="view-dashboard">
+    <div class="section-head">
+      <div>
+        <span class="eyebrow">Watchlist</span>
+        <h2>관심종목</h2>
+      </div>
+      <div class="row">
+        <input type="text" id="wlInput" placeholder="예: AAPL, TSLA, 005930.KS" style="width:190px;">
+        <button class="btn" id="wlAdd">추가</button>
+        <button class="btn ghost" id="wlRefresh">새로고침</button>
+      </div>
+    </div>
+
+    <div id="dashBanner"></div>
+
+    <div class="panel">
+      <table id="wlTable">
+        <thead>
+          <tr>
+            <th>종목</th>
+            <th>현재가</th>
+            <th>등락</th>
+            <th>등락률</th>
+            <th style="width:40px;"></th>
+          </tr>
+        </thead>
+        <tbody id="wlBody"></tbody>
+      </table>
+      <div class="empty-state" id="wlEmpty">
+        <div class="glyph">§</div>
+        <p>아직 관심종목이 없습니다. 위 입력창에 티커를 입력해 추가해보세요. (예: AAPL, MSFT, NVDA)</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ANALYSIS -->
+  <section class="view" id="view-analysis">
+    <div class="section-head">
+      <div>
+        <span class="eyebrow">Deep Dive</span>
+        <h2>종목분석</h2>
+      </div>
+      <div class="row">
+        <input type="text" id="anInput" placeholder="티커 입력 (예: AAPL)" style="width:190px;">
+        <button class="btn" id="anGo">조회</button>
+      </div>
+    </div>
+
+    <div id="anBanner"></div>
+    <div id="anResult"></div>
+  </section>
+
+  <!-- PORTFOLIO -->
+  <section class="view" id="view-portfolio">
+    <div class="section-head">
+      <div>
+        <span class="eyebrow">Holdings</span>
+        <h2>포트폴리오</h2>
+      </div>
+      <button class="btn ghost" id="pfRefresh">시세 새로고침</button>
+    </div>
+
+    <div id="pfBanner"></div>
+
+    <div class="panel pad" style="margin-bottom:20px;">
+      <div class="row" style="align-items:flex-end;">
+        <div><label>티커</label><input type="text" id="pfSym" placeholder="AAPL" style="width:100px;"></div>
+        <div><label>수량</label><input type="number" id="pfQty" placeholder="10" style="width:90px;"></div>
+        <div><label>평균 매입가</label><input type="number" id="pfCost" placeholder="150.00" style="width:110px;"></div>
+        <button class="btn" id="pfAdd">보유종목 추가</button>
+      </div>
+    </div>
+
+    <div class="stat-grid" id="pfStats" style="margin-bottom:20px;"></div>
+
+    <div class="panel" style="margin-bottom:20px;">
+      <table id="pfTable">
+        <thead>
+          <tr>
+            <th>종목</th>
+            <th>수량</th>
+            <th>평균단가</th>
+            <th>현재가</th>
+            <th>평가금액</th>
+            <th>손익</th>
+            <th>수익률</th>
+            <th style="width:40px;"></th>
+          </tr>
+        </thead>
+        <tbody id="pfBody"></tbody>
+      </table>
+      <div class="empty-state" id="pfEmpty">
+        <div class="glyph">§</div>
+        <p>보유중인 종목이 없습니다. 위에서 티커, 수량, 평균 매입가를 입력해 추가해보세요.</p>
+      </div>
+    </div>
+
+    <div class="panel pad" id="pfAllocWrap" style="display:none;">
+      <span class="eyebrow">Allocation</span>
+      <h3 style="margin:6px 0 16px;">자산 배분</h3>
+      <div class="chart-wrap small"><canvas id="pfAllocChart"></canvas></div>
+    </div>
+  </section>
+
+  <!-- SETTINGS -->
+  <section class="view" id="view-settings">
+    <div class="section-head">
+      <div>
+        <span class="eyebrow">Configuration</span>
+        <h2>설정</h2>
+      </div>
+    </div>
+
+    <div class="panel pad" style="margin-bottom:20px;">
+      <h3 style="margin-top:0; font-size:15px;">Alpha Vantage API 키</h3>
+      <p style="color:var(--muted); font-size:12.5px; line-height:1.6; margin-bottom:16px;">
+        실시간 시세와 재무데이터를 불러오려면 API 키가 필요합니다.
+        <a href="https://www.alphavantage.co/support/#api-key" target="_blank" style="color:var(--gold);">alphavantage.co</a>에서 무료로 발급받을 수 있습니다.
+        입력한 키는 <b style="color:var(--paper);">이 브라우저에만</b> 저장되며 서버로 전송되지 않습니다.
+      </p>
+      <div class="row">
+        <input type="password" id="apiKeyInput" placeholder="API 키 입력" style="width:280px;">
+        <button class="btn" id="apiKeySave">저장</button>
+        <span id="apiKeyStatus" style="font-size:12px; color:var(--muted); font-family:'IBM Plex Mono',monospace;"></span>
+      </div>
+    </div>
+
+    <div class="banner">
+      <b>무료 티어 제한 안내</b><br>
+      Alpha Vantage 무료 API는 <b>1분당 5회 / 1일 25회</b> 요청으로 제한됩니다. 앱은 중복 요청을 줄이기 위해 시세를 한동안 캐시해두지만, 관심종목이 많으면 한도에 빨리 도달할 수 있어요.
+      해외(특히 미국) 종목은 폭넓게 지원되지만, 국내 코스피/코스닥 종목은 일부만 지원되거나 지연 시세일 수 있습니다.
+    </div>
+
+    <div class="panel pad">
+      <h3 style="margin-top:0; font-size:15px;">데이터 초기화</h3>
+      <p style="color:var(--muted); font-size:12.5px; margin-bottom:14px;">관심종목, 보유종목, API 키를 모두 삭제하고 처음부터 시작합니다.</p>
+      <button class="btn danger" id="resetAll">전체 초기화</button>
+    </div>
+  </section>
+
+</main>
+
+<footer>LEDGER — 개인용 투자 분석 도구 · 시세 제공: Alpha Vantage · 투자 조언이 아닙니다</footer>
+
+<script>
+(function(){
+  "use strict";
+
+  /* ---------------- Storage ---------------- */
+  var LS = {
+    KEY: 'ledger_api_key',
+    WATCH: 'ledger_watchlist',
+    PORT: 'ledger_portfolio',
+    CACHE: 'ledger_cache'
+  };
+
+  function safeGet(k, fallback){
+    try{
+      var v = localStorage.getItem(k);
+      return v ? JSON.parse(v) : fallback;
+    }catch(e){ return fallback; }
+  }
+  function safeSet(k, v){
+    try{ localStorage.setItem(k, JSON.stringify(v)); }catch(e){ /* storage unavailable */ }
+  }
+
+  var state = {
+    apiKey: safeGet(LS.KEY, '') ,
+    watchlist: safeGet(LS.WATCH, []),      // ["AAPL","TSLA"]
+    portfolio: safeGet(LS.PORT, []),       // [{symbol,qty,cost}]
+    cache: safeGet(LS.CACHE, {}),          // { "GLOBAL_QUOTE:AAPL": {t, data} }
+    quotes: {}                             // live in-memory quote cache for current session
+  };
+  if(typeof state.apiKey !== 'string') state.apiKey = '';
+
+  function persist(){
+    safeSet(LS.WATCH, state.watchlist);
+    safeSet(LS.PORT, state.portfolio);
+    safeSet(LS.CACHE, state.cache);
+  }
+
+  /* ---------------- API layer ---------------- */
+  var AV_BASE = 'https://www.alphavantage.co/query';
+  var TTL = { quote: 60*1000, daily: 60*60*1000, overview: 6*60*60*1000, rsi: 60*60*1000 };
+
+  function cacheGet(key, ttl){
+    var e = state.cache[key];
+    if(e && (Date.now() - e.t) < ttl) return e.data;
+    return null;
+  }
+  function cacheSet(key, data){
+    state.cache[key] = { t: Date.now(), data: data };
+    persist();
+  }
+
+  function avFetch(params, cacheKey, ttl){
+    if(cacheKey){
+      var cached = cacheGet(cacheKey, ttl);
+      if(cached) return Promise.resolve(cached);
+    }
+    if(!state.apiKey){
+      return Promise.reject(new Error('NO_KEY'));
+    }
+    var qs = Object.keys(params).map(function(k){
+      return encodeURIComponent(k)+'='+encodeURIComponent(params[k]);
+    }).join('&');
+    var url = AV_BASE + '?' + qs + '&apikey=' + encodeURIComponent(state.apiKey);
+    return fetch(url).then(function(res){
+      if(!res.ok) throw new Error('HTTP_'+res.status);
+      return res.json();
+    }).then(function(json){
+      if(json['Note']) throw new Error('RATE_LIMIT');
+      if(json['Information']) throw new Error('RATE_LIMIT');
+      if(json['Error Message']) throw new Error('BAD_SYMBOL');
+      if(cacheKey) cacheSet(cacheKey, json);
+      return json;
+    });
+  }
+
+  function fetchQuote(symbol){
+    return avFetch(
+      { function:'GLOBAL_QUOTE', symbol: symbol },
+      'GLOBAL_QUOTE:'+symbol, TTL.quote
+    ).then(function(json){
+      var q = json['Global Quote'] || {};
+      if(!q['05. price']) throw new Error('BAD_SYMBOL');
+      return {
+        symbol: symbol,
+        price: parseFloat(q['05. price']),
+        change: parseFloat(q['09. change']),
+        changePct: parseFloat((q['10. change percent']||'0').replace('%','')),
+        prevClose: parseFloat(q['08. previous close'])
+      };
+    });
+  }
+
+  function fetchDaily(symbol){
+    return avFetch(
+      { function:'TIME_SERIES_DAILY', symbol: symbol, outputsize:'compact' },
+      'DAILY:'+symbol, TTL.daily
+    ).then(function(json){
+      var series = json['Time Series (Daily)'];
+      if(!series) throw new Error('BAD_SYMBOL');
+      var dates = Object.keys(series).sort();
+      return dates.map(function(d){
+        return { date: d, close: parseFloat(series[d]['4. close']) };
+      });
+    });
+  }
+
+  function fetchOverview(symbol){
+    return avFetch(
+      { function:'OVERVIEW', symbol: symbol },
+      'OVERVIEW:'+symbol, TTL.overview
+    ).then(function(json){
+      if(!json || !json['Symbol']) throw new Error('BAD_SYMBOL');
+      return json;
+    });
+  }
+
+  function fetchRSI(symbol){
+    return avFetch(
+      { function:'RSI', symbol: symbol, interval:'daily', time_period:'14', series_type:'close' },
+      'RSI:'+symbol, TTL.rsi
+    ).then(function(json){
+      var series = json['Technical Analysis: RSI'];
+      if(!series) return null;
+      var dates = Object.keys(series).sort();
+      var last = dates[dates.length-1];
+      return last ? parseFloat(series[last]['RSI']) : null;
+    });
+  }
+
+  function sma(values, period){
+    var out = [];
+    for(var i=0;i<values.length;i++){
+      if(i < period-1){ out.push(null); continue; }
+      var sum=0;
+      for(var j=i-period+1;j<=i;j++) sum += values[j];
+      out.push(sum/period);
+    }
+    return out;
+  }
+
+  function errMsg(e){
+    var m = e && e.message;
+    if(m === 'NO_KEY') return 'API 키가 설정되지 않았습니다. 설정 탭에서 먼저 키를 입력해주세요.';
+    if(m === 'RATE_LIMIT') return 'API 요청 한도에 도달했습니다 (무료 티어: 분당 5회 / 일 25회). 잠시 후 다시 시도해주세요.';
+    if(m === 'BAD_SYMBOL') return '해당 티커의 데이터를 찾을 수 없습니다. 심볼을 확인해주세요.';
+    return '데이터를 불러오는 중 오류가 발생했습니다.';
+  }
+
+  function banner(el, type, html){
+    if(!html){ el.innerHTML=''; return; }
+    el.innerHTML = '<div class="banner '+(type==='err'?'err':'')+'">'+html+'</div>';
+  }
+
+  /* ---------------- Formatting ---------------- */
+  function fmt(n, d){
+    if(n===null || n===undefined || isNaN(n)) return '—';
+    return n.toLocaleString('en-US', {minimumFractionDigits:d===undefined?2:d, maximumFractionDigits:d===undefined?2:d});
+  }
+  function fmtBig(n){
+    if(n===null || n===undefined || isNaN(n)) return '—';
+    n = Number(n);
+    if(Math.abs(n) >= 1e12) return (n/1e12).toFixed(2)+'T';
+    if(Math.abs(n) >= 1e9) return (n/1e9).toFixed(2)+'B';
+    if(Math.abs(n) >= 1e6) return (n/1e6).toFixed(2)+'M';
+    return fmt(n,0);
+  }
+  function pctClass(n){ return n>0?'up':(n<0?'down':'flat'); }
+  function arrow(n){ return n>0?'▲':(n<0?'▼':'—'); }
+
+  /* ---------------- Tabs ---------------- */
+  var tabs = document.getElementById('tabs');
+  tabs.addEventListener('click', function(e){
+    var btn = e.target.closest('button[data-view]');
+    if(!btn) return;
+    Array.prototype.forEach.call(tabs.querySelectorAll('button'), function(b){ b.classList.remove('active'); });
+    btn.classList.add('active');
+    Array.prototype.forEach.call(document.querySelectorAll('.view'), function(v){ v.classList.remove('active'); });
+    document.getElementById('view-'+btn.dataset.view).classList.add('active');
+  });
+
+  /* ---------------- Ticker Tape ---------------- */
+  var tapeTrack = document.getElementById('tapeTrack');
+  function renderTape(){
+    if(state.watchlist.length===0){
+      tapeTrack.innerHTML = '<span class="tape-empty">관심종목을 추가하면 여기 시세가 흐릅니다 —</span>';
+      return;
+    }
+    var items = state.watchlist.map(function(sym){
+      var q = state.quotes[sym];
+      if(!q){
+        return '<span class="tape-item"><b>'+sym+'</b><span class="mono" style="color:var(--muted-2)">···</span></span>';
+      }
+      var cls = pctClass(q.change);
+      return '<span class="tape-item"><b>'+sym+'</b>'+fmt(q.price)+'<span class="'+cls+'">'+arrow(q.change)+' '+fmt(Math.abs(q.changePct))+'%</span></span>';
+    }).join('');
+    // duplicate for seamless loop
+    tapeTrack.innerHTML = items + items;
+  }
+
+  /* ---------------- Dashboard / Watchlist ---------------- */
+  var wlBody = document.getElementById('wlBody');
+  var wlEmpty = document.getElementById('wlEmpty');
+  var dashBanner = document.getElementById('dashBanner');
+
+  function renderWatchlistSkeleton(){
+    if(state.watchlist.length===0){
+      wlBody.innerHTML=''; wlEmpty.style.display='block'; return;
+    }
+    wlEmpty.style.display='none';
+    wlBody.innerHTML = state.watchlist.map(function(sym){
+      return '<tr class="clickable" data-sym="'+sym+'">'+
+        '<td class="sym">'+sym+'</td>'+
+        '<td colspan="3" class="mono" style="color:var(--muted-2)"><span class="spinner"></span> 불러오는 중</td>'+
+        '<td><button class="icon-btn" data-remove="'+sym+'">✕</button></td>'+
+      '</tr>';
+    }).join('');
+  }
+
+  function loadWatchlistQuotes(){
+    if(state.watchlist.length===0) return;
+    banner(dashBanner,'','');
+    var promises = state.watchlist.map(function(sym){
+      return fetchQuote(sym).then(function(q){
+        state.quotes[sym]=q;
+        return {sym:sym, ok:true};
+      }).catch(function(e){
+        return {sym:sym, ok:false, err:e};
+      });
+    });
+    Promise.all(promises).then(function(results){
+      renderTape();
+      wlBody.innerHTML = state.watchlist.map(function(sym){
+        var r = results.find(function(x){return x.sym===sym;});
+        if(r && !r.ok){
+          return '<tr data-sym="'+sym+'">'+
+            '<td class="sym">'+sym+'</td>'+
+            '<td colspan="3" style="color:var(--muted-2); font-family:Inter,sans-serif; font-size:12px;">'+errMsg(r.err)+'</td>'+
+            '<td><button class="icon-btn" data-remove="'+sym+'">✕</button></td>'+
+          '</tr>';
+        }
+        var q = state.quotes[sym];
+        var cls = pctClass(q.change);
+        return '<tr class="clickable" data-sym="'+sym+'">'+
+          '<td class="sym">'+sym+'</td>'+
+          '<td>'+fmt(q.price)+'</td>'+
+          '<td class="'+cls+'">'+arrow(q.change)+' '+fmt(Math.abs(q.change))+'</td>'+
+          '<td class="'+cls+'">'+fmt(Math.abs(q.changePct))+'%</td>'+
+          '<td><button class="icon-btn" data-remove="'+sym+'">✕</button></td>'+
+        '</tr>';
+      }).join('');
+      var anyRateLimited = results.some(function(r){ return r.err && r.err.message==='RATE_LIMIT'; });
+      if(anyRateLimited){
+        banner(dashBanner,'err','일부 종목의 시세를 불러오지 못했습니다 — '+errMsg({message:'RATE_LIMIT'}));
+      }
+    });
+  }
+
+  document.getElementById('wlAdd').addEventListener('click', function(){
+    var input = document.getElementById('wlInput');
+    var sym = input.value.trim().toUpperCase();
+    if(!sym) return;
+    if(state.watchlist.indexOf(sym) !== -1){ input.value=''; return; }
+    state.watchlist.push(sym);
+    persist();
+    input.value='';
+    renderWatchlistSkeleton();
+    renderTape();
+    loadWatchlistQuotes();
+  });
+  document.getElementById('wlInput').addEventListener('keydown', function(e){
+    if(e.key==='Enter') document.getElementById('wlAdd').click();
+  });
+  document.getElementById('wlRefresh').addEventListener('click', function(){
+    renderWatchlistSkeleton();
+    loadWatchlistQuotes();
+  });
+  wlBody.addEventListener('click', function(e){
+    var rm = e.target.closest('[data-remove]');
+    if(rm){
+      var sym = rm.dataset.remove;
+      state.watchlist = state.watchlist.filter(function(s){ return s!==sym; });
+      persist(); renderWatchlistSkeleton(); renderTape();
+      return;
+    }
+    var row = e.target.closest('tr[data-sym]');
+    if(row){
+      var s = row.dataset.sym;
+      document.querySelector('button[data-view="analysis"]').click();
+      document.getElementById('anInput').value = s;
+      document.getElementById('anGo').click();
+    }
+  });
+
+  /* ---------------- Analysis view ---------------- */
+  var anBanner = document.getElementById('anBanner');
+  var anResult = document.getElementById('anResult');
+  var priceChart = null;
+
+  document.getElementById('anGo').addEventListener('click', runAnalysis);
+  document.getElementById('anInput').addEventListener('keydown', function(e){ if(e.key==='Enter') runAnalysis(); });
+
+  function runAnalysis(){
+    var sym = document.getElementById('anInput').value.trim().toUpperCase();
+    if(!sym) return;
+    banner(anBanner,'','');
+    anResult.innerHTML = '<div class="panel pad" style="text-align:center; color:var(--muted);"><span class="spinner"></span>&nbsp; '+sym+' 데이터를 불러오는 중…</div>';
+
+    Promise.allSettled([
+      fetchOverview(sym),
+      fetchDaily(sym),
+      fetchRSI(sym),
+      fetchQuote(sym)
+    ]).then(function(results){
+      var overview = results[0].status==='fulfilled' ? results[0].value : null;
+      var daily = results[1].status==='fulfilled' ? results[1].value : null;
+      var rsi = results[2].status==='fulfilled' ? results[2].value : null;
+      var quote = results[3].status==='fulfilled' ? results[3].value : null;
+
+      if(!daily && !overview && !quote){
+        var firstErr = results.find(function(r){return r.status==='rejected';});
+        banner(anBanner,'err', errMsg(firstErr ? firstErr.reason : null));
+        anResult.innerHTML='';
+        return;
+      }
+
+      renderAnalysis(sym, overview, daily, rsi, quote);
+    });
+  }
+
+  function renderAnalysis(sym, overview, daily, rsi, quote){
+    var name = overview ? overview['Name'] : sym;
+    var cls = quote ? pctClass(quote.change) : 'flat';
+
+    var html = '';
+    html += '<div class="panel pad" style="margin-bottom:20px;">';
+    html += '<div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:12px;">';
+    html += '<div><h2 style="margin:0 0 4px;">'+sym+'</h2><div style="color:var(--muted); font-size:13px;">'+(name||'')+'</div></div>';
+    if(quote){
+      html += '<div style="text-align:right;">';
+      html += '<div class="mono" style="font-size:26px; font-weight:600;">'+fmt(quote.price)+'</div>';
+      html += '<div class="mono '+cls+'" style="font-size:13px;">'+arrow(quote.change)+' '+fmt(Math.abs(quote.change))+' ('+fmt(Math.abs(quote.changePct))+'%)</div>';
+      html += '</div>';
+    }
+    html += '</div></div>';
+
+    // Chart
+    html += '<div class="panel pad" style="margin-bottom:20px;">';
+    html += '<span class="eyebrow">Price History</span><h3 style="margin:6px 0 16px;">가격 추이 (최근 100거래일) · 20일 이동평균</h3>';
+    if(daily && daily.length){
+      html += '<div class="chart-wrap"><canvas id="priceCanvas"></canvas></div>';
+    } else {
+      html += '<div style="color:var(--muted-2); font-size:13px; padding:20px 0;">차트 데이터를 불러오지 못했습니다.</div>';
+    }
+    html += '</div>';
+
+    // Fundamentals
+    html += '<div class="panel pad" style="margin-bottom:20px;">';
+    html += '<span class="eyebrow">Fundamentals</span><h3 style="margin:6px 0 16px;">재무 지표</h3>';
+    if(overview){
+      html += '<div class="stat-grid">';
+      html += statCell('시가총액', fmtBig(overview['MarketCapitalization']));
+      html += statCell('PER', overview['PERatio'] && overview['PERatio']!=='None' ? overview['PERatio'] : '—');
+      html += statCell('PBR', overview['PriceToBookRatio'] && overview['PriceToBookRatio']!=='None' ? overview['PriceToBookRatio'] : '—');
+      html += statCell('EPS', overview['EPS'] && overview['EPS']!=='None' ? overview['EPS'] : '—');
+      html += statCell('배당수익률', overview['DividendYield'] && overview['DividendYield']!=='None' ? (parseFloat(overview['DividendYield'])*100).toFixed(2)+'%' : '—');
+      html += statCell('52주 최고', overview['52WeekHigh'] || '—');
+      html += statCell('52주 최저', overview['52WeekLow'] || '—');
+      html += statCell('RSI (14일)', rsi!==null && rsi!==undefined ? rsi.toFixed(1) : '—');
+      html += '</div>';
+    } else {
+      html += '<div style="color:var(--muted-2); font-size:13px;">재무 데이터를 불러오지 못했습니다. (국내 종목은 미지원일 수 있습니다)</div>';
+    }
+    html += '</div>';
+
+    anResult.innerHTML = html;
+
+    if(daily && daily.length){
+      var labels = daily.map(function(d){return d.date;});
+      var closes = daily.map(function(d){return d.close;});
+      var ma20 = sma(closes, 20);
+      var ctx = document.getElementById('priceCanvas').getContext('2d');
+      if(priceChart) priceChart.destroy();
+      priceChart = new Chart(ctx, {
+        type:'line',
+        data:{
+          labels:labels,
+          datasets:[
+            {
+              label:'종가', data:closes, borderColor:'#C9A24B', backgroundColor:'rgba(201,162,75,0.08)',
+              borderWidth:2, pointRadius:0, fill:true, tension:0.15
+            },
+            {
+              label:'MA20', data:ma20, borderColor:'#4CBE94', borderWidth:1.5, pointRadius:0, borderDash:[3,3], tension:0.15
+            }
+          ]
+        },
+        options:{
+          responsive:true, maintainAspectRatio:false,
+          interaction:{ mode:'index', intersect:false },
+          scales:{
+            x:{ grid:{color:'#1c2029'}, ticks:{color:'#5C6373', maxTicksLimit:8, font:{family:'IBM Plex Mono',size:10}} },
+            y:{ grid:{color:'#1c2029'}, ticks:{color:'#5C6373', font:{family:'IBM Plex Mono',size:10}} }
+          },
+          plugins:{
+            legend:{ labels:{color:'#8B92A0', font:{family:'Inter',size:11}} }
+          }
+        }
+      });
+    }
+  }
+
+  function statCell(k,v){
+    return '<div class="stat"><div class="k">'+k+'</div><div class="v">'+v+'</div></div>';
+  }
+
+  /* ---------------- Portfolio ---------------- */
+  var pfBody = document.getElementById('pfBody');
+  var pfEmpty = document.getElementById('pfEmpty');
+  var pfBanner = document.getElementById('pfBanner');
+  var pfStats = document.getElementById('pfStats');
+  var pfAllocWrap = document.getElementById('pfAllocWrap');
+  var allocChart = null;
+
+  document.getElementById('pfAdd').addEventListener('click', function(){
+    var sym = document.getElementById('pfSym').value.trim().toUpperCase();
+    var qty = parseFloat(document.getElementById('pfQty').value);
+    var cost = parseFloat(document.getElementById('pfCost').value);
+    if(!sym || !qty || !cost || qty<=0 || cost<=0) return;
+    state.portfolio.push({symbol:sym, qty:qty, cost:cost});
+    persist();
+    document.getElementById('pfSym').value='';
+    document.getElementById('pfQty').value='';
+    document.getElementById('pfCost').value='';
+    renderPortfolioSkeleton();
+    loadPortfolioQuotes();
+  });
+
+  document.getElementById('pfRefresh').addEventListener('click', function(){
+    renderPortfolioSkeleton();
+    loadPortfolioQuotes();
+  });
+
+  pfBody.addEventListener('click', function(e){
+    var rm = e.target.closest('[data-remove-idx]');
+    if(rm){
+      var idx = parseInt(rm.dataset.removeIdx,10);
+      state.portfolio.splice(idx,1);
+      persist();
+      renderPortfolioSkeleton();
+      loadPortfolioQuotes();
+    }
+  });
+
+  function renderPortfolioSkeleton(){
+    if(state.portfolio.length===0){
+      pfBody.innerHTML=''; pfEmpty.style.display='block';
+      pfStats.innerHTML=''; pfAllocWrap.style.display='none';
+      return;
+    }
+    pfEmpty.style.display='none';
+    pfBody.innerHTML = state.portfolio.map(function(h,i){
+      return '<tr>'+
+        '<td class="sym">'+h.symbol+'</td>'+
+        '<td>'+fmt(h.qty,2)+'</td>'+
+        '<td>'+fmt(h.cost)+'</td>'+
+        '<td colspan="3" style="color:var(--muted-2);"><span class="spinner"></span></td>'+
+        '<td><button class="icon-btn" data-remove-idx="'+i+'">✕</button></td>'+
+      '</tr>';
+    }).join('');
+  }
+
+  function loadPortfolioQuotes(){
+    if(state.portfolio.length===0) return;
+    banner(pfBanner,'','');
+    var symbols = Array.from(new Set(state.portfolio.map(function(h){return h.symbol;})));
+    Promise.all(symbols.map(function(sym){
+      return fetchQuote(sym).then(function(q){ return {sym:sym, q:q}; })
+        .catch(function(e){ return {sym:sym, err:e}; });
+    })).then(function(results){
+      var priceMap = {};
+      var anyErr = null;
+      results.forEach(function(r){
+        if(r.q) priceMap[r.sym]=r.q.price; else anyErr = r.err;
+      });
+
+      var totalValue=0, totalCost=0;
+      var rows = state.portfolio.map(function(h,i){
+        var price = priceMap[h.symbol];
+        var value = price ? price*h.qty : null;
+        var cost = h.cost*h.qty;
+        totalCost += cost;
+        if(value!==null) totalValue += value;
+        var pl = value!==null ? value-cost : null;
+        var plPct = value!==null ? (pl/cost*100) : null;
+        var cls = pl===null ? 'flat' : pctClass(pl);
+        return '<tr>'+
+          '<td class="sym">'+h.symbol+'</td>'+
+          '<td>'+fmt(h.qty,2)+'</td>'+
+          '<td>'+fmt(h.cost)+'</td>'+
+          '<td>'+(price?fmt(price):'—')+'</td>'+
+          '<td>'+(value!==null?fmt(value):'—')+'</td>'+
+          '<td class="'+cls+'">'+(pl!==null?(pl>=0?'+':'')+fmt(pl):'—')+'</td>'+
+          '<td class="'+cls+'">'+(plPct!==null?(plPct>=0?'+':'')+fmt(plPct)+'%':'—')+'</td>'+
+          '<td><button class="icon-btn" data-remove-idx="'+i+'">✕</button></td>'+
+        '</tr>';
+      });
+      pfBody.innerHTML = rows.join('');
+
+      if(anyErr){
+        banner(pfBanner,'err', errMsg(anyErr));
+      }
+
+      var totalPL = totalValue - totalCost;
+      var totalPLPct = totalCost ? (totalPL/totalCost*100) : 0;
+      var plCls = pctClass(totalPL);
+      pfStats.innerHTML =
+        statCell('총 평가금액', fmt(totalValue)) +
+        statCell('총 매입금액', fmt(totalCost)) +
+        '<div class="stat"><div class="k">총 손익</div><div class="v '+plCls+'">'+(totalPL>=0?'+':'')+fmt(totalPL)+'</div></div>' +
+        '<div class="stat"><div class="k">수익률</div><div class="v '+plCls+'">'+(totalPLPct>=0?'+':'')+fmt(totalPLPct)+'%</div></div>';
+
+      // Allocation chart
+      var allocLabels=[], allocData=[];
+      state.portfolio.forEach(function(h){
+        var price = priceMap[h.symbol];
+        var v = price ? price*h.qty : h.cost*h.qty;
+        var existingIdx = allocLabels.indexOf(h.symbol);
+        if(existingIdx>=0){ allocData[existingIdx]+=v; }
+        else { allocLabels.push(h.symbol); allocData.push(v); }
+      });
+      if(allocData.length){
+        pfAllocWrap.style.display='block';
+        var palette = ['#C9A24B','#4CBE94','#E0645A','#7C8493','#8A733A','#5C6373','#6E9BC9','#B37DBF'];
+        var ctx = document.getElementById('pfAllocChart').getContext('2d');
+        if(allocChart) allocChart.destroy();
+        allocChart = new Chart(ctx, {
+          type:'doughnut',
+          data:{ labels:allocLabels, datasets:[{ data:allocData, backgroundColor:palette, borderColor:'#12161D', borderWidth:2 }] },
+          options:{
+            responsive:true, maintainAspectRatio:false,
+            plugins:{ legend:{ position:'right', labels:{ color:'#E9E6DC', font:{family:'Inter',size:12} } } }
+          }
+        });
+      }
+    });
+  }
+
+  /* ---------------- Settings ---------------- */
+  var apiKeyInput = document.getElementById('apiKeyInput');
+  var apiKeyStatus = document.getElementById('apiKeyStatus');
+  function refreshKeyStatus(){
+    apiKeyStatus.textContent = state.apiKey ? '저장됨 ✓' : '설정되지 않음';
+    apiKeyStatus.style.color = state.apiKey ? 'var(--gain)' : 'var(--muted-2)';
+  }
+  apiKeyInput.value = state.apiKey || '';
+  refreshKeyStatus();
+
+  document.getElementById('apiKeySave').addEventListener('click', function(){
+    state.apiKey = apiKeyInput.value.trim();
+    safeSet(LS.KEY, state.apiKey);
+    refreshKeyStatus();
+  });
+
+  document.getElementById('resetAll').addEventListener('click', function(){
+    if(!confirm('정말 모든 데이터를 초기화할까요? 이 작업은 되돌릴 수 없습니다.')) return;
+    try{
+      localStorage.removeItem(LS.KEY);
+      localStorage.removeItem(LS.WATCH);
+      localStorage.removeItem(LS.PORT);
+      localStorage.removeItem(LS.CACHE);
+    }catch(e){}
+    location.reload();
+  });
+
+  /* ---------------- Init ---------------- */
+  function init(){
+    if(!state.apiKey){
+      banner(dashBanner,'','<b>시작하기</b> — 설정 탭에서 Alpha Vantage API 키를 먼저 입력해주세요.');
+    }
+    renderWatchlistSkeleton();
+    renderPortfolioSkeleton();
+    renderTape();
+    if(state.apiKey){
+      loadWatchlistQuotes();
+      loadPortfolioQuotes();
+    }
+  }
+  init();
+
+})();
+</script>
+</body>
+</html>
