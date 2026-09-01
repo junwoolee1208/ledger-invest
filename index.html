@@ -7,6 +7,9 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300;0,9..144,500;0,9..144,600;1,9..144,500&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.4/chart.umd.min.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore-compat.js"></script>
 <style>
   :root{
     --ink:#0C0F14;
@@ -215,9 +218,50 @@
     main{ padding:18px; }
     nav.tabs{ width:100%; overflow-x:auto; }
   }
+
+  /* ---- Auth overlay ---- */
+  .auth-overlay{
+    position:fixed; inset:0; background:var(--ink);
+    display:flex; align-items:center; justify-content:center;
+    z-index:100; padding:20px;
+  }
+  .auth-overlay.hidden{ display:none; }
+  .auth-box{
+    width:100%; max-width:340px; background:var(--panel);
+    border:1px solid var(--line); border-radius:var(--radius);
+    padding:30px 26px;
+  }
+  .auth-box .brand{ justify-content:center; margin-bottom:4px; }
+  .auth-box .sub-line{ text-align:center; color:var(--muted); font-size:12.5px; margin-bottom:24px; }
+  .auth-box label{ margin-top:12px; }
+  .auth-box input{ width:100%; }
+  .auth-box .btn{ width:100%; margin-top:18px; }
+  .auth-box .switch{ text-align:center; margin-top:14px; font-size:12.5px; color:var(--muted); }
+  .auth-box .switch a{ color:var(--gold); cursor:pointer; text-decoration:underline; }
+  .auth-box .err{ color:var(--loss); font-size:12px; margin-top:10px; min-height:14px; }
+  .auth-box .status-line{ text-align:center; color:var(--muted-2); font-size:12px; margin-top:14px; font-family:'IBM Plex Mono',monospace;}
+  .user-badge{ display:flex; align-items:center; gap:10px; }
+  .user-badge span{ font-size:12px; color:var(--muted); font-family:'IBM Plex Mono',monospace; }
+  .user-badge button{ background:transparent; border:1px solid var(--line); color:var(--muted); font-size:11.5px; padding:6px 10px; border-radius:var(--radius); cursor:pointer; font-family:'Inter',sans-serif;}
+  .user-badge button:hover{ color:var(--paper); border-color:var(--muted); }
 </style>
 </head>
 <body>
+
+<div class="auth-overlay" id="authOverlay">
+  <div class="auth-box">
+    <div class="brand"><span class="mark">LEDGER<em>.</em></span></div>
+    <div class="sub-line">모든 기기에서 데이터를 동기화하려면 로그인하세요</div>
+    <label>이메일</label>
+    <input type="email" id="authEmail" placeholder="you@example.com">
+    <label>비밀번호</label>
+    <input type="password" id="authPassword" placeholder="6자 이상">
+    <button class="btn" id="authSubmit">로그인</button>
+    <div class="err" id="authErr"></div>
+    <div class="switch">계정이 없으신가요? <a id="authSwitch">회원가입</a></div>
+    <div class="status-line" id="authStatus">연결 확인 중…</div>
+  </div>
+</div>
 
 <div class="tape-wrap" id="tapeWrap">
   <div class="tape-track" id="tapeTrack">
@@ -236,6 +280,10 @@
     <button data-view="portfolio">포트폴리오</button>
     <button data-view="settings">설정</button>
   </nav>
+  <div class="user-badge" id="userBadge" style="display:none;">
+    <span id="userEmail"></span>
+    <button id="logoutBtn">로그아웃</button>
+  </div>
 </header>
 
 <main>
@@ -420,7 +468,139 @@
     safeSet(LS.WATCH, state.watchlist);
     safeSet(LS.PORT, state.portfolio);
     safeSet(LS.CACHE, state.cache);
+    cloudSyncDebounced();
   }
+
+  /* ---------------- Firebase (cross-device sync) ---------------- */
+  var firebaseConfig = {
+    apiKey: "AIzaSyCI9mlo-KCsDagXdP4h07sPufTIns2FfZc",
+    authDomain: "ledger-invest.firebaseapp.com",
+    projectId: "ledger-invest",
+    storageBucket: "ledger-invest.firebasestorage.app",
+    messagingSenderId: "573693856807",
+    appId: "1:573693856807:web:d2a8911e2e7dd942ae9202"
+  };
+  firebase.initializeApp(firebaseConfig);
+  var fbAuth = firebase.auth();
+  var fbDb = firebase.firestore();
+  var currentUser = null;
+  var cloudSyncTimer = null;
+
+  function userDocRef(){
+    if(!currentUser) return null;
+    return fbDb.collection('ledger_users').doc(currentUser.uid);
+  }
+
+  function cloudSyncDebounced(){
+    if(!currentUser) return;
+    clearTimeout(cloudSyncTimer);
+    cloudSyncTimer = setTimeout(cloudPush, 800);
+  }
+
+  function cloudPush(){
+    var ref = userDocRef();
+    if(!ref) return;
+    ref.set({
+      apiKey: state.apiKey || '',
+      watchlist: state.watchlist || [],
+      portfolio: state.portfolio || [],
+      updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+    }).catch(function(e){ console.error('cloud sync failed', e); });
+  }
+
+  function cloudPullThenInit(){
+    var ref = userDocRef();
+    if(!ref){ init(); return; }
+    ref.get().then(function(doc){
+      if(doc.exists){
+        var d = doc.data();
+        state.apiKey = d.apiKey || state.apiKey || '';
+        state.watchlist = d.watchlist || [];
+        state.portfolio = d.portfolio || [];
+        persistLocalOnly();
+      } else {
+        // First login on this account: push whatever is currently local (migration)
+        cloudPush();
+      }
+      init();
+    }).catch(function(e){
+      console.error('cloud pull failed', e);
+      init();
+    });
+  }
+
+  function persistLocalOnly(){
+    safeSet(LS.KEY, state.apiKey);
+    safeSet(LS.WATCH, state.watchlist);
+    safeSet(LS.PORT, state.portfolio);
+  }
+
+  /* ---- Auth UI ---- */
+  var authOverlay = document.getElementById('authOverlay');
+  var authEmail = document.getElementById('authEmail');
+  var authPassword = document.getElementById('authPassword');
+  var authErr = document.getElementById('authErr');
+  var authStatus = document.getElementById('authStatus');
+  var authSubmit = document.getElementById('authSubmit');
+  var authSwitch = document.getElementById('authSwitch');
+  var authMode = 'login';
+
+  function setAuthMode(mode){
+    authMode = mode;
+    authSubmit.textContent = mode==='login' ? '로그인' : '회원가입';
+    authSwitch.textContent = mode==='login' ? '회원가입' : '로그인';
+    authOverlay.querySelector('.switch').firstChild.textContent = mode==='login' ? '계정이 없으신가요? ' : '이미 계정이 있으신가요? ';
+    authErr.textContent = '';
+  }
+  authSwitch.addEventListener('click', function(){ setAuthMode(authMode==='login' ? 'signup' : 'login'); });
+
+  function authErrMsg(code){
+    var map = {
+      'auth/invalid-email':'이메일 형식이 올바르지 않습니다.',
+      'auth/user-not-found':'등록되지 않은 이메일입니다. 회원가입을 먼저 해주세요.',
+      'auth/wrong-password':'비밀번호가 틀렸습니다.',
+      'auth/invalid-credential':'이메일 또는 비밀번호가 올바르지 않습니다.',
+      'auth/email-already-in-use':'이미 가입된 이메일입니다. 로그인해주세요.',
+      'auth/weak-password':'비밀번호는 6자 이상이어야 합니다.',
+      'auth/network-request-failed':'네트워크 오류입니다. 인터넷 연결을 확인해주세요.'
+    };
+    return map[code] || '오류가 발생했습니다. 다시 시도해주세요.';
+  }
+
+  authSubmit.addEventListener('click', function(){
+    var email = authEmail.value.trim();
+    var pw = authPassword.value;
+    if(!email || !pw){ authErr.textContent='이메일과 비밀번호를 입력해주세요.'; return; }
+    authErr.textContent = '';
+    authSubmit.disabled = true;
+    var action = authMode==='login'
+      ? fbAuth.signInWithEmailAndPassword(email, pw)
+      : fbAuth.createUserWithEmailAndPassword(email, pw);
+    action.catch(function(e){
+      authErr.textContent = authErrMsg(e.code);
+    }).finally(function(){
+      authSubmit.disabled = false;
+    });
+  });
+
+  document.getElementById('logoutBtn').addEventListener('click', function(){
+    fbAuth.signOut();
+  });
+
+  fbAuth.onAuthStateChanged(function(user){
+    if(user){
+      currentUser = user;
+      authOverlay.classList.add('hidden');
+      document.getElementById('userBadge').style.display='flex';
+      document.getElementById('userEmail').textContent = user.email;
+      cloudPullThenInit();
+    } else {
+      currentUser = null;
+      document.getElementById('userBadge').style.display='none';
+      authStatus.textContent = '';
+      authOverlay.classList.remove('hidden');
+    }
+  });
 
   /* ---------------- API layer ---------------- */
   var AV_BASE = 'https://www.alphavantage.co/query';
@@ -1006,12 +1186,14 @@
     apiKeyStatus.textContent = state.apiKey ? '저장됨 ✓' : '설정되지 않음';
     apiKeyStatus.style.color = state.apiKey ? 'var(--gain)' : 'var(--muted-2)';
   }
-  apiKeyInput.value = state.apiKey || '';
-  refreshKeyStatus();
+  function refreshKeyStatus(){
+    apiKeyStatus.textContent = state.apiKey ? '저장됨 ✓' : '설정되지 않음';
+    apiKeyStatus.style.color = state.apiKey ? 'var(--gain)' : 'var(--muted-2)';
+  }
 
   document.getElementById('apiKeySave').addEventListener('click', function(){
     state.apiKey = apiKeyInput.value.trim();
-    safeSet(LS.KEY, state.apiKey);
+    persist();
     refreshKeyStatus();
   });
 
@@ -1023,11 +1205,15 @@
       localStorage.removeItem(LS.PORT);
       localStorage.removeItem(LS.CACHE);
     }catch(e){}
-    location.reload();
+    var ref = userDocRef();
+    if(ref){ ref.delete().finally(function(){ location.reload(); }); }
+    else { location.reload(); }
   });
 
   /* ---------------- Init ---------------- */
   function init(){
+    apiKeyInput.value = state.apiKey || '';
+    refreshKeyStatus();
     if(!state.apiKey){
       banner(dashBanner,'','<b>시작하기</b> — 설정 탭에서 Alpha Vantage API 키를 먼저 입력해주세요.');
     }
@@ -1039,7 +1225,6 @@
       loadPortfolioQuotes();
     }
   }
-  init();
 
 })();
 </script>
