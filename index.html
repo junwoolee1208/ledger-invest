@@ -370,7 +370,7 @@
 
     <div class="banner">
       <b>무료 티어 제한 안내</b><br>
-      Alpha Vantage 무료 API는 <b>1분당 5회 / 1일 25회</b> 요청으로 제한됩니다. 앱은 중복 요청을 줄이기 위해 시세를 한동안 캐시해두지만, 관심종목이 많으면 한도에 빨리 도달할 수 있어요.
+      Alpha Vantage 무료 API는 <b>1분당 5회 / 1일 25회</b> 요청으로 제한됩니다. 앱은 중복 요청을 줄이기 위해 시세를 한동안 캐시해두지만, 관심종목이 많으면 한도에 빨리 도달할 수 있어요. 종목분석 화면은 한 번 조회할 때 시세·재무·차트·뉴스까지 최대 5개 요청을 한꺼번에 사용하니, 너무 자주 조회하지 않는 게 좋아요.
       해외(특히 미국) 종목은 폭넓게 지원되지만, 국내 코스피/코스닥 종목은 일부만 지원되거나 지연 시세일 수 있습니다.
     </div>
 
@@ -424,7 +424,7 @@
 
   /* ---------------- API layer ---------------- */
   var AV_BASE = 'https://www.alphavantage.co/query';
-  var TTL = { quote: 60*1000, daily: 60*60*1000, overview: 6*60*60*1000, rsi: 60*60*1000 };
+  var TTL = { quote: 60*1000, daily: 60*60*1000, overview: 6*60*60*1000, rsi: 60*60*1000, news: 30*60*1000 };
 
   function cacheGet(key, ttl){
     var e = state.cache[key];
@@ -514,6 +514,45 @@
     });
   }
 
+  function fetchNews(symbol){
+    return avFetch(
+      { function:'NEWS_SENTIMENT', tickers: symbol, limit:'12' },
+      'NEWS:'+symbol, TTL.news
+    ).then(function(json){
+      var feed = json['feed'];
+      if(!feed) return [];
+      return feed.map(function(a){
+        var tickerSentiment = null;
+        if(a['ticker_sentiment']){
+          tickerSentiment = a['ticker_sentiment'].find(function(t){ return t['ticker']===symbol; });
+        }
+        return {
+          title: a['title'],
+          url: a['url'],
+          source: a['source'],
+          published: a['time_published'],
+          summary: a['summary'],
+          sentimentLabel: tickerSentiment ? tickerSentiment['ticker_sentiment_label'] : a['overall_sentiment_label'],
+          sentimentScore: tickerSentiment ? parseFloat(tickerSentiment['ticker_sentiment_score']) : parseFloat(a['overall_sentiment_score'])
+        };
+      });
+    });
+  }
+
+  function fmtPublished(raw){
+    if(!raw || raw.length < 8) return raw||'';
+    var y=raw.slice(0,4), m=raw.slice(4,6), d=raw.slice(6,8);
+    var hh=raw.length>=13?raw.slice(9,11):null, mm=raw.length>=13?raw.slice(11,13):null;
+    return y+'.'+m+'.'+d + (hh?' '+hh+':'+mm:'');
+  }
+
+  function sentimentMeta(label){
+    var l = (label||'').toLowerCase();
+    if(l.indexOf('bullish')!==-1) return {cls:'up', text:label==='Somewhat-Bullish'?'약한 긍정':'긍정'};
+    if(l.indexOf('bearish')!==-1) return {cls:'down', text:label==='Somewhat-Bearish'?'약한 부정':'부정'};
+    return {cls:'flat', text:'중립'};
+  }
+
   function sma(values, period){
     var out = [];
     for(var i=0;i<values.length;i++){
@@ -552,6 +591,10 @@
     return fmt(n,0);
   }
   function pctClass(n){ return n>0?'up':(n<0?'down':'flat'); }
+  function escapeHtml(s){
+    if(!s) return '';
+    return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }
   function arrow(n){ return n>0?'▲':(n<0?'▼':'—'); }
 
   /* ---------------- Tabs ---------------- */
@@ -696,25 +739,27 @@
       fetchOverview(sym),
       fetchDaily(sym),
       fetchRSI(sym),
-      fetchQuote(sym)
+      fetchQuote(sym),
+      fetchNews(sym)
     ]).then(function(results){
       var overview = results[0].status==='fulfilled' ? results[0].value : null;
       var daily = results[1].status==='fulfilled' ? results[1].value : null;
       var rsi = results[2].status==='fulfilled' ? results[2].value : null;
       var quote = results[3].status==='fulfilled' ? results[3].value : null;
+      var news = results[4].status==='fulfilled' ? results[4].value : null;
 
-      if(!daily && !overview && !quote){
+      if(!daily && !overview && !quote && !news){
         var firstErr = results.find(function(r){return r.status==='rejected';});
         banner(anBanner,'err', errMsg(firstErr ? firstErr.reason : null));
         anResult.innerHTML='';
         return;
       }
 
-      renderAnalysis(sym, overview, daily, rsi, quote);
+      renderAnalysis(sym, overview, daily, rsi, quote, news);
     });
   }
 
-  function renderAnalysis(sym, overview, daily, rsi, quote){
+  function renderAnalysis(sym, overview, daily, rsi, quote, news){
     var name = overview ? overview['Name'] : sym;
     var cls = quote ? pctClass(quote.change) : 'flat';
 
@@ -756,6 +801,28 @@
       html += '</div>';
     } else {
       html += '<div style="color:var(--muted-2); font-size:13px;">재무 데이터를 불러오지 못했습니다. (국내 종목은 미지원일 수 있습니다)</div>';
+    }
+    html += '</div>';
+
+    // News & sentiment
+    html += '<div class="panel pad" style="margin-bottom:20px;">';
+    html += '<span class="eyebrow">Why It Moved</span><h3 style="margin:6px 0 4px;">관련 뉴스 &amp; 감성분석</h3>';
+    html += '<p style="color:var(--muted-2); font-size:12px; margin:0 0 16px;">최근 뉴스와 이 종목에 대한 논조(긍정/부정)를 보여드려요. 가격이 크게 움직인 날짜 근처 뉴스를 확인해보세요.</p>';
+    if(news && news.length){
+      html += '<div style="display:flex; flex-direction:column; gap:0;">';
+      news.forEach(function(a, idx){
+        var sm = sentimentMeta(a.sentimentLabel);
+        html += '<div style="padding:14px 0; '+(idx>0?'border-top:1px solid var(--line);':'')+'">';
+        html += '<div style="display:flex; justify-content:space-between; gap:12px; align-items:flex-start;">';
+        html += '<a href="'+a.url+'" target="_blank" rel="noopener" style="color:var(--paper); font-family:\'Fraunces\',serif; font-size:14.5px; font-weight:500; line-height:1.4; text-decoration:none;">'+escapeHtml(a.title)+'</a>';
+        html += '<span class="mono '+sm.cls+'" style="font-size:11px; white-space:nowrap; border:1px solid var(--line); border-radius:2px; padding:2px 7px; flex-shrink:0;">'+sm.text+'</span>';
+        html += '</div>';
+        html += '<div class="mono" style="color:var(--muted-2); font-size:11px; margin-top:6px;">'+escapeHtml(a.source||'')+' · '+fmtPublished(a.published)+'</div>';
+        html += '</div>';
+      });
+      html += '</div>';
+    } else {
+      html += '<div style="color:var(--muted-2); font-size:13px;">관련 뉴스를 불러오지 못했습니다. (국내 종목은 뉴스 데이터가 제한적일 수 있어요)</div>';
     }
     html += '</div>';
 
