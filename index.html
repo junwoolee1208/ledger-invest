@@ -422,6 +422,21 @@
       해외(특히 미국) 종목은 폭넓게 지원되지만, 국내 코스피/코스닥 종목은 일부만 지원되거나 지연 시세일 수 있습니다.
     </div>
 
+    <div class="panel pad" style="margin-bottom:20px;">
+      <h3 style="margin-top:0; font-size:15px;">AI 뉴스 요약 (선택 사항)</h3>
+      <p style="color:var(--muted); font-size:12.5px; line-height:1.6; margin-bottom:12px;">
+        종목분석 화면에서 "이 종목이 왜 이렇게 움직였는지" AI가 뉴스를 바탕으로 요약해주는 기능이에요.
+        이 기능을 쓰려면 <b style="color:var(--paper);">Vercel 프로젝트에 서버 설정을 한 번 추가</b>해야 해요 (브라우저가 아니라 서버에서만 동작하는 키라 안전해요).
+      </p>
+      <ol style="color:var(--muted); font-size:12.5px; line-height:2; padding-left:18px; margin:0;">
+        <li><a href="https://console.anthropic.com" target="_blank" style="color:var(--gold);">console.anthropic.com</a>에서 계정을 만들고 API 키를 발급받으세요.</li>
+        <li>Vercel 대시보드 → 이 프로젝트 → <b style="color:var(--paper);">Settings → Environment Variables</b>로 이동하세요.</li>
+        <li>이름 <span class="mono" style="background:var(--panel-2); padding:1px 6px; border-radius:2px;">ANTHROPIC_API_KEY</span>, 값은 발급받은 키를 입력하고 저장하세요.</li>
+        <li>Vercel에서 재배포(Redeploy)하면 자동으로 활성화돼요.</li>
+      </ol>
+      <p style="color:var(--muted-2); font-size:11.5px; margin-top:12px;">설정하지 않아도 나머지 기능은 그대로 잘 작동해요. AI 요약란에만 안내 문구가 표시돼요.</p>
+    </div>
+
     <div class="panel pad">
       <h3 style="margin-top:0; font-size:15px;">데이터 초기화</h3>
       <p style="color:var(--muted); font-size:12.5px; margin-bottom:14px;">관심종목, 보유종목, API 키를 모두 삭제하고 처음부터 시작합니다.</p>
@@ -987,17 +1002,18 @@
     // News & sentiment
     html += '<div class="panel pad" style="margin-bottom:20px;">';
     html += '<span class="eyebrow">Why It Moved</span><h3 style="margin:6px 0 4px;">관련 뉴스 &amp; 감성분석</h3>';
-    html += '<p style="color:var(--muted-2); font-size:12px; margin:0 0 16px;">최근 뉴스와 이 종목에 대한 논조(긍정/부정)를 보여드려요. 가격이 크게 움직인 날짜 근처 뉴스를 확인해보세요.</p>';
+    html += '<p style="color:var(--muted-2); font-size:12px; margin:0 0 16px;">최근 뉴스를 한국어로 번역해서 보여드리고, AI가 주가 변동 이유를 요약해드려요.</p>';
     if(news && news.length){
+      html += '<div id="aiSummaryBox" style="border:1px solid var(--gold-dim); background:rgba(201,162,75,0.06); border-radius:var(--radius); padding:14px 16px; margin-bottom:18px; font-size:13px; line-height:1.75;"><span class="spinner"></span>&nbsp; AI가 최근 뉴스를 바탕으로 변동 이유를 요약하고 있어요…</div>';
       html += '<div style="display:flex; flex-direction:column; gap:0;">';
       news.forEach(function(a, idx){
         var sm = sentimentMeta(a.sentimentLabel);
         html += '<div style="padding:14px 0; '+(idx>0?'border-top:1px solid var(--line);':'')+'">';
         html += '<div style="display:flex; justify-content:space-between; gap:12px; align-items:flex-start;">';
-        html += '<a href="'+a.url+'" target="_blank" rel="noopener" style="color:var(--paper); font-family:\'Fraunces\',serif; font-size:14.5px; font-weight:500; line-height:1.4; text-decoration:none;">'+escapeHtml(a.title)+'</a>';
+        html += '<a id="newsTitle'+idx+'" href="'+a.url+'" target="_blank" rel="noopener" data-original="'+escapeHtml(a.title)+'" style="color:var(--paper); font-family:\'Fraunces\',serif; font-size:14.5px; font-weight:500; line-height:1.4; text-decoration:none;">'+escapeHtml(a.title)+'</a>';
         html += '<span class="mono '+sm.cls+'" style="font-size:11px; white-space:nowrap; border:1px solid var(--line); border-radius:2px; padding:2px 7px; flex-shrink:0;">'+sm.text+'</span>';
         html += '</div>';
-        html += '<div class="mono" style="color:var(--muted-2); font-size:11px; margin-top:6px;">'+escapeHtml(a.source||'')+' · '+fmtPublished(a.published)+'</div>';
+        html += '<div class="mono" style="color:var(--muted-2); font-size:11px; margin-top:6px;">'+escapeHtml(a.source||'')+' · '+fmtPublished(a.published)+' <span id="newsTr'+idx+'" style="color:var(--gold-dim);"></span></div>';
         html += '</div>';
       });
       html += '</div>';
@@ -1007,6 +1023,11 @@
     html += '</div>';
 
     anResult.innerHTML = html;
+
+    if(news && news.length){
+      translateNewsTitles(news);
+      requestAiSummary(sym, quote, news);
+    }
 
     if(daily && daily.length){
       var labels = daily.map(function(d){return d.date;});
@@ -1045,6 +1066,64 @@
 
   function statCell(k,v){
     return '<div class="stat"><div class="k">'+k+'</div><div class="v">'+v+'</div></div>';
+  }
+
+  /* ---- Translation (client-side, free MyMemory API) ---- */
+  var translationCache = {}; // session-only, not persisted (keeps cloud data small)
+  function translateText(text){
+    if(!text) return Promise.resolve('');
+    if(translationCache[text]) return Promise.resolve(translationCache[text]);
+    var url = 'https://api.mymemory.translated.net/get?q='+encodeURIComponent(text)+'&langpair=en|ko';
+    return fetch(url).then(function(r){ return r.json(); }).then(function(json){
+      var translated = json && json.responseData && json.responseData.translatedText ? json.responseData.translatedText : null;
+      if(!translated || translated.toUpperCase()===text.toUpperCase()) translated = text;
+      translationCache[text] = translated;
+      return translated;
+    }).catch(function(){ return text; });
+  }
+
+  function translateNewsTitles(news){
+    news.forEach(function(a, idx){
+      translateText(a.title).then(function(translated){
+        var el = document.getElementById('newsTitle'+idx);
+        var tag = document.getElementById('newsTr'+idx);
+        if(el && translated !== a.title){
+          el.textContent = translated;
+          if(tag) tag.textContent = '· 번역됨';
+        }
+      });
+    });
+  }
+
+  /* ---- AI summary (requires /api/explain serverless function + ANTHROPIC_API_KEY) ---- */
+  function requestAiSummary(sym, quote, news){
+    var box = document.getElementById('aiSummaryBox');
+    if(!box) return;
+    var headlines = news.slice(0,8).map(function(a){
+      return a.title + (a.summary ? ' — ' + a.summary : '');
+    });
+    fetch('/api/explain', {
+      method:'POST',
+      headers:{ 'Content-Type':'application/json' },
+      body: JSON.stringify({
+        symbol: sym,
+        changePct: quote ? quote.changePct : null,
+        headlines: headlines
+      })
+    }).then(function(res){
+      if(!res.ok) throw new Error('API_ERROR');
+      return res.json();
+    }).then(function(data){
+      if(!box) return;
+      if(data && data.summary){
+        box.innerHTML = '<b style="color:var(--gold);">AI 요약</b><br>' + escapeHtml(data.summary).replace(/\n/g,'<br>');
+      } else {
+        box.innerHTML = '<span style="color:var(--muted-2);">AI 요약을 생성하지 못했습니다.</span>';
+      }
+    }).catch(function(){
+      if(!box) return;
+      box.innerHTML = '<span style="color:var(--muted-2);">AI 요약 기능이 아직 설정되지 않았어요. (설정 탭의 안내를 참고해 Vercel에 서버 함수와 API 키를 추가해주세요)</span>';
+    });
   }
 
   /* ---------------- Portfolio ---------------- */
