@@ -480,6 +480,7 @@
   if(typeof state.apiKey !== 'string') state.apiKey = '';
 
   function persist(){
+    safeSet(LS.KEY, state.apiKey);
     safeSet(LS.WATCH, state.watchlist);
     safeSet(LS.PORT, state.portfolio);
     safeSet(LS.CACHE, state.cache);
