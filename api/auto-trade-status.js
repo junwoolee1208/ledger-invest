@@ -11,6 +11,10 @@
 
 import { getKisToken, kisHeaders, num, KIS_BASE } from './_kis.js';
 import { kvGetJson, kvSetJson, kvCommand, kvReady } from './_kv.js';
+import {
+  COST_CONFIG_KEY, REALIZED_KEY_PREFIX, DEFAULT_COSTS, normalizeCosts, loadCosts,
+  planSell, positionCostBasis, estimateOverseasTax
+} from './_costs.js';
 
 export const config = { maxDuration: 30 };
 
@@ -173,6 +177,28 @@ async function requireUid(req, res) {
     return null;
   }
   return uid;
+}
+
+/* ==================== action=cost-config (매매 비용·세금 설정) ====================
+   GET : 현재 설정(없으면 토스증권 기준 기본값) + 기본값을 같이 돌려줍니다(화면의 "기본값으로" 버튼용).
+   POST: 로그인한 본인만 저장. body: { costs } 또는 { reset: true } */
+async function handleCostConfig(req, res) {
+  if (req.method === 'GET') {
+    const costs = await loadCosts();
+    res.status(200).json({ costs, defaults: DEFAULT_COSTS });
+    return;
+  }
+  if (req.method !== 'POST') {
+    res.status(405).json({ error: 'GET 또는 POST만 지원합니다.' });
+    return;
+  }
+  const uid = await requireUid(req, res);
+  if (!uid) return;
+  const body = req.body || {};
+  const next = body.reset ? normalizeCosts(DEFAULT_COSTS) : normalizeCosts(body.costs);
+  next.updatedAt = Date.now();
+  await kvSetJson(COST_CONFIG_KEY, next);
+  res.status(200).json({ ok: true, costs: next });
 }
 
 /* ==================== action=custom (커스텀 전략 추가/수정/삭제) ====================
@@ -371,8 +397,22 @@ async function fetchOverseasQuote(token, symbol, preferredExcd) {
   return null;
 }
 
+// 보유 종목의 손익을 "지금 팔면 실제로 남는 돈" 기준으로 계산합니다:
+// (현재가×수량 − 예상 매도비용[수수료·거래세·환전]) − (매수금액 + 매수비용)
+function fillNetPnl(pos, costs, market, price, digits) {
+  const round = (v) => Math.round(v * digits) / digits;
+  const basis = positionCostBasis(costs, market, pos);
+  const sell = planSell(costs, market, pos.qty, price);
+  pos.currentPrice = price;
+  pos.evalAmount = round(sell.gross);
+  pos.netEvalAmount = round(sell.proceeds);
+  pos.costBasis = round(basis);
+  pos.unrealizedPnlAmount = round(sell.proceeds - basis);
+  pos.unrealizedPnlPct = Math.round(((sell.proceeds - basis) / basis) * 10000) / 100;
+}
+
 // 보유 종목에 현재가/평가금액/미실현 손익(%,금액)을 채워 넣습니다. 시세 조회는 종목당 한 번만(캐시 공유).
-async function attachLivePrices(strategies, token) {
+async function attachLivePrices(strategies, token, costs) {
   const krCache = new Map();
   const usCache = new Map();
 
@@ -390,22 +430,12 @@ async function attachLivePrices(strategies, token) {
     for (const symbol of Object.keys(s.kr.positions || {})) {
       const pos = s.kr.positions[symbol];
       const q = await getKr(symbol);
-      if (q && q.price !== null) {
-        pos.currentPrice = q.price;
-        pos.evalAmount = Math.round(pos.qty * q.price);
-        pos.unrealizedPnlAmount = Math.round(pos.qty * (q.price - pos.avgPrice));
-        pos.unrealizedPnlPct = Math.round(((q.price - pos.avgPrice) / pos.avgPrice) * 10000) / 100;
-      }
+      if (q && q.price !== null) fillNetPnl(pos, costs, 'KR', q.price, 1);
     }
     for (const symbol of Object.keys(s.us.positions || {})) {
       const pos = s.us.positions[symbol];
       const q = await getUs(symbol, pos.excd);
-      if (q && q.price !== null) {
-        pos.currentPrice = q.price;
-        pos.evalAmount = Math.round(pos.qty * q.price * 100) / 100;
-        pos.unrealizedPnlAmount = Math.round(pos.qty * (q.price - pos.avgPrice) * 100) / 100;
-        pos.unrealizedPnlPct = Math.round(((q.price - pos.avgPrice) / pos.avgPrice) * 10000) / 100;
-      }
+      if (q && q.price !== null) fillNetPnl(pos, costs, 'US', q.price, 100);
     }
   }
 }
@@ -424,11 +454,12 @@ async function handleLog(req, res) {
       strategies[c.id] = { name: c.name, kr, us, custom: true, enabled: c.enabled !== false };
     }
 
+    const costs = await loadCosts();
     const hasAnyPosition = Object.values(strategies).some((s) => Object.keys(s.kr.positions || {}).length || Object.keys(s.us.positions || {}).length);
     if (hasAnyPosition && process.env.KIS_APP_KEY && process.env.KIS_APP_SECRET) {
       try {
         const token = await getKisToken();
-        await attachLivePrices(strategies, token);
+        await attachLivePrices(strategies, token, costs);
       } catch (e) {
         console.error('auto-trade-status.js(log) live price error:', e);
       }
@@ -436,8 +467,27 @@ async function handleLog(req, res) {
 
     const log = await kvGetJson(LOG_KEY, []);
 
+    // 올해 실현손익(전략별 가상계좌 기준)과 해외주식 양도세 추정치.
+    // 매매 기록(log)은 최근 400건까지만 남기 때문에, 1년치 합계는 auto-trade-check.js가 매도할 때마다
+    // 따로 누적해두는 연간 장부(REALIZED_KEY_PREFIX+연도)에서 읽습니다. 달러 손익은 매도 당시 환율로 원화 환산돼 있어요.
+    const year = todayKST().slice(0, 4);
+    const realized = await kvGetJson(REALIZED_KEY_PREFIX + year, {});
+    const taxByStrategy = {};
+    Object.keys(realized || {}).forEach((id) => {
+      const r = realized[id] || {};
+      taxByStrategy[id] = Object.assign({
+        usPnlUsd: Math.round((r.usPnlUsd || 0) * 100) / 100,
+        usPnlKrw: Math.round(r.usPnlKrw || 0),
+        krPnlKrw: Math.round(r.krPnlKrw || 0),
+        usTrades: r.usTrades || 0,
+        krTrades: r.krTrades || 0
+      }, estimateOverseasTax(costs, r.usPnlKrw || 0));
+    });
+
     res.status(200).json({
       strategies,
+      costs,
+      taxSummary: { year, byStrategy: taxByStrategy },
       log: log.slice(0, 80),
       kr: strategies.momentum.kr, us: strategies.momentum.us,
       positions: strategies.momentum.kr.positions, cash: strategies.momentum.kr.cash, startingCash: strategies.momentum.kr.startingCash
@@ -490,5 +540,6 @@ export default async function handler(req, res) {
   if (action === 'changes') return handleChanges(req, res);
   if (action === 'custom') return handleCustom(req, res);
   if (action === 'manual-edit') return handleManualEdit(req, res);
+  if (action === 'cost-config') return handleCostConfig(req, res);
   return handleConfig(req, res);
 }

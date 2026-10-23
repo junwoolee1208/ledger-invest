@@ -3,9 +3,13 @@
 // 과거 일봉 데이터 조회 + 팩터 계산 + 한 전략(가중치/청산/사이징 조합)의 시뮬레이션을 담당합니다.
 
 import { kisHeaders, num, KIS_BASE, fetchKisJson } from './_kis.js';
+import { DEFAULT_COSTS, planBuy, planSell, buyCostPct, sellCostPct, marketOfSymbol } from './_costs.js';
 
 export const STARTING_CASH = 10_000_000;
-export const FEE_PCT = 0.25; // 매도 시 대략적인 왕복 비용(수수료+세금) 반영
+// 예전엔 "매도 시 0.25%"를 한 번에 뺐는데, 이제 자동매매와 같은 비용 모델(_costs.js: 매수수수료 +
+// 매도수수료 + 거래세/SEC Fee + 해외 환전비용)을 씁니다. 아래 값은 기본(토스증권) 국내 왕복비용으로,
+// 화면에 "비용 X% 반영" 같은 안내를 띄울 때만 쓰여요.
+export const FEE_PCT = Math.round((buyCostPct(DEFAULT_COSTS, 'KR') + sellCostPct(DEFAULT_COSTS, 'KR')) * 1000) / 1000;
 
 function todayYYYYMMDD() {
   const d = new Date();
@@ -223,7 +227,9 @@ export function scoreForStrategy(factors, weights) {
 // symbolMaps: { symbol: Map(date -> annotatedRow) }, dates: 정렬된 전체 거래일 배열
 // opts.startingCash: 시작 자본 override(해외 종목은 원화 천만원 기준이 안 맞아서 "상세분석"에서 씀)
 // opts.includeDetails: true면 다운샘플 없는 전체 자산곡선 + 매매 하나하나의 진입/청산 상세를 같이 반환
+// opts.costs: _costs.js의 매매 비용 설정(없으면 토스증권 기본값). 종목코드가 6자리 숫자면 국내, 아니면 해외 비용을 씁니다.
 export function runBacktest(strategy, symbolMaps, dates, opts = {}) {
+  const costs = opts.costs || DEFAULT_COSTS;
   const startingCash = opts.startingCash || STARTING_CASH;
   let cash = startingCash;
   const positions = {};
@@ -250,13 +256,18 @@ export function runBacktest(strategy, symbolMaps, dates, opts = {}) {
         else if (pnlPct >= strategy.exit.takeProfitPct) exit = true;
       }
       if (exit) {
-        const proceeds = pos.qty * row.close * (1 - FEE_PCT / 100);
-        cash += proceeds;
+        // 청산 "조건"은 주가 등락률(가격 기준)으로 판단하고, 기록하는 손익은 비용을 다 뺀 실제 금액으로 남깁니다.
+        const sell = planSell(costs, pos.market, pos.qty, row.close);
+        cash += sell.proceeds;
+        const netPnl = sell.proceeds - pos.costBasis;
         trades.push({
-          symbol, pnlPct: Math.round(pnlPct * 100) / 100, entryFactors: pos.entryFactors,
+          symbol, pnlPct: Math.round((netPnl / pos.costBasis) * 10000) / 100,
+          grossPnlPct: Math.round(pnlPct * 100) / 100,
+          entryFactors: pos.entryFactors,
           entryDate: pos.entryDate, entryPrice: pos.entryPrice,
           exitDate: date, exitPrice: row.close, qty: pos.qty,
-          pnlAmount: Math.round(proceeds - pos.qty * pos.entryPrice)
+          pnlAmount: Math.round(netPnl),
+          fee: Math.round(pos.buyFee + sell.fee)
         });
         delete positions[symbol];
       }
@@ -297,19 +308,23 @@ export function runBacktest(strategy, symbolMaps, dates, opts = {}) {
         candidates.sort((a, b) => b.score - a.score);
         candidates.slice(0, slots).forEach((c) => {
           const budget = cash * (strategy.sizing.positionPct / 100);
-          const qty = Math.floor(budget / c.row.close);
-          if (qty < 1) return;
-          cash -= qty * c.row.close;
-          positions[c.symbol] = { qty, entryPrice: c.row.close, entryDate: date, peakPrice: c.row.close, entryFactors: c.row.factors };
+          const market = marketOfSymbol(c.symbol);
+          const buy = planBuy(costs, market, budget, c.row.close);
+          if (buy.qty < 1) return;
+          cash -= buy.total;
+          positions[c.symbol] = {
+            qty: buy.qty, market, costBasis: buy.total, buyFee: buy.fee,
+            entryPrice: c.row.close, entryDate: date, peakPrice: c.row.close, entryFactors: c.row.factors
+          };
         });
       }
     }
 
-    // 4) 자산 곡선 기록
+    // 4) 자산 곡선 기록 — 보유 종목은 "지금 팔면 손에 남는 금액"(예상 매도비용 차감)으로 평가합니다.
     let posValue = 0;
     Object.keys(positions).forEach((s) => {
       const row = symbolMaps[s].get(date);
-      if (row && row.close !== null) posValue += positions[s].qty * row.close;
+      if (row && row.close !== null) posValue += planSell(costs, positions[s].market, positions[s].qty, row.close).proceeds;
     });
     equityCurve.push({ date, equity: cash + posValue });
   }

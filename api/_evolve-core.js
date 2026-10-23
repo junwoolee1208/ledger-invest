@@ -112,7 +112,7 @@ export function advanceGeneration(lineagesState, symbolMaps, dates, opts = {}) {
       // 구간별 탐색에서는 "그 구간에서만 사는" 조건을 모든 후보가 동일하게 갖도록 고정합니다.
       pool = pool.map((p) => ({ ...p, strategy: Object.assign({}, p.strategy, { regimeFilter: opts.forceRegimeFilter }) }));
     }
-    const evaluated = pool.map((p) => ({ strategy: p.strategy, tag: p.tag, stats: runBacktest(p.strategy, symbolMaps, dates, { regimeByDate: opts.regimeByDate }) }));
+    const evaluated = pool.map((p) => ({ strategy: p.strategy, tag: p.tag, stats: runBacktest(p.strategy, symbolMaps, dates, { regimeByDate: opts.regimeByDate, costs: opts.costs }) }));
     evaluated.sort((a, b) => b.stats.totalReturnPct - a.stats.totalReturnPct);
 
     const genTop = evaluated[0];

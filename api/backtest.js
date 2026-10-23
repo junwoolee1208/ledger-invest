@@ -23,6 +23,7 @@ import {
 } from './_backtest-core.js';
 import { DEFAULT_LINEAGES, describeStrategy, advanceGeneration, MAX_HISTORY } from './_evolve-core.js';
 import { kvGetJson, kvSetJson, kvReady } from './_kv.js';
+import { loadCosts, buyCostPct, sellCostPct } from './_costs.js';
 
 export const config = { maxDuration: 30 };
 
@@ -135,7 +136,8 @@ async function handlePresets(req, res) {
     }
     const dates = Array.from(dateSet).sort();
 
-    const results = PRESETS.map((preset) => Object.assign({ id: preset.id, name: preset.name }, runBacktest(preset, symbolMaps, dates)))
+    const costs = await loadCosts();
+    const results = PRESETS.map((preset) => Object.assign({ id: preset.id, name: preset.name }, runBacktest(preset, symbolMaps, dates, { costs })))
       .sort((a, b) => b.totalReturnPct - a.totalReturnPct);
 
     const feedback = await askPresetFeedback(results, process.env.ANTHROPIC_API_KEY);
@@ -145,7 +147,8 @@ async function handlePresets(req, res) {
       skippedNonKr,
       periodFrom: dates[0], periodTo: dates[dates.length - 1],
       startingCash: STARTING_CASH,
-      feePct: FEE_PCT,
+      feePct: Math.round((buyCostPct(costs, 'KR') + sellCostPct(costs, 'KR')) * 1000) / 1000, // 왕복 비용(매수+매도, 설정값 기준)
+      broker: costs.broker,
       results,
       feedback,
       note: '가격/거래량 기반 팩터만 백테스트 가능해요(수급·호가·AI의견은 과거 이력이 없어 제외). 체결가는 종가 기준 단순화, 슬리피지는 반영 안 됐어요.'
@@ -235,7 +238,7 @@ async function handleEvolveManual(req, res) {
     const dates = Array.from(dateSet).sort();
 
     const seededLineages = lineages.map((l) => l.bestStats ? l : Object.assign({}, l));
-    const { lineages: newLineages, globalBest, globalImproved } = advanceGeneration(seededLineages, symbolMaps, dates);
+    const { lineages: newLineages, globalBest, globalImproved } = advanceGeneration(seededLineages, symbolMaps, dates, { costs: await loadCosts() });
 
     const historyEntry = { generation: newLineages.reduce((a, l) => a + l.generation, 0), totalReturnPct: globalBest.stats.totalReturnPct, maxDrawdownPct: globalBest.stats.maxDrawdownPct, lineage: globalBest.lineage, timestamp: Date.now() };
     const newHistory = [...history, historyEntry].slice(-MAX_HISTORY);
@@ -327,7 +330,7 @@ async function handleEvolveAuto(req, res) {
     const history = (state && state.history) || [];
     const prevGlobalBest = (state && state.globalBest) || null;
 
-    const { lineages: newLineages, globalBest, globalImproved } = advanceGeneration(lineages, symbolMaps, dates);
+    const { lineages: newLineages, globalBest, globalImproved } = advanceGeneration(lineages, symbolMaps, dates, { costs: await loadCosts() });
 
     const historyEntry = {
       generation: newLineages.reduce((a, l) => a + l.generation, 0), totalReturnPct: globalBest.stats.totalReturnPct,
@@ -444,7 +447,7 @@ async function handleRegimeEvolveAuto(req, res) {
     const lineages = (state && state.lineages) ? state.lineages : freshLineages();
     const prevGlobalBest = (state && state.globalBest) || null;
 
-    const { lineages: newLineages, globalBest, globalImproved } = advanceGeneration(lineages, symbolMaps, dates, { forceRegimeFilter: label, regimeByDate });
+    const { lineages: newLineages, globalBest, globalImproved } = advanceGeneration(lineages, symbolMaps, dates, { forceRegimeFilter: label, regimeByDate, costs: await loadCosts() });
 
     await kvSetJson(stateKey, { lineages: newLineages, globalBest, updatedAt: Date.now(), lookbackDays });
     await kvSetJson(REGIME_ROTATION_KEY, { index: rotation.index + 1 });
@@ -517,7 +520,7 @@ async function handleRegimeEvolveManual(req, res) {
     const state = await kvGetJson(stateKey, null);
     const lineages = (state && state.lineages) ? state.lineages : freshLineages();
 
-    const { lineages: newLineages, globalBest, globalImproved } = advanceGeneration(lineages, symbolMaps, dates, { forceRegimeFilter: label, regimeByDate });
+    const { lineages: newLineages, globalBest, globalImproved } = advanceGeneration(lineages, symbolMaps, dates, { forceRegimeFilter: label, regimeByDate, costs: await loadCosts() });
     await kvSetJson(stateKey, { lineages: newLineages, globalBest, updatedAt: Date.now(), lookbackDays });
 
     // 이 구간에 해당하는 날짜가 과거 데이터에 얼마나 있었는지도 같이 보여줍니다(너무 적으면 신뢰하기 어려움).
@@ -689,12 +692,13 @@ async function handleDetail(req, res) {
     const dates = Array.from(dateSet).sort();
     const startingCash = market === 'US' ? STARTING_CASH_US : STARTING_CASH;
 
-    const stats = runBacktest(strategy, symbolMaps, dates, { startingCash, includeDetails: true });
+    const costs = await loadCosts();
+    const stats = runBacktest(strategy, symbolMaps, dates, { startingCash, includeDetails: true, costs });
 
     res.status(200).json({
       market, symbols: usedSymbols, skippedSymbols,
       periodFrom: dates[0], periodTo: dates[dates.length - 1],
-      startingCash, feePct: FEE_PCT,
+      startingCash, feePct: Math.round((buyCostPct(costs, market) + sellCostPct(costs, market)) * 1000) / 1000, broker: costs.broker,
       strategy,
       supplyRequested: wantSupply, supplyUsed: supplyUsedForAny,
       stats: {

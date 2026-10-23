@@ -611,6 +611,43 @@
     </div>
 
     <div class="panel pad" style="margin-bottom:20px;">
+      <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:10px; flex-wrap:wrap;">
+        <div>
+          <h3 style="margin-top:0; font-size:15px;">매매 비용·세금 설정</h3>
+          <p style="color:var(--muted-2); font-size:12px; margin:0 0 12px;">자동매매와 전략연구실 백테스트가 사고팔 때마다 이 값만큼 비용을 빼서 실제 수익률에 가깝게 계산해요. 증권사나 이벤트에 따라 수수료가 다르니 쓰는 곳에 맞게 바꿔주세요. 저장하면 다음 매매부터 적용돼요(이미 끝난 매매 기록은 그대로).</p>
+        </div>
+        <span id="atCostBroker" class="mono" style="font-size:11.5px; color:var(--brand); border:1px solid var(--brand-dim); border-radius:999px; padding:2px 10px; white-space:nowrap;"></span>
+      </div>
+      <div style="max-width:260px; margin-bottom:6px;">
+        <div><label>증권사 이름</label><input type="text" id="atCostBrokerName" style="width:100%;" maxlength="30"></div>
+      </div>
+      <div style="font-size:12px; font-weight:700; color:var(--ink); margin:12px 0 6px;">국내 주식</div>
+      <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:10px; align-items:end;">
+        <div><label>매수 수수료(%)</label><input type="number" step="0.001" id="atCostKrBuy" class="mono" style="width:100%;"></div>
+        <div><label>매도 수수료(%)</label><input type="number" step="0.001" id="atCostKrSell" class="mono" style="width:100%;"></div>
+        <div><label>증권거래세(%, 매도 시)</label><input type="number" step="0.01" id="atCostKrTax" class="mono" style="width:100%;"></div>
+      </div>
+      <div style="font-size:12px; font-weight:700; color:var(--ink); margin:14px 0 6px;">해외 주식 (미국)</div>
+      <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:10px; align-items:end;">
+        <div><label>매수 수수료(%)</label><input type="number" step="0.001" id="atCostUsBuy" class="mono" style="width:100%;"></div>
+        <div><label>매도 수수료(%)</label><input type="number" step="0.001" id="atCostUsSell" class="mono" style="width:100%;"></div>
+        <div><label>SEC Fee(%, 매도 시)</label><input type="number" step="0.00001" id="atCostUsSec" class="mono" style="width:100%;"></div>
+        <div><label>환전 비용(%, 1회당)</label><input type="number" step="0.01" id="atCostUsFx" class="mono" style="width:100%;"></div>
+      </div>
+      <div style="font-size:12px; font-weight:700; color:var(--ink); margin:14px 0 6px;">해외주식 양도소득세 (1년 단위)</div>
+      <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:10px; align-items:end;">
+        <div><label>세율(%, 지방세 포함)</label><input type="number" step="0.1" id="atCostTaxRate" class="mono" style="width:100%;"></div>
+        <div><label>기본공제(원)</label><input type="number" step="10000" id="atCostTaxDeduct" class="mono" style="width:100%;"></div>
+      </div>
+      <p style="color:var(--muted-2); font-size:11.5px; margin:10px 0 0;">환전 비용은 원화→달러(살 때), 달러→원화(팔 때) 각각 한 번씩 빠져요. 토스증권은 평일 낮 환전이 약 0.05%, 그 외 시간은 약 0.5%예요. 달러를 계속 들고 거래한다면 0으로 두세요. 국내 주식은 대주주가 아니면 양도세가 없어서, 증권거래세만 반영돼요.</p>
+      <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-top:12px;">
+        <button class="btn" id="atCostSave">저장</button>
+        <button class="btn ghost" id="atCostReset">토스증권 기본값으로</button>
+        <span id="atCostMsg" style="font-size:12.5px; color:var(--muted);"></span>
+      </div>
+    </div>
+
+    <div class="panel pad" style="margin-bottom:20px;">
       <h3 style="margin-top:0; font-size:15px;">커스텀 전략</h3>
       <p style="color:var(--muted-2); font-size:12px; margin:0 0 12px;">전략연구실의 "진화형 탐색" 결과를 이름 붙여 저장해둔 전략들이에요(국내 종목만 지원). 켜고 끌 수 있고, 완전히 삭제도 할 수 있어요.</p>
       <div id="atCustomList"><div style="color:var(--muted-2); font-size:12.5px;">저장된 커스텀 전략이 없어요. 전략연구실 &gt; 진화형 탐색 결과에서 저장해보세요.</div></div>
@@ -618,11 +655,23 @@
 
     <div class="panel pad" style="margin-bottom:20px;">
       <h3 style="margin-top:0; font-size:15px;">전략 경쟁 비교</h3>
-      <p style="color:var(--muted-2); font-size:12px; margin:0 0 14px;">국내+해외 가상계좌를 합산한 누적 손익률 기준이에요. 가장 높은 전략에 1위 표시가 붙어요.</p>
+      <p style="color:var(--muted-2); font-size:12px; margin:0 0 14px;">국내+해외 가상계좌를 합산한 누적 손익률 기준이에요. 매매할 때마다 수수료·거래세·환전비용을 빼고, 보유 종목도 "지금 팔면 남는 금액"으로 계산해서 실제 계좌 수익률에 가깝게 보여줘요. 가장 높은 전략에 1위 표시가 붙어요.</p>
       <table id="atStrategyTable">
         <thead><tr><th>전략</th><th>국내 손익률</th><th>해외 손익률</th><th>종합 손익률</th><th></th></tr></thead>
         <tbody id="atStrategyBody"></tbody>
       </table>
+    </div>
+
+    <div class="panel pad" style="margin-bottom:20px;">
+      <h3 style="margin-top:0; font-size:15px;" id="atTaxTitle">올해 실현손익과 해외주식 양도세(추정)</h3>
+      <p style="color:var(--muted-2); font-size:12px; margin:0 0 14px;">해외주식 양도세는 1년 동안 실현한 이익과 손실을 합친 뒤 기본공제를 빼고 매겨져요. 전략마다 따로 운용하는 가상계좌라서 "이 전략만 썼다면 낼 세금"으로 계산했어요. 달러 손익은 매도 당시 환율로 원화 환산했어요. 실제 신고 금액은 증권사·국세청 안내로 꼭 다시 확인하세요.</p>
+      <table id="atTaxTable">
+        <thead><tr><th>전략</th><th>국내 실현손익</th><th>해외 실현손익</th><th>원화 환산</th><th>예상 양도세</th><th>해외 세후 손익</th></tr></thead>
+        <tbody id="atTaxBody"></tbody>
+      </table>
+      <div class="empty-state" id="atTaxEmpty" style="display:none; padding:24px 10px;">
+        <p>올해 아직 매도로 확정된 손익이 없어요.</p>
+      </div>
     </div>
 
     <div class="panel pad" style="margin-bottom:20px;">
@@ -1530,6 +1579,7 @@
       loadAutoTradeConfig();
       loadAutoTradeStatus();
       loadCustomStrategies();
+      loadCostConfig();
     }
     if(btn.dataset.view === 'strategychanges'){
       loadStrategyChanges();
@@ -2671,7 +2721,14 @@
     var cash = acct.cash || 0;
     var positions = acct.positions || {};
     var posValue = 0;
-    Object.keys(positions).forEach(function(sym){ posValue += positions[sym].qty * positions[sym].avgPrice; });
+    // 서버가 "지금 팔면 남는 금액"(netEvalAmount: 현재가 − 예상 매도비용)을 계산해줬으면 그걸 쓰고,
+    // 시세를 못 받아온 경우엔 실제로 들어간 돈(costBasis, 없으면 매수가×수량)으로 평가해요.
+    Object.keys(positions).forEach(function(sym){
+      var p = positions[sym];
+      if(p.netEvalAmount!==undefined && p.netEvalAmount!==null) posValue += p.netEvalAmount;
+      else if(p.costBasis) posValue += p.costBasis;
+      else posValue += p.qty * p.avgPrice;
+    });
     var total = cash + posValue;
     var startingCash = acct.startingCash || 0;
     var pl = total - startingCash;
@@ -2711,7 +2768,9 @@
       pnlAmount = Math.round(e.qty * (e.price - buyPrice));
     }
     if(e.pnlPct===undefined || e.pnlPct===null) return '—';
-    return '<span class="'+(e.pnlPct>=0?'up':'down')+'">'+(e.pnlPct>=0?'+':'')+fmt(e.pnlPct,1)+'%'+
+    // grossPnlPct가 있으면 비용 반영 이후 기록 → 보이는 숫자는 "실제 남은 돈" 기준, 마우스를 올리면 단순 주가 등락률도 보여줘요.
+    var tip = (e.grossPnlPct!==undefined && e.grossPnlPct!==null) ? ' title="수수료·세금 뺀 실제 수익률이에요. 주가 등락률은 '+(e.grossPnlPct>=0?'+':'')+fmt(e.grossPnlPct,2)+'%"' : ' title="비용 반영 이전 기록이라 수수료·세금이 빠지지 않은 값이에요"';
+    return '<span'+tip+' class="'+(e.pnlPct>=0?'up':'down')+'">'+(e.pnlPct>=0?'+':'')+fmt(e.pnlPct,1)+'%'+
       (pnlAmount!==undefined && pnlAmount!==null ? ' ('+(pnlAmount>=0?'+':'')+atFmtPrice(market, pnlAmount)+')' : '')+'</span>';
   }
 
@@ -2734,7 +2793,12 @@
     { key:'side', label:'구분', render: function(e){ return atSideLabel(e.side); } },
     { key:'qty', label:'수량', render: function(e){ return fmt(e.qty,0); } },
     { key:'price', label:'가격', render: function(e){ return atFmtPrice(e.market||'KR', e.price); } },
-    { key:'amount', label:'금액', render: function(e){ var amount=(e.amount!==undefined&&e.amount!==null)?e.amount:(e.qty*e.price); return atFmtPrice(e.market||'KR', amount); } },
+    { key:'amount', label:'금액', render: function(e){
+        var amount=(e.amount!==undefined&&e.amount!==null)?e.amount:(e.qty*e.price);
+        // 비용(수수료·세금·환전)이 기록된 매매는 금액 아래에 작게 같이 보여줘요. 매수는 비용 포함 지출액, 매도는 비용 뺀 입금액이에요.
+        var feeLine = (e.fee!==undefined && e.fee!==null) ? '<div style="font-size:11px; color:var(--muted-2);">비용 '+atFmtPrice(e.market||'KR', e.fee)+'</div>' : '';
+        return atFmtPrice(e.market||'KR', amount) + feeLine;
+      } },
     { key:'pnl', label:'손익', render: atLogPnlCell },
     { key:'reason', label:'사유', render: atLogReasonCell, wide: true }
   ];
@@ -2896,16 +2960,110 @@
         posBody.innerHTML = posRows.join('');
       }
 
+      // ---- 올해 실현손익 + 해외주식 양도세(추정) ----
+      renderAtTax(data.taxSummary, order);
+
       // ---- 매매 기록 (날짜/전략/시장/종목/구분별로 묶어서 보기) ----
       atLogData = log;
       renderAtLog();
     }).catch(function(e){ console.error('auto-trade status load failed', e); });
   }
 
+  function renderAtTax(summary, order){
+    var body = document.getElementById('atTaxBody');
+    var table = document.getElementById('atTaxTable');
+    var empty = document.getElementById('atTaxEmpty');
+    if(!body) return;
+    var by = (summary && summary.byStrategy) || {};
+    if(summary && summary.year) document.getElementById('atTaxTitle').textContent = summary.year + '년 실현손익과 해외주식 양도세(추정)';
+    var ids = order.filter(function(id){ return by[id]; });
+    Object.keys(by).forEach(function(id){ if(ids.indexOf(id) === -1) ids.push(id); });
+    if(!ids.length){
+      body.innerHTML = ''; table.style.display = 'none'; empty.style.display = ''; return;
+    }
+    table.style.display = ''; empty.style.display = 'none';
+    function signed(v, market){
+      var cls = v>=0 ? 'up' : 'down';
+      return '<span class="'+cls+'">'+(v>=0?'+':'')+atFmtPrice(market, v)+'</span>';
+    }
+    body.innerHTML = ids.map(function(id){
+      var t = by[id];
+      var taxCell = t.tax > 0
+        ? '<span class="down">'+atFmtPrice('KR', t.tax)+'</span>'
+        : '<span style="color:var(--muted-2);">0원</span>' + (t.usPnlKrw > 0 ? '<div style="font-size:11px; color:var(--muted-2);">공제 한도 안</div>' : '');
+      return '<tr><td>'+atStratLabel(id)+'</td>' +
+        '<td>'+(t.krTrades ? signed(t.krPnlKrw,'KR')+'<div style="font-size:11px; color:var(--muted-2);">'+t.krTrades+'건</div>' : '—')+'</td>' +
+        '<td>'+(t.usTrades ? signed(t.usPnlUsd,'US')+'<div style="font-size:11px; color:var(--muted-2);">'+t.usTrades+'건</div>' : '—')+'</td>' +
+        '<td>'+(t.usTrades ? signed(t.usPnlKrw,'KR') : '—')+'</td>' +
+        '<td>'+(t.usTrades ? taxCell : '—')+'</td>' +
+        '<td>'+(t.usTrades ? signed(t.afterTax,'KR') : '—')+'</td></tr>';
+    }).join('');
+  }
+
+  /* ---- 매매 비용·세금 설정 ---- */
+  var atCostDefaults = null;
+  var AT_COST_FIELDS = [
+    ['atCostKrBuy', 'kr', 'buyFeePct'], ['atCostKrSell', 'kr', 'sellFeePct'], ['atCostKrTax', 'kr', 'sellTaxPct'],
+    ['atCostUsBuy', 'us', 'buyFeePct'], ['atCostUsSell', 'us', 'sellFeePct'], ['atCostUsSec', 'us', 'sellRegFeePct'], ['atCostUsFx', 'us', 'fxSpreadPct'],
+    ['atCostTaxRate', 'overseasTax', 'ratePct'], ['atCostTaxDeduct', 'overseasTax', 'deductionKrw']
+  ];
+  function fillCostForm(c){
+    if(!c) return;
+    document.getElementById('atCostBrokerName').value = c.broker || '';
+    AT_COST_FIELDS.forEach(function(f){ document.getElementById(f[0]).value = c[f[1]][f[2]]; });
+    var kr = c.kr.buyFeePct + c.kr.sellFeePct + c.kr.sellTaxPct;
+    var us = c.us.buyFeePct + c.us.sellFeePct + c.us.sellRegFeePct + c.us.fxSpreadPct*2;
+    document.getElementById('atCostBroker').textContent = (c.broker||'사용자 설정') + ' · 왕복 국내 ' + fmt(kr,3) + '% / 해외 ' + fmt(us,3) + '%';
+  }
+  function readCostForm(){
+    var c = { broker: document.getElementById('atCostBrokerName').value.trim(), kr:{}, us:{}, overseasTax:{} };
+    var bad = false;
+    AT_COST_FIELDS.forEach(function(f){
+      var raw = document.getElementById(f[0]).value;
+      var v = Number(raw);
+      if(raw === '' || !isFinite(v) || v < 0) bad = true;
+      c[f[1]][f[2]] = v;
+    });
+    return bad ? null : c;
+  }
+  function loadCostConfig(){
+    fetch('/api/auto-trade-status?action=cost-config').then(function(r){ return r.json(); }).then(function(d){
+      atCostDefaults = d.defaults || null;
+      fillCostForm(d.costs);
+    }).catch(function(e){ console.error('cost config load failed', e); });
+  }
+  function saveCostConfig(payload, doneText){
+    var msg = document.getElementById('atCostMsg');
+    if(!currentUser){ msg.textContent = '로그인 후 저장할 수 있어요.'; msg.style.color = 'var(--down)'; return; }
+    msg.textContent = '저장 중…'; msg.style.color = 'var(--muted-2)';
+    currentUser.getIdToken().then(function(token){
+      return fetch('/api/auto-trade-status?action=cost-config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+        body: JSON.stringify(payload)
+      });
+    }).then(function(r){ return r.json().then(function(d){ return {ok:r.ok, d:d}; }); }).then(function(res){
+      if(!res.ok){ msg.textContent = (res.d && res.d.error) || '저장하지 못했어요.'; msg.style.color = 'var(--down)'; return; }
+      fillCostForm(res.d.costs);
+      msg.textContent = doneText; msg.style.color = 'var(--up)';
+    }).catch(function(){ msg.textContent = '저장하지 못했어요.'; msg.style.color = 'var(--down)'; });
+  }
+  document.getElementById('atCostSave').addEventListener('click', function(){
+    var c = readCostForm();
+    var msg = document.getElementById('atCostMsg');
+    if(!c){ msg.textContent = '모든 칸에 0 이상의 숫자를 넣어주세요.'; msg.style.color = 'var(--down)'; return; }
+    saveCostConfig({ costs: c }, '저장했어요. 다음 매매부터 적용돼요.');
+  });
+  document.getElementById('atCostReset').addEventListener('click', function(){
+    if(!confirm('수수료·세금 설정을 토스증권 기본값으로 되돌릴까요?')) return;
+    saveCostConfig({ reset: true }, '토스증권 기본값으로 되돌렸어요.');
+  });
+
   document.getElementById('atRefresh').addEventListener('click', function(){
     loadAutoTradeConfig();
     loadAutoTradeStatus();
     loadCustomStrategies();
+    loadCostConfig();
   });
 
   /* ---------------- 전략 변경 이력 ---------------- */
@@ -3158,7 +3316,7 @@
         }
         var data = res.data;
         var html = '';
-        html += '<div style="color:var(--muted-2); font-size:11.5px; margin-bottom:10px;">기간: '+data.periodFrom+' ~ '+data.periodTo+' · 대상: '+data.symbols.length+'개 종목'+(data.skippedNonKr?' (해외 '+data.skippedNonKr+'개 제외)':'')+' · 시작자금 '+fmt(data.startingCash,0)+'원 · 매도비용 약 '+data.feePct+'% 반영</div>';
+        html += '<div style="color:var(--muted-2); font-size:11.5px; margin-bottom:10px;">기간: '+data.periodFrom+' ~ '+data.periodTo+' · 대상: '+data.symbols.length+'개 종목'+(data.skippedNonKr?' (해외 '+data.skippedNonKr+'개 제외)':'')+' · 시작자금 '+fmt(data.startingCash,0)+'원 · 매매비용(수수료·세금'+(data.broker?', '+escapeHtml(data.broker)+' 기준':'')+') 왕복 약 '+data.feePct+'% 반영</div>';
         html += '<table><thead><tr><th>전략</th><th>총 수익률</th><th>최대 낙폭(MDD)</th><th>거래횟수</th><th>승률</th></tr></thead><tbody>';
         data.results.forEach(function(r, idx){
           var retCls = r.totalReturnPct>=0 ? 'up' : 'down';
@@ -3325,7 +3483,7 @@
         var html = '';
         html += '<div style="color:var(--muted-2); font-size:11.5px; margin-bottom:10px;">기간: '+data.periodFrom+' ~ '+data.periodTo+' · 대상: '+data.symbols.join(', ')+
           (data.skippedSymbols && data.skippedSymbols.length ? ' (제외: '+data.skippedSymbols.join(', ')+')' : '') +
-          ' · 시작자금 '+fmt(data.startingCash,0)+(market==='US'?'달러':'원')+' · 매도비용 약 '+data.feePct+'% 반영</div>';
+          ' · 시작자금 '+fmt(data.startingCash,0)+(market==='US'?'달러':'원')+' · 매매비용(수수료·세금'+(data.broker?', '+escapeHtml(data.broker)+' 기준':'')+') 왕복 약 '+data.feePct+'% 반영</div>';
         html += '<div class="stat-grid" style="margin-bottom:14px;">';
         html += statCell('총 수익률', '<span class="'+(s.totalReturnPct>=0?'up':'down')+'">'+(s.totalReturnPct>=0?'+':'')+fmt(s.totalReturnPct,2)+'%</span>');
         html += statCell('최대 낙폭(MDD)', '<span class="down">'+fmt(s.maxDrawdownPct,2)+'%</span>');

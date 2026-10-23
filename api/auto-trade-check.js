@@ -19,6 +19,7 @@
 import { getKisToken, kisHeaders, num, KIS_BASE } from './_kis.js';
 import { kvGetJson, kvSetJson, kvReady } from './_kv.js';
 import { fetchSymbolHistory, annotateWithFactors, scoreForStrategy, classifyRegimeByDate } from './_backtest-core.js';
+import { loadCosts, planBuy, planSell, positionCostBasis, fetchUsdKrw, REALIZED_KEY_PREFIX } from './_costs.js';
 
 export const config = { maxDuration: 30 };
 
@@ -398,7 +399,10 @@ function makeQuoteFetcher(token, marketKey, cache) {
 // 한 전략 x 한 마켓에 대한 손절/익절 + 신규매수 평가를 수행합니다.
 // log는 handler에서 실행 시작 시 딱 한 번만 읽어서 넘겨주는 전체 매매 로그입니다(읽기 전용으로만 씀) —
 // 여러 전략이 매번 전체 로그를 KV에서 다시 읽던 것을 없애서 호출 수를 줄입니다.
-async function processStrategyMarket(strategyDef, marketKey, fetchQuote, cfg, candidates, today, risk, apiKey, log) {
+// costs: _costs.js의 매매 비용 설정(수수료·거래세·환전) — 살 때/팔 때 실제로 빠지는 돈을 반영해서,
+// 가상계좌 현금과 기록되는 손익(pnlPct/pnlAmount)이 실제 계좌에 남는 돈과 최대한 같아지게 합니다.
+// 손절/익절 "발동" 기준은 증권사 주문처럼 주가 등락률(가격 기준) 그대로 두고, 기록되는 손익만 비용을 뺀 값으로 남깁니다.
+async function processStrategyMarket(strategyDef, marketKey, fetchQuote, cfg, candidates, today, risk, apiKey, log, costs) {
   const keys = keysFor(strategyDef.id, marketKey);
   const positions = await kvGetJson(keys.positionsKey, {});
   let cash = await kvGetJson(keys.cashKey, keys.startingCash);
@@ -424,15 +428,23 @@ async function processStrategyMarket(strategyDef, marketKey, fetchQuote, cfg, ca
     else if (pnlPct >= takeProfitPct && tradesToday < maxTradesPerDay) side = 'TAKE_PROFIT';
 
     if (side) {
-      const proceeds = pos.qty * q.price;
-      const pnlAmount = proceeds - pos.qty * pos.avgPrice; // 이번 매매로 실현된 손익 금액(원화/달러, 시장 통화 기준)
-      cash += proceeds;
+      const sell = planSell(costs, marketKey, pos.qty, q.price);
+      const costBasis = positionCostBasis(costs, marketKey, pos); // 매수금액 + 매수비용
+      const netPnlAmount = sell.proceeds - costBasis; // 이번 매매로 실제로 남은(잃은) 돈 — 시장 통화 기준
+      const netPnlPct = (netPnlAmount / costBasis) * 100;
+      const digits = marketKey === 'KR' ? 1 : 100;
+      cash += sell.proceeds;
       delete positions[symbol];
       const entry = {
         ts: Date.now(), date: today, market: marketKey, strategy: strategyDef.id,
         symbol, name: pos.name || q.name || symbol, side,
-        qty: pos.qty, price: q.price, pnlPct: Math.round(pnlPct * 100) / 100,
-        amount: Math.round(proceeds), pnlAmount: Math.round(pnlAmount), mode: 'dryrun',
+        qty: pos.qty, price: q.price,
+        pnlPct: Math.round(netPnlPct * 100) / 100, // 비용(수수료·세금·환전) 뺀 실제 수익률
+        grossPnlPct: Math.round(pnlPct * 100) / 100, // 단순 주가 등락률(참고용)
+        amount: Math.round(sell.proceeds * digits) / digits,
+        pnlAmount: Math.round(netPnlAmount * digits) / digits,
+        fee: Math.round(sell.fee * digits) / digits,
+        mode: 'dryrun',
         reason: pos.reason || null
       };
       if (side === 'STOP_LOSS') {
@@ -461,17 +473,23 @@ async function processStrategyMarket(strategyDef, marketKey, fetchQuote, cfg, ca
       if (!strategyDef.shouldBuy(cand, q)) continue;
 
       const budget = cash * (positionPct / 100);
-      const qty = Math.floor(budget / q.price);
-      if (qty < 1) continue;
+      // 매수비용(수수료, 해외는 환전비용까지)을 포함해도 예산을 넘지 않는 최대 수량
+      const buy = planBuy(costs, marketKey, budget, q.price);
+      if (buy.qty < 1) continue;
+      const qty = buy.qty;
+      const digits = marketKey === 'KR' ? 1 : 100;
 
-      const cost = qty * q.price;
-      cash -= cost;
+      cash -= buy.total;
       const displayName = cand.name || q.name || cand.symbol;
-      positions[cand.symbol] = { qty, avgPrice: q.price, entryDate: today, name: displayName, excd: q.excd || null, reason: cand.reason || null };
+      positions[cand.symbol] = {
+        qty, avgPrice: q.price, costBasis: Math.round(buy.total * digits) / digits,
+        entryDate: today, name: displayName, excd: q.excd || null, reason: cand.reason || null
+      };
       const entry = {
         ts: Date.now(), date: today, market: marketKey, strategy: strategyDef.id,
         symbol: cand.symbol, name: displayName, side: 'BUY',
-        qty, price: q.price, amount: Math.round(cost), reason: cand.reason, mode: 'dryrun'
+        qty, price: q.price, amount: Math.round(buy.total * digits) / digits,
+        fee: Math.round(buy.fee * digits) / digits, reason: cand.reason, mode: 'dryrun'
       };
       actions.push(entry);
     }
@@ -569,6 +587,7 @@ export default async function handler(req, res) {
 
     const apiKey = process.env.ANTHROPIC_API_KEY;
     const overrides = await maybeRunDailyAdjust(cfg, apiKey, today, log);
+    const costs = await loadCosts(); // 매매 비용 설정(기본: 토스증권) — 자동매매 탭에서 바꿀 수 있음
 
     // 전략끼리는 서로 다른 KV 키(현금/보유종목)를 쓰기 때문에 서로 영향을 주지 않아, 동시에(병렬로)
     // 처리해도 안전합니다 — 순서대로 하나씩 기다리던 것보다 전체 실행 시간이 훨씬 짧아집니다.
@@ -576,8 +595,8 @@ export default async function handler(req, res) {
       // 전략별로 AI가 자동 조정한 값(오버라이드)이 있으면 하드코딩된 기본값/사용자 설정 위에 덮어씁니다.
       const risk = Object.assign({}, def.getRisk(cfg), overrides[def.id] || {});
       const [krResult, usResult] = await Promise.all([
-        processStrategyMarket(def, 'KR', fetchKrQuote, cfg, krCandidates, today, risk, apiKey, log),
-        processStrategyMarket(def, 'US', fetchUsQuote, cfg, usCandidates, today, risk, apiKey, log)
+        processStrategyMarket(def, 'KR', fetchKrQuote, cfg, krCandidates, today, risk, apiKey, log, costs),
+        processStrategyMarket(def, 'US', fetchUsQuote, cfg, usCandidates, today, risk, apiKey, log, costs)
       ]);
       results[def.id] = { kr: { cash: krResult.cash, positions: krResult.positions }, us: { cash: usResult.cash, positions: usResult.positions } };
       allActions.push(...krResult.actions, ...usResult.actions);
@@ -653,7 +672,7 @@ export default async function handler(req, res) {
           }
         };
         const risk = evolvedRiskFrom(wd.strategy);
-        const result = await processStrategyMarket(def, 'KR', fetchKrQuote, cfg, krCandidates, today, risk, apiKey, log);
+        const result = await processStrategyMarket(def, 'KR', fetchKrQuote, cfg, krCandidates, today, risk, apiKey, log, costs);
         results[wd.id] = { kr: { cash: result.cash, positions: result.positions }, us: { cash: STARTING_CASH_US, positions: {} } };
         allActions.push(...result.actions);
       }));
@@ -664,6 +683,40 @@ export default async function handler(req, res) {
       for (const entry of allActions) log.unshift(entry);
       if (log.length > MAX_LOG) log.length = MAX_LOG;
       await kvSetJson(LOG_KEY, log);
+    }
+
+    // 연간 실현손익 장부 — 해외주식 양도세(연 단위 합산)를 계산하려면 1년치 합계가 필요한데,
+    // 매매 기록은 최근 400건만 남으니 매도가 생길 때마다 여기에 따로 누적합니다.
+    // 달러 손익은 "매도 당시" 환율로 원화 환산해서 쌓습니다(실제 신고도 거래일 환율 기준이라 이게 더 정확해요).
+    const isSell = (a) => a.side === 'STOP_LOSS' || a.side === 'TAKE_PROFIT';
+    const newSells = allActions.filter(isSell);
+    if (newSells.length) {
+      try {
+        const year = today.slice(0, 4);
+        const ledgerKey = REALIZED_KEY_PREFIX + year;
+        let ledger = await kvGetJson(ledgerKey, null);
+        // 장부가 처음 만들어지는 경우: 이미 남아있는 올해 매매 기록(방금 추가한 것 포함)으로 한 번 채워 넣습니다.
+        // (이 기능 전 기록은 비용이 안 빠진 손익이라 약간 높게 잡히고, 달러 손익은 지금 환율로 환산된 근사치예요.)
+        const sells = ledger ? newSells : log.filter((e) => isSell(e) && String(e.date || '').startsWith(year));
+        ledger = ledger || {};
+        const usdKrw = sells.some((a) => a.market === 'US') ? await fetchUsdKrw() : null;
+        for (const a of sells) {
+          const row = ledger[a.strategy] || { krPnlKrw: 0, krTrades: 0, usPnlUsd: 0, usPnlKrw: 0, usTrades: 0, usFxMissing: 0 };
+          if (a.market === 'KR') {
+            row.krPnlKrw += a.pnlAmount || 0;
+            row.krTrades += 1;
+          } else {
+            row.usPnlUsd += a.pnlAmount || 0;
+            if (usdKrw) row.usPnlKrw += (a.pnlAmount || 0) * usdKrw;
+            else row.usFxMissing += 1; // 환율 조회 실패 — 원화 합계에서 빠졌다는 표시
+            row.usTrades += 1;
+          }
+          ledger[a.strategy] = row;
+        }
+        await kvSetJson(ledgerKey, ledger);
+      } catch (e) {
+        console.error('auto-trade-check.js(realized ledger) error:', e);
+      }
     }
 
     res.status(200).json({ ok: true, actions: allActions, strategies: results, checkedAt: Date.now() });
