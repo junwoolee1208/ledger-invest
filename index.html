@@ -3761,6 +3761,9 @@
     var pick = d.pickReport;
     document.getElementById('scdSystem').innerHTML =
       '<div>🔎 <b>종목 고르기</b>: '+(pick && pick.summary ? escapeHtml(pick.summary) : '아직 채점된 기록이 없어요(고른 지 3거래일이 지나야 채점돼요).')+'</div>' +
+      (pick && pick.buckets && pick.buckets.length ? '<details class="more" style="margin:4px 0 6px 20px;"><summary>고를 때 상태별 3거래일 뒤 성적</summary><div class="more-body"><table><thead><tr><th>고를 때 상태</th><th>종목 수</th><th>3일 뒤 평균</th><th>오른 비율</th></tr></thead><tbody>' +
+        pick.buckets.map(function(b){ return '<tr><td>'+escapeHtml(b.bucket)+'</td><td>'+b.n+'</td><td class="'+(b.avgRet3>=0?'up':'down')+'">'+(b.avgRet3>=0?'+':'')+b.avgRet3+'%</td><td>'+b.upRate+'%</td></tr>'; }).join('') +
+        '</tbody></table><p style="margin-top:6px;">5개 이상 쌓인 구간은 "교훈"으로 AI 종목 거르기에 전달돼요.</p></div></details>' : '') +
       '<div>🧪 <b>자동조정 학습</b>: 채점된 실험 '+(sys.judged||0)+'개 — 좋아짐 <span class="up">'+(sys.improved||0)+'</span>, 나빠짐 <span class="down">'+(sys.worse||0)+'</span>, 되돌림 '+(sys.rolledBack||0)+'번, 지금 실험 중 '+(sys.running||0)+'개</div>';
 
     renderScorecardTrend();
