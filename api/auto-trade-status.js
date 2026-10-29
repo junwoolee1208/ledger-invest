@@ -5,9 +5,15 @@
 // 합쳤습니다. 각 기능의 내부 로직은 그대로입니다.)
 //
 // 쿼리: action=config (기본값) | log | changes | custom | manual-edit | cost-config | daytrade-config
+//       | strategies | strategy-toggle | reset-account | calendar | calendar-day
 //   action=config, GET  : 설정 조회 (인증 불필요 — auto-trade-check.js도 같이 씀)
 //   action=config, POST : 설정 저장 (로그인한 본인만, Firebase ID 토큰 필요)
 //   action=log,    GET  : 전략별 계좌 현황 + 보유종목(실시간 평가금액/손익 포함) + 매매기록 조회
+//   action=strategies,      GET  : "내 전략" 카드용 목록(켜짐/숨김 여부 + 지금 적용 중인 손절·익절 등)
+//   action=strategy-toggle, POST : 전략 켜기/끄기/숨기기를 즉시 저장
+//   action=reset-account,   POST : 한 전략의 가상계좌만 처음 상태(현금 원금, 보유종목 없음)로 되돌림
+//   action=calendar,        GET  : month=YYYY-MM 의 날짜별 손익 요약(손익 캘린더)
+//   action=calendar-day,    GET  : date=YYYY-MM-DD 의 매매 하나하나(캘린더 "자세히 보기")
 
 import { getKisToken, kisHeaders, num, KIS_BASE } from './_kis.js';
 import { kvGetJson, kvSetJson, kvCommand, kvReady } from './_kv.js';
@@ -16,6 +22,8 @@ import {
   planSell, positionCostBasis, estimateOverseasTax
 } from './_costs.js';
 import { DEFAULT_DAYTRADE, normalizeDaytrade, describeDaytrade } from './_daytrade.js';
+import { STRATEGY_IDS, STRATEGY_NAMES, WEIGHT_BASED_IDS, OWN_SETTINGS_IDS, BASE_RISK, keysFor } from './_strategies.js';
+import { isSellSide, ensureBackfilled, DAILY_KEY_PREFIX, TRADES_KEY_PREFIX } from './_ledger.js';
 
 export const config = { maxDuration: 30 };
 
@@ -26,8 +34,6 @@ const CHANGES_KEY = 'autotrade:strategy-changes'; // auto-trade-check.js의 하�
 const OVERRIDES_KEY = 'autotrade:strategy-overrides'; // auto-trade-check.js와 같은 키 (AI 자동조정 + 수동편집이 같이 씀)
 const CUSTOM_KEY = 'autotrade:custom-strategies'; // 사용자가 진화형 탐색 결과를 저장한 커스텀 전략 목록
 const MAX_CHANGES = 200;
-const STARTING_CASH_KR = 10_000_000;
-const STARTING_CASH_US = 7_000;
 
 function todayKST() {
   const d = new Date(Date.now() + 9 * 60 * 60 * 1000);
@@ -44,17 +50,6 @@ function clipRisk(r, fallback) {
   };
 }
 
-const STRATEGY_IDS = ['momentum', 'pullback', 'breakout', 'reversal', 'scalp', 'selective', 'wideswing', 'baseline', 'daytrade', 'evolved', 'regime-adaptive'];
-const STRATEGY_NAMES = {
-  momentum: '모멘텀(추세 추종)', pullback: '눌림목(과열 회피)', breakout: '강한 돌파',
-  reversal: '역추세(저가 반등)', scalp: '초단타(잦은 매매)', selective: '신중한 선별(엄격)',
-  wideswing: '광폭 스윙(길게 보유)', baseline: '기준선(대조군)', daytrade: '데이트레이딩(당일 청산)',
-  evolved: '진화형(자동탐색)', 'regime-adaptive': '시장적응형(구간별 자동전환)'
-};
-// 매도 종류: 손절 / 익절 / 장마감 청산(단타 전략이 장 끝나기 전에 전부 파는 것)
-const isSellSide = (side) => side === 'STOP_LOSS' || side === 'TAKE_PROFIT' || side === 'DAY_CLOSE';
-const WEIGHT_BASED_IDS = ['evolved', 'regime-adaptive']; // 가중치 기반 전략 — 리스크 수동편집 대상에서 제외
-const OWN_SETTINGS_IDS = ['daytrade']; // 자기 전용 설정 화면이 있는 전략 — 수동편집 대상에서 제외(설정이 한 곳에서만 바뀌도록)
 
 const DEFAULT_CONFIG = {
   enabled: false,
@@ -126,12 +121,14 @@ async function handleConfig(req, res) {
     }
     body = body || {};
 
-    const risk = Object.assign({}, DEFAULT_CONFIG.risk, body.risk || {});
-    const strategiesIn = body.strategies || {};
-    // 데이트레이딩 설정은 따로 저장하는 화면(action=daytrade-config)이 있어서, 이 "설정 저장" 버튼이 덮어쓰지 않도록 기존 값을 그대로 이어받습니다.
-    const prev = await kvGetJson(CONFIG_KEY, null);
+    // 데이트레이딩 설정·전략 켜기/끄기·숨김은 "내 전략" 카드에서 따로 바로 저장돼서, 이 "설정 저장" 버튼이 덮어쓰지 않도록
+    // 요청에 안 들어 있으면 기존 값을 그대로 이어받습니다. momentum 손절/익절(risk)도 이제 카드에서 바꾸므로 같은 방식이에요.
+    const prev = (await kvGetJson(CONFIG_KEY, null)) || {};
+    const risk = Object.assign({}, DEFAULT_CONFIG.risk, prev.risk || {}, body.risk || {});
+    const strategiesIn = body.strategies || prev.strategies || {};
     const next = {
-      daytrade: normalizeDaytrade(prev && prev.daytrade),
+      daytrade: normalizeDaytrade(prev.daytrade),
+      hidden: Array.isArray(prev.hidden) ? prev.hidden : [],
       enabled: !!body.enabled,
       mode: 'dryrun', // 실거래 전환은 모의투자 검증 후 서버 코드에서 명시적으로만 바꿉니다.
       symbols: Array.isArray(body.symbols) ? body.symbols.slice(0, 50) : [],
@@ -206,6 +203,158 @@ async function handleCostConfig(req, res) {
   next.updatedAt = Date.now();
   await kvSetJson(COST_CONFIG_KEY, next);
   res.status(200).json({ ok: true, costs: next });
+}
+
+function readBody(req) {
+  let body = req.body;
+  if (typeof body === 'string') {
+    try { body = JSON.parse(body); } catch (e) { body = {}; }
+  }
+  return body || {};
+}
+
+/* ==================== action=strategies ("내 전략" 카드 목록) ====================
+   카드마다 필요한 것: 이름, 종류(일반/단타/가중치/커스텀), 켜짐·숨김 여부, 지금 실제로 적용 중인 손절·익절·비중·한도.
+   "지금 적용 중인 값" = 기본값(_strategies.js) 위에 수동 수정/AI 자동조정 값(오버라이드)을 덮어쓴 것 — 매매 엔진과 같은 계산이에요. */
+async function handleStrategies(req, res) {
+  try {
+    const [cfgRaw, overrides, customList] = await Promise.all([
+      kvGetJson(CONFIG_KEY, null), kvGetJson(OVERRIDES_KEY, {}), kvGetJson(CUSTOM_KEY, [])
+    ]);
+    const cfg = cfgRaw || DEFAULT_CONFIG;
+    const enabledMap = cfg.strategies || {};
+    const hidden = Array.isArray(cfg.hidden) ? cfg.hidden : [];
+    const list = STRATEGY_IDS.map((id) => {
+      let kind = 'builtin', risk = null, daytrade = null;
+      if (WEIGHT_BASED_IDS.includes(id)) kind = 'weight';
+      else if (id === 'daytrade') {
+        kind = 'daytrade';
+        daytrade = normalizeDaytrade(cfg.daytrade);
+        risk = { positionPct: daytrade.positionPct, stopLossPct: daytrade.stopLossPct, takeProfitPct: daytrade.takeProfitPct, maxTradesPerDay: daytrade.maxBuysPerDay };
+      } else {
+        const base = id === 'momentum' ? Object.assign({}, BASE_RISK.momentum, cfg.risk || {}) : BASE_RISK[id];
+        risk = clipRisk(Object.assign({}, base, overrides[id] || {}), base);
+      }
+      return { id, name: STRATEGY_NAMES[id], kind, enabled: enabledMap[id] !== false, hidden: hidden.includes(id), risk, daytrade };
+    });
+    customList.forEach((c) => list.push({
+      id: c.id, name: c.name, kind: 'custom', enabled: c.enabled !== false, hidden: false, risk: null, createdAt: c.createdAt || null
+    }));
+    res.status(200).json({ strategies: list, daytradeDefaults: DEFAULT_DAYTRADE });
+  } catch (e) {
+    console.error('auto-trade-status.js(strategies) error:', e);
+    res.status(500).json({ error: '서버 오류가 발생했습니다.' });
+  }
+}
+
+/* ==================== action=strategy-toggle (켜기/끄기/숨기기 즉시 저장) ====================
+   body: { strategyId, enabled?: boolean, hidden?: boolean }
+   숨기면 자동으로 꺼져요(안 보이는 전략이 몰래 매매하면 안 되니까). 커스텀 전략은 커스텀 목록의 켜짐 여부를 바꿉니다. */
+async function handleStrategyToggle(req, res) {
+  if (req.method !== 'POST') { res.status(405).json({ error: 'POST만 지원합니다.' }); return; }
+  const uid = await requireUid(req, res);
+  if (!uid) return;
+  const body = readBody(req);
+  const id = String(body.strategyId || '');
+  try {
+    if (id.startsWith('custom-')) {
+      const list = await kvGetJson(CUSTOM_KEY, []);
+      const item = list.find((s) => s.id === id);
+      if (!item) { res.status(404).json({ error: '해당 전략을 찾을 수 없습니다.' }); return; }
+      if (typeof body.enabled === 'boolean') item.enabled = body.enabled;
+      await kvSetJson(CUSTOM_KEY, list);
+      res.status(200).json({ ok: true });
+      return;
+    }
+    if (!STRATEGY_IDS.includes(id)) { res.status(400).json({ error: '알 수 없는 전략입니다.' }); return; }
+    const cfg = (await kvGetJson(CONFIG_KEY, null)) || Object.assign({}, DEFAULT_CONFIG);
+    cfg.strategies = Object.assign({}, DEFAULT_CONFIG.strategies, cfg.strategies || {});
+    let hidden = Array.isArray(cfg.hidden) ? cfg.hidden.slice() : [];
+    if (typeof body.hidden === 'boolean') {
+      hidden = hidden.filter((h) => h !== id);
+      if (body.hidden) { hidden.push(id); cfg.strategies[id] = false; }
+    }
+    if (typeof body.enabled === 'boolean') cfg.strategies[id] = body.enabled;
+    cfg.hidden = hidden;
+    cfg.updatedAt = Date.now();
+    await kvSetJson(CONFIG_KEY, cfg);
+    res.status(200).json({ ok: true, enabled: cfg.strategies[id] !== false, hidden: hidden.includes(id) });
+  } catch (e) {
+    console.error('auto-trade-status.js(strategy-toggle) error:', e);
+    res.status(500).json({ error: '서버 오류가 발생했습니다.' });
+  }
+}
+
+/* ==================== action=reset-account (가상계좌 초기화) ====================
+   body: { strategyId } — 그 전략의 국내·해외 가상계좌를 처음 상태로 되돌립니다(현금=원금, 보유종목 없음).
+   설정은 그대로 두고 "새 출발"만 하는 기능이라, 설정을 크게 바꾼 뒤 공정하게 다시 비교하고 싶을 때 써요.
+   지난 매매 기록과 손익 캘린더는 지우지 않아요(그날그날 있었던 일이니까). "전략 변경 이력"에 기록을 남깁니다. */
+async function handleResetAccount(req, res) {
+  if (req.method !== 'POST') { res.status(405).json({ error: 'POST만 지원합니다.' }); return; }
+  const uid = await requireUid(req, res);
+  if (!uid) return;
+  const id = String(readBody(req).strategyId || '');
+  try {
+    const customList = await kvGetJson(CUSTOM_KEY, []);
+    const custom = customList.find((c) => c.id === id);
+    if (!STRATEGY_IDS.includes(id) && !custom) { res.status(400).json({ error: '알 수 없는 전략입니다.' }); return; }
+    const kr = keysFor(id, 'KR'), us = keysFor(id, 'US');
+    await Promise.all([kr.positionsKey, kr.cashKey, us.positionsKey, us.cashKey].map((k) => kvCommand(['DEL', k])));
+
+    const name = custom ? custom.name : STRATEGY_NAMES[id];
+    const changes = await kvGetJson(CHANGES_KEY, []);
+    changes.unshift({
+      id: Date.now() + '-reset-' + id,
+      ts: Date.now(), date: todayKST(),
+      strategyId: id, strategyName: name,
+      source: 'manual',
+      diagnosis: '사용자가 이 전략의 가상계좌를 처음 상태로 초기화했습니다. 전략 설정은 그대로예요.',
+      statsAtChange: null,
+      beforeDescription: '그동안 쌓인 가상계좌(현금·보유종목)',
+      afterDescription: `국내 ${kr.startingCash.toLocaleString()}원 · 해외 ${us.startingCash.toLocaleString()}달러, 보유종목 없음`
+    });
+    if (changes.length > MAX_CHANGES) changes.length = MAX_CHANGES;
+    await kvSetJson(CHANGES_KEY, changes);
+    res.status(200).json({ ok: true });
+  } catch (e) {
+    console.error('auto-trade-status.js(reset-account) error:', e);
+    res.status(500).json({ error: '서버 오류가 발생했습니다.' });
+  }
+}
+
+/* ==================== action=calendar / calendar-day (손익 캘린더) ====================
+   _ledger.js의 날짜별 장부를 읽습니다. 장부가 아직 없으면(이 기능이 생기기 전) 남아 있는 매매 기록으로 한 번 채워요. */
+async function strategyNameMap() {
+  const names = Object.assign({}, STRATEGY_NAMES);
+  (await kvGetJson(CUSTOM_KEY, [])).forEach((c) => { names[c.id] = c.name; });
+  return names;
+}
+
+async function handleCalendar(req, res) {
+  const month = String(req.query.month || todayKST().slice(0, 7));
+  if (!/^\d{4}-\d{2}$/.test(month)) { res.status(400).json({ error: 'month는 YYYY-MM 형식이어야 합니다.' }); return; }
+  try {
+    await ensureBackfilled(await kvGetJson(LOG_KEY, []));
+    const [days, names] = await Promise.all([kvGetJson(DAILY_KEY_PREFIX + month, {}), strategyNameMap()]);
+    res.status(200).json({ month, today: todayKST(), days, names });
+  } catch (e) {
+    console.error('auto-trade-status.js(calendar) error:', e);
+    res.status(500).json({ error: '서버 오류가 발생했습니다.' });
+  }
+}
+
+async function handleCalendarDay(req, res) {
+  const date = String(req.query.date || '');
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) { res.status(400).json({ error: 'date는 YYYY-MM-DD 형식이어야 합니다.' }); return; }
+  try {
+    const [trades, month, names] = await Promise.all([
+      kvGetJson(TRADES_KEY_PREFIX + date, []), kvGetJson(DAILY_KEY_PREFIX + date.slice(0, 7), {}), strategyNameMap()
+    ]);
+    res.status(200).json({ date, summary: month[date] || null, trades, names });
+  } catch (e) {
+    console.error('auto-trade-status.js(calendar-day) error:', e);
+    res.status(500).json({ error: '서버 오류가 발생했습니다.' });
+  }
 }
 
 /* ==================== action=daytrade-config (데이트레이딩 설정) ====================
@@ -411,17 +560,6 @@ async function handleManualEdit(req, res) {
 
 /* ==================== action=log ==================== */
 
-function keysFor(strategyId, marketKey) {
-  if (strategyId === 'momentum') {
-    return marketKey === 'KR'
-      ? { positionsKey: 'autotrade:positions', cashKey: 'autotrade:cash', startingCash: STARTING_CASH_KR }
-      : { positionsKey: 'autotrade:positions:usd', cashKey: 'autotrade:cash:usd', startingCash: STARTING_CASH_US };
-  }
-  return marketKey === 'KR'
-    ? { positionsKey: `autotrade:strategy:${strategyId}:positions:kr`, cashKey: `autotrade:strategy:${strategyId}:cash:kr`, startingCash: STARTING_CASH_KR }
-    : { positionsKey: `autotrade:strategy:${strategyId}:positions:us`, cashKey: `autotrade:strategy:${strategyId}:cash:us`, startingCash: STARTING_CASH_US };
-}
-
 async function loadAccount(strategyId, marketKey) {
   const keys = keysFor(strategyId, marketKey);
   const [positions, cash] = await Promise.all([
@@ -621,5 +759,10 @@ export default async function handler(req, res) {
   if (action === 'manual-edit') return handleManualEdit(req, res);
   if (action === 'cost-config') return handleCostConfig(req, res);
   if (action === 'daytrade-config') return handleDaytradeConfig(req, res);
+  if (action === 'strategies') return handleStrategies(req, res);
+  if (action === 'strategy-toggle') return handleStrategyToggle(req, res);
+  if (action === 'reset-account') return handleResetAccount(req, res);
+  if (action === 'calendar') return handleCalendar(req, res);
+  if (action === 'calendar-day') return handleCalendarDay(req, res);
   return handleConfig(req, res);
 }

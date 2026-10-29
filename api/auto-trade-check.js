@@ -21,14 +21,14 @@ import { kvGetJson, kvSetJson, kvReady } from './_kv.js';
 import { fetchSymbolHistory, annotateWithFactors, scoreForStrategy, classifyRegimeByDate } from './_backtest-core.js';
 import { loadCosts, planBuy, planSell, positionCostBasis, fetchUsdKrw, REALIZED_KEY_PREFIX } from './_costs.js';
 import { normalizeDaytrade, hhmmToMin } from './_daytrade.js';
+import { BASE_RISK, keysFor, STARTING_CASH_US } from './_strategies.js';
+import { isSellSide, recordEntries, ensureBackfilled } from './_ledger.js';
 
 export const config = { maxDuration: 30 };
 
 const CONFIG_KEY = 'autotrade:config';
 const LOG_KEY = 'autotrade:log';
 const MAX_LOG = 400;
-const STARTING_CASH_KR = 10_000_000; // 가상 원화 자금
-const STARTING_CASH_US = 7_000; // 가상 달러 자금
 
 // ---- 전략 자동 조정(설정한 주기마다, "전략 변경 이력" 탭에서 보이는 기록) ----
 const OVERRIDES_KEY = 'autotrade:strategy-overrides'; // 전략별로 자동 조정된 손절/익절/비중/매매한도
@@ -96,62 +96,62 @@ function isAiCand(cand) {
 
 // 전략별 정의 — 매수 트리거(shouldBuy)와 리스크 규칙(risk)이 서로 다릅니다.
 // momentum은 사용자가 설정 화면에서 조절하는 cfg.risk를 그대로 쓰고(기존 동작 유지),
-// 나머지는 "경쟁 비교"가 목적이라 비교 기준이 흔들리지 않도록 고정값을 씁니다.
+// 나머지는 "경쟁 비교"가 목적이라 비교 기준이 흔들리지 않도록 고정값(_strategies.js의 BASE_RISK)을 씁니다.
 // baseline(기준선)은 조건 없이 후보를 그대로 사는 전략으로, 다른 전략들이 "그냥 아무거나 사는 것"보다
 // 실제로 나은지를 판단하는 비교 기준(대조군) 역할을 합니다.
 const STRATEGY_DEFS = [
   {
     id: 'momentum',
     name: '모멘텀(추세 추종)',
-    getRisk: (cfg) => cfg.risk || {},
+    getRisk: (cfg) => Object.assign({}, BASE_RISK.momentum, cfg.risk || {}),
     shouldBuy: (cand, q) => q.changePct !== null && q.changePct >= (isAiCand(cand) ? 1 : 3)
   },
   {
     id: 'pullback',
     name: '눌림목(과열 회피)',
-    getRisk: () => ({ positionPct: 5, stopLossPct: 4, takeProfitPct: 8, maxTradesPerDay: 3 }),
+    getRisk: () => BASE_RISK.pullback,
     // 이미 많이 오른 급등주보다, 완만하게 움직이기 시작한(0~2%) 종목을 선호합니다.
     shouldBuy: (cand, q) => q.changePct !== null && q.changePct > 0 && q.changePct <= 2
   },
   {
     id: 'breakout',
     name: '강한 돌파',
-    getRisk: () => ({ positionPct: 5, stopLossPct: 7, takeProfitPct: 15, maxTradesPerDay: 2 }),
+    getRisk: () => BASE_RISK.breakout,
     // 더 강한 상승 모멘텀만 선택하고, 손절/익절 폭도 더 크게 잡아 추세를 오래 태웁니다.
     shouldBuy: (cand, q) => q.changePct !== null && q.changePct >= (isAiCand(cand) ? 4 : 6)
   },
   {
     id: 'reversal',
     name: '역추세(저가 반등)',
-    getRisk: () => ({ positionPct: 4, stopLossPct: 3, takeProfitPct: 6, maxTradesPerDay: 3 }),
+    getRisk: () => BASE_RISK.reversal,
     // 최근 하락폭이 있는(-2%~-6%) 종목의 단기 반등을 노립니다. 실패 시 빨리 손절하도록 폭을 좁게 잡습니다.
     shouldBuy: (cand, q) => q.changePct !== null && q.changePct <= -2 && q.changePct >= -6
   },
   {
     id: 'scalp',
     name: '초단타(잦은 매매)',
-    getRisk: () => ({ positionPct: 3, stopLossPct: 2, takeProfitPct: 3, maxTradesPerDay: 8 }),
+    getRisk: () => BASE_RISK.scalp,
     // 문턱을 낮춰 자주 매매하고, 손절/익절 폭도 아주 좁게 잡아 빠르게 치고 빠집니다.
     shouldBuy: (cand, q) => q.changePct !== null && q.changePct >= (isAiCand(cand) ? 0.5 : 1.5)
   },
   {
     id: 'selective',
     name: '신중한 선별(엄격)',
-    getRisk: () => ({ positionPct: 8, stopLossPct: 5, takeProfitPct: 12, maxTradesPerDay: 2 }),
+    getRisk: () => BASE_RISK.selective,
     // 아주 강한 조건에서만 매매하되, 한 번 살 때 비중을 크게 실어(8%) 소수 정예로 갑니다.
     shouldBuy: (cand, q) => q.changePct !== null && q.changePct >= (isAiCand(cand) ? 2.5 : 4)
   },
   {
     id: 'wideswing',
     name: '광폭 스윙(길게 보유)',
-    getRisk: () => ({ positionPct: 5, stopLossPct: 10, takeProfitPct: 25, maxTradesPerDay: 2 }),
+    getRisk: () => BASE_RISK.wideswing,
     // 모멘텀과 매수 조건은 비슷하지만, 손절/익절 폭을 훨씬 넓게 잡아 추세를 오래 들고 갑니다.
     shouldBuy: (cand, q) => q.changePct !== null && q.changePct >= (isAiCand(cand) ? 1.5 : 3)
   },
   {
     id: 'baseline',
     name: '기준선(대조군, 조건 없음)',
-    getRisk: () => ({ positionPct: 5, stopLossPct: 5, takeProfitPct: 10, maxTradesPerDay: 3 }),
+    getRisk: () => BASE_RISK.baseline,
     // 등락률 조건 없이 후보에 오르면 그냥 삽니다 — 다른 전략들이 "무조건 사는 것"보다 실제로 나은지 비교하는 대조군.
     shouldBuy: () => true
   },
@@ -181,18 +181,6 @@ const STRATEGY_DEFS = [
   }
 ];
 
-// momentum 전략은 기존에 쌓인 시뮬레이션 데이터를 그대로 이어가도록 기존 KV 키를 그대로 씁니다.
-// 나머지 전략은 새 키 네임스페이스를 씁니다.
-function keysFor(strategyId, marketKey) {
-  if (strategyId === 'momentum') {
-    return marketKey === 'KR'
-      ? { positionsKey: 'autotrade:positions', cashKey: 'autotrade:cash', startingCash: STARTING_CASH_KR }
-      : { positionsKey: 'autotrade:positions:usd', cashKey: 'autotrade:cash:usd', startingCash: STARTING_CASH_US };
-  }
-  return marketKey === 'KR'
-    ? { positionsKey: `autotrade:strategy:${strategyId}:positions:kr`, cashKey: `autotrade:strategy:${strategyId}:cash:kr`, startingCash: STARTING_CASH_KR }
-    : { positionsKey: `autotrade:strategy:${strategyId}:positions:us`, cashKey: `autotrade:strategy:${strategyId}:cash:us`, startingCash: STARTING_CASH_US };
-}
 
 function todayKST() {
   // 서버 시간이 UTC라 KST(+9)로 보정해서 "날짜"를 계산합니다.
@@ -224,10 +212,6 @@ function marketClock(marketKey) {
   const minutes = Number(parts.hour) * 60 + Number(parts.minute);
   const weekday = parts.weekday !== 'Sat' && parts.weekday !== 'Sun';
   return { open: weekday && minutes >= US_OPEN_MIN && minutes < US_CLOSE_MIN, minutes };
-}
-
-function isSellSide(side) {
-  return side === 'STOP_LOSS' || side === 'TAKE_PROFIT' || side === 'DAY_CLOSE';
 }
 
 async function fetchDomesticQuote(token, symbol) {
@@ -775,6 +759,15 @@ export default async function handler(req, res) {
       for (const entry of allActions) log.unshift(entry);
       if (log.length > MAX_LOG) log.length = MAX_LOG;
       await kvSetJson(LOG_KEY, log);
+    }
+
+    // 손익 캘린더용 날짜별 장부(_ledger.js) — 위 매매 기록은 400건만 남지만, 이 장부는 지워지지 않아요.
+    // 장부가 처음 만들어지는 순간엔 방금 매매까지 포함된 log 전체로 채우니, 그때는 따로 더하지 않습니다(두 번 더해짐 방지).
+    try {
+      const backfilled = await ensureBackfilled(log);
+      if (!backfilled && allActions.length) await recordEntries(allActions);
+    } catch (e) {
+      console.error('auto-trade-check.js(daily ledger) error:', e);
     }
 
     // 연간 실현손익 장부 — 해외주식 양도세(연 단위 합산)를 계산하려면 1년치 합계가 필요한데,

@@ -310,6 +310,84 @@
     background:none; border:none; color:var(--muted-2); font-size:11px; cursor:pointer;
     padding:2px 0; text-decoration:underline; display:block; margin-top:2px;
   }
+
+  /* ---- 쉬운 설명 + "자세히 보기" (접었다 펴는 긴 설명) ---- */
+  .easy{ color:var(--muted); font-size:13px; line-height:1.6; margin:0 0 8px; }
+  details.more{ margin:0 0 12px; font-size:12.5px; color:var(--muted); line-height:1.7; }
+  details.more > summary{ cursor:pointer; color:var(--brand); font-size:12.5px; list-style:none; display:inline-block; user-select:none; }
+  details.more > summary::-webkit-details-marker{ display:none; }
+  details.more > summary::after{ content:' ▾'; }
+  details.more[open] > summary::after{ content:' ▴'; }
+  details.more .more-body{ background:var(--panel-2); border-radius:var(--radius-sm); padding:12px 14px; margin-top:8px; }
+  details.more .more-body p{ margin:0 0 8px; }
+  details.more .more-body p:last-child{ margin-bottom:0; }
+  /* 어려운 말: 점선 밑줄 — 누르면 뜻이 말풍선으로 떠요(전략 설명 팝업과 같은 말풍선을 씀) */
+  .term{ border-bottom:1px dotted var(--muted-2); cursor:help; }
+
+  /* ---- 내 전략 카드 ---- */
+  .st-cards{ display:grid; grid-template-columns:repeat(auto-fill,minmax(300px,1fr)); gap:12px; }
+  .st-card{ border:1px solid var(--line); border-radius:var(--radius-sm); padding:14px 16px; background:var(--panel); display:flex; flex-direction:column; gap:8px; }
+  .st-card.off{ background:var(--panel-2); }
+  .st-card.off .st-name, .st-card.off .st-meta{ color:var(--muted-2); }
+  .st-card.editing{ grid-column:1/-1; }
+  .st-head{ display:flex; justify-content:space-between; align-items:flex-start; gap:10px; }
+  .st-name{ font-weight:700; font-size:14.5px; }
+  .st-tag{ display:inline-block; font-size:10.5px; font-weight:600; color:var(--brand); background:var(--brand-dim); border-radius:999px; padding:1px 7px; margin-left:4px; vertical-align:middle; }
+  .st-easy{ font-size:12.5px; color:var(--muted); line-height:1.5; margin-top:3px; }
+  .st-meta{ font-size:12px; color:var(--ink); display:flex; flex-wrap:wrap; gap:4px 12px; }
+  .st-meta b{ font-weight:600; }
+  .st-actions{ display:flex; flex-wrap:wrap; gap:6px; margin-top:2px; }
+  .st-actions button{ border:1px solid var(--line); background:var(--panel); border-radius:8px; padding:5px 10px; font-size:12px; cursor:pointer; color:var(--ink); font-family:inherit; }
+  .st-actions button:hover{ background:var(--panel-2); }
+  .st-actions button.danger{ color:var(--up); }
+  .st-actions button.on{ background:var(--brand-dim); border-color:var(--brand-dim); color:var(--brand); }
+  .st-panel{ border-top:1px dashed var(--line); padding-top:10px; font-size:12.5px; line-height:1.7; color:var(--muted); }
+  .st-panel:empty{ display:none; }
+  .st-panel .row{ display:grid; grid-template-columns:repeat(auto-fit,minmax(130px,1fr)); gap:10px; align-items:end; }
+  .st-msg{ font-size:12px; margin-left:8px; }
+  .switch{ position:relative; display:inline-block; width:42px; height:24px; flex-shrink:0; }
+  .switch input{ opacity:0; width:0; height:0; }
+  .switch span{ position:absolute; inset:0; background:var(--line); border-radius:999px; cursor:pointer; transition:background .15s; }
+  .switch span::before{ content:''; position:absolute; width:18px; height:18px; left:3px; top:3px; background:#fff; border-radius:50%; transition:transform .15s; box-shadow:0 1px 2px rgba(0,0,0,0.2); }
+  .switch input:checked + span{ background:var(--brand); }
+  .switch input:checked + span::before{ transform:translateX(18px); }
+  .switch input:focus-visible + span{ outline:2px solid var(--brand); outline-offset:2px; }
+
+  /* ---- 손익 캘린더(월 달력) ---- */
+  .cal-nav{ display:flex; align-items:center; justify-content:space-between; gap:10px; margin-bottom:12px; flex-wrap:wrap; }
+  .cal-nav .cal-title{ font-size:17px; font-weight:700; }
+  .cal-nav button{ border:1px solid var(--line); background:var(--panel); border-radius:8px; padding:6px 12px; cursor:pointer; font-size:13px; font-family:inherit; }
+  .cal-nav button:disabled{ opacity:.4; cursor:default; }
+  .cal-sum{ display:grid; grid-template-columns:repeat(auto-fit,minmax(120px,1fr)); gap:8px; margin-bottom:12px; }
+  .cal-sum div{ background:var(--panel-2); border-radius:var(--radius-sm); padding:8px 12px; font-size:12px; color:var(--muted); }
+  .cal-sum b{ display:block; font-size:15px; color:var(--ink); margin-top:2px; }
+  .cal-grid{ display:grid; grid-template-columns:repeat(7, minmax(0,1fr)); gap:4px; }
+  .cal-dow{ text-align:center; font-size:12px; color:var(--muted-2); padding:4px 0; font-weight:600; }
+  .cal-dow.sun{ color:var(--up); } .cal-dow.sat{ color:var(--down); }
+  .cal-cell{ min-height:74px; border:1px solid var(--line); border-radius:8px; padding:5px 6px; background:var(--panel); cursor:pointer; display:flex; flex-direction:column; gap:2px; text-align:left; font-family:inherit; color:var(--ink); }
+  .cal-cell:hover{ border-color:var(--muted-2); }
+  .cal-cell.blank{ background:transparent; border-color:transparent; cursor:default; }
+  .cal-cell.weekend{ background:var(--panel-2); }
+  .cal-cell.today{ border:2px solid var(--brand); }
+  .cal-cell.selected{ box-shadow:0 0 0 2px var(--ink) inset; }
+  .cal-cell.gain{ background:rgba(240,68,82,var(--a,0.12)); }
+  .cal-cell.loss{ background:rgba(49,130,246,var(--a,0.12)); }
+  .cal-d{ font-size:12px; font-weight:600; }
+  .cal-cell.weekend .cal-d{ color:var(--muted-2); }
+  .cal-pnl{ font-size:12px; font-weight:700; white-space:nowrap; overflow:hidden; text-overflow:clip; }
+  .cal-cnt{ font-size:10.5px; color:var(--muted); }
+  .cal-pnl .short{ display:none; }
+  @media (max-width:640px){
+    .cal-cell{ min-height:56px; padding:4px; }
+    .cal-pnl .long{ display:none; } .cal-pnl .short{ display:inline; }
+    .cal-pnl{ font-size:11px; } .cal-cnt{ display:none; }
+  }
+  .cal-detail table{ width:100%; }
+  /* 휴대폰에서 표 칸이 찌그러지지 않게: 표는 최소 너비를 두고, 좁으면 옆으로 밀어서 봐요 */
+  .cal-scroll{ overflow-x:auto; }
+  .cal-scroll table{ min-width:460px; }
+  .cal-scroll.wide table{ min-width:720px; }
+  .cal-detail th, .cal-detail td{ padding:7px 8px; font-size:12.5px; }
 </style>
 </head>
 <body>
@@ -533,16 +611,23 @@
     </div>
 
     <div class="banner">
-      <b>지금은 내부 시뮬레이션 모드예요</b><br>
-      한국투자증권 모의투자 API 키가 아직 연결되지 않아서, 실제 모의투자 주문 대신 <b>가상 자금(국내 1천만원 / 해외 7,000달러, 계좌 별도)</b>으로 매매 신호·리스크 규칙을 먼저 검증하는 단계예요. 관심종목에 등록한 해외 주식도 함께 감시하며(AI 추천 종목은 현재 국내 종목만 지원), 24시간 체크돼요.
-      모의투자 키가 준비되면 같은 로직으로 실제 모의투자 계좌에 주문이 들어가도록 바꿔드릴게요.
+      <b>진짜 돈이 아니라 연습용 가짜 돈으로 사고팔아요</b><br>
+      전략마다 가짜 돈(국내 1,000만원, 해외 7,000달러)을 따로 주고, 누가 더 잘 버는지 겨루게 해요. 실제 주문은 들어가지 않아요.
+      <details class="more" style="margin:8px 0 0;"><summary>자세히 보기</summary><div class="more-body">
+        <p>지금은 한국투자증권의 "모의투자" 연결이 아직 없어서, 이 사이트 안에서 가짜 계좌를 직접 만들어 계산해요. 주식을 "샀다"고 기록하고, 가격이 오르내리면 그만큼 계좌 금액이 바뀌는 식이에요.</p>
+        <p>관심종목에 넣은 주식과(켜두면) AI가 골라준 주식을 지켜봐요. AI 추천은 아직 국내 주식만 돼요.</p>
+        <p>장이 열려 있는 시간(국내 평일 09:00~15:20, 미국 정규장)에만 사고팔아요. 장이 닫힌 밤에는 실제로 살 수 없는 가격이라 쉬어요.</p>
+        <p>모의투자 연결이 준비되면 같은 규칙으로 모의투자 계좌에 주문이 들어가게 바꿀 수 있어요.</p>
+      </div></details>
     </div>
 
     <div class="panel pad" style="margin-bottom:20px;">
-      <h3 style="margin-top:0; font-size:15px;">설정</h3>
-      <p style="color:var(--muted); font-size:12.5px; line-height:1.6; margin-bottom:14px;">
-        감시 대상은 <b style="color:var(--ink);">관심종목 전체</b> + (켜두면) <b style="color:var(--ink);">AI가 추천하는 종목</b>이에요. 외부 스케줄러가 주기적으로 이 화면의 설정값으로 자동 실행해요.
-      </p>
+      <h3 style="margin-top:0; font-size:15px;">기본 설정</h3>
+      <p class="easy">자동매매를 켜고 끄는 곳이에요. 전략별 설정은 아래 "내 전략"에서 바꿔요.</p>
+      <details class="more"><summary>자세히 보기</summary><div class="more-body">
+        <p>지켜보는 주식은 <b style="color:var(--ink);">관심종목 전체</b>와, 켜두면 <b style="color:var(--ink);">AI가 추천한 주식</b>이에요.</p>
+        <p>외부 알람 서비스(cron-job.org)가 몇 분마다 이 사이트를 깨워서, 여기 설정대로 사고팔지 판단하게 해요. 단타 전략을 쓰려면 5분마다 깨우도록 설정해 두는 게 좋아요.</p>
+      </div></details>
       <label style="display:flex; align-items:center; gap:8px; margin-bottom:14px; font-size:13px;">
         <input type="checkbox" id="atEnabled" style="width:16px; height:16px;">
         자동매매 실행 켜기
@@ -551,103 +636,89 @@
         <input type="checkbox" id="atUseAi" style="width:16px; height:16px;">
         AI 추천 종목도 감시 대상에 포함
       </label>
-      <div class="stat-grid" style="margin-bottom:16px;">
-        <div class="stat">
-          <div class="k">종목당 투입 비중(%) <span style="font-weight:400; color:var(--muted-2);">— 모멘텀 전략</span></div>
-          <input type="number" id="atPositionPct" class="mono" style="width:100%; margin-top:4px;" min="1" max="50">
-        </div>
-        <div class="stat">
-          <div class="k">손절 기준(%) <span style="font-weight:400; color:var(--muted-2);">— 모멘텀 전략</span></div>
-          <input type="number" id="atStopLoss" class="mono" style="width:100%; margin-top:4px;" min="1" max="50">
-        </div>
-        <div class="stat">
-          <div class="k">익절 기준(%) <span style="font-weight:400; color:var(--muted-2);">— 모멘텀 전략</span></div>
-          <input type="number" id="atTakeProfit" class="mono" style="width:100%; margin-top:4px;" min="1" max="200">
-        </div>
-        <div class="stat">
-          <div class="k">하루 최대 매매 횟수 <span style="font-weight:400; color:var(--muted-2);">— 모멘텀 전략</span></div>
-          <input type="number" id="atMaxTrades" class="mono" style="width:100%; margin-top:4px;" min="1" max="50">
-        </div>
-      </div>
       <div style="border-top:1px solid var(--line); padding-top:14px; margin-bottom:16px;">
         <div style="font-size:13px; font-weight:600; margin-bottom:4px;">자동 점검 주기</div>
-        <p style="color:var(--muted-2); font-size:12px; margin:0 0 10px;">외부 스케줄러(cron-job.org 등)는 자주 호출돼도 되고, 실제로 "점검/조정"을 실행할지는 아래 주기로 우리 쪽에서 걸러요. 스케줄러 쪽 설정을 안 바꿔도 여기서 주기를 바로 바꿀 수 있어요.</p>
+        <p class="easy" style="font-size:12px;">AI가 전략을 스스로 고치거나, 더 좋은 전략을 찾아보는 일을 몇 시간마다 할지 정해요.</p>
+        <details class="more"><summary>자세히 보기</summary><div class="more-body">
+          <p><b>전략 자동조정</b>: 최근 2주 동안 마무리된 거래가 5번 이상인 전략을 AI가 살펴보고, 성적이 나쁘면 <span class="term" data-term="손절">손절</span>·<span class="term" data-term="익절">익절</span> 기준 같은 숫자를 조금씩 고쳐요. 고친 내용은 "전략 변경 이력" 탭에 남아요.</p>
+          <p><b>진화형 탐색</b>: 전략연구실에서 과거 데이터로 여러 조합을 시험해 보고 더 나은 조합을 찾아요.</p>
+          <p>알람 서비스가 더 자주 깨워도 괜찮아요. 여기 정한 시간이 지나지 않았으면 그냥 넘어가요.</p>
+        </div></details>
         <div class="stat-grid">
           <div class="stat">
-            <div class="k">전략 자동조정 주기(시간) <span style="font-weight:400; color:var(--muted-2);">— 실거래 성과 기반</span></div>
+            <div class="k">전략 자동조정 주기(시간)</div>
             <input type="number" id="atAdjustInterval" class="mono" style="width:100%; margin-top:4px;" min="1" max="168">
           </div>
           <div class="stat">
-            <div class="k">진화형 탐색 실행 주기(시간) <span style="font-weight:400; color:var(--muted-2);">— 전략연구실 자동탐색</span></div>
+            <div class="k">진화형 탐색 주기(시간)</div>
             <input type="number" id="atEvolveInterval" class="mono" style="width:100%; margin-top:4px;" min="1" max="168">
           </div>
         </div>
       </div>
-      <div style="border-top:1px solid var(--line); padding-top:14px; margin-bottom:16px;">
-        <div style="font-size:13px; font-weight:600; margin-bottom:8px;">경쟁시킬 전략 선택</div>
-        <p style="color:var(--muted-2); font-size:12px; margin:0 0 10px;">켜둔 전략들이 각자 독립된 가상계좌로 동시에 매매하면서 수익률을 겨뤄요. momentum을 제외한 나머지는 리스크 규칙이 고정값이에요(비교가 목적이라 임의로 바뀌지 않게).</p>
-        <div id="atStrategyChecks"></div>
-      </div>
       <button class="btn" id="atSave">설정 저장</button>
       <span id="atSaveMsg" style="margin-left:10px; font-size:12.5px; color:var(--muted);"></span>
-      <p style="color:var(--muted-2); font-size:11.5px; margin:12px 0 0;">새 전략을 만들거나 과거 데이터로 실험해보고 싶으면 <b style="color:var(--ink);">전략연구실</b> 탭을 이용하세요.</p>
     </div>
 
     <div class="panel pad" style="margin-bottom:20px;">
-      <h3 style="margin-top:0; font-size:15px;">데이트레이딩 설정</h3>
-      <p style="color:var(--muted-2); font-size:12px; margin:0 0 12px;">"데이트레이딩(당일 청산)" 전략이 언제, 무엇을, 얼마나 살지 정해요(국내 종목만). 저장하면 다음 자동매매 실행부터 적용되고 "전략 변경 이력"에도 남아요. 시간은 국내 장중(09:00~15:15) 안으로 맞춰지고, "매수 시작 ≤ 매수 끝 ≤ 청산 시각" 순서가 되도록 자동으로 정리돼요.</p>
+      <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:10px; flex-wrap:wrap;">
+        <h3 style="margin:0; font-size:15px;">내 전략</h3>
+        <button class="btn ghost" id="atShowHidden" type="button" style="font-size:12px; padding:6px 12px;">숨긴 전략 보기</button>
+      </div>
+      <p class="easy" style="margin-top:6px;">전략마다 가짜 돈을 따로 갖고 겨뤄요. 스위치로 켜고 끄고, 버튼으로 바로 고칠 수 있어요.</p>
+      <details class="more"><summary>자세히 보기</summary><div class="more-body">
+        <p><b>스위치</b>: 누르는 순간 바로 저장돼요. 끄면 그 전략은 새로 사지 않아요(이미 산 주식은 계좌에 그대로 남아요).</p>
+        <p><b>수정</b>: 언제 팔지(<span class="term" data-term="손절">손절</span>·<span class="term" data-term="익절">익절</span>), 한 번에 얼마나 살지(<span class="term" data-term="비중">비중</span>), 하루에 몇 번까지 살지 정해요. 바꾼 내용은 "전략 변경 이력"에 남아요.</p>
+        <p><b>기록 초기화</b>: 설정은 그대로 두고, 가짜 계좌만 처음 돈으로 되돌려요. 설정을 크게 바꾼 뒤 처음부터 다시 비교하고 싶을 때 써요. 지난 매매 기록과 달력은 지워지지 않아요.</p>
+        <p><b>숨기기</b>: 처음부터 들어 있는 전략은 지울 수 없어서, 대신 끄고 목록에서 숨겨요. "숨긴 전략 보기"로 언제든 다시 꺼낼 수 있어요.</p>
+        <p><b>삭제</b>: 내가 전략연구실에서 저장한 "커스텀 전략"만 완전히 지울 수 있어요.</p>
+      </div></details>
+      <div id="atCards" class="st-cards"><div style="color:var(--muted-2); font-size:12.5px;">불러오는 중…</div></div>
+      <p style="color:var(--muted-2); font-size:11.5px; margin:12px 0 0;">새 전략을 만들거나 과거 데이터로 실험해보고 싶으면 <b style="color:var(--ink);">전략연구실</b> 탭을 이용하세요.</p>
+    </div>
+
+    <!-- 데이트레이딩 설정 입력칸 — 평소엔 숨겨두고, "내 전략"에서 데이트레이딩 카드의 [수정]을 누르면 그 카드 안으로 옮겨서 보여줘요. -->
+    <div id="atDtFormHome" style="display:none;"><div id="atDtForm">
+      <p class="easy" style="font-size:12px;">시간은 장중(09:00~15:15) 안으로 맞춰지고, "매수 시작 → 매수 끝 → 청산 시각" 순서가 되게 자동으로 정리돼요.</p>
       <div style="font-size:12px; font-weight:700; color:var(--ink); margin:4px 0 6px;">사는 조건</div>
       <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:10px; align-items:end;">
-        <div><label>시가 대비 최소 상승(%)</label><input type="number" step="0.1" id="atDtMinOpen" class="mono" style="width:100%;"></div>
-        <div><label>시가 대비 최대 상승(%)</label><input type="number" step="0.1" id="atDtMaxOpen" class="mono" style="width:100%;"></div>
-        <div><label>고가에서 최대 하락(%)</label><input type="number" step="0.1" id="atDtOffHigh" class="mono" style="width:100%;"></div>
-        <div><label>전일 대비 최대 상승(%)</label><input type="number" step="0.5" id="atDtMaxChg" class="mono" style="width:100%;"></div>
+        <div><label>시가보다 최소 몇 % 올랐을 때</label><input type="number" step="0.1" id="atDtMinOpen" class="mono" style="width:100%;"></div>
+        <div><label>시가보다 최대 몇 %까지만</label><input type="number" step="0.1" id="atDtMaxOpen" class="mono" style="width:100%;"></div>
+        <div><label>오늘 최고가에서 몇 %까지 밀려도 OK</label><input type="number" step="0.1" id="atDtOffHigh" class="mono" style="width:100%;"></div>
+        <div><label>어제보다 최대 몇 %까지만</label><input type="number" step="0.5" id="atDtMaxChg" class="mono" style="width:100%;"></div>
       </div>
-      <div style="font-size:12px; font-weight:700; color:var(--ink); margin:14px 0 6px;">매수 시간 · 장 마감 전 정리</div>
+      <details class="more" style="margin-top:8px;"><summary>사는 조건 자세히 보기</summary><div class="more-body">
+        <p><span class="term" data-term="시가">시가</span>는 오늘 아침 장이 열릴 때 처음 정해진 가격이에요. "시가보다 1~5% 올랐다"는 건 오늘 하루 동안 힘있게 오르고 있다는 뜻이에요.</p>
+        <p>"오늘 최고가에서 1%까지 밀려도 OK"는, 많이 올랐다가 다시 떨어지는 중인 주식은 피하려는 조건이에요. 아직 최고가 근처에서 버티는 주식만 사요.</p>
+        <p>"어제보다 15%까지만"은 너무 많이 오른 주식을 피하는 조건이에요. 하루에 30%까지 오를 수 있는데(<span class="term" data-term="상한가">상한가</span>), 그 근처는 가격이 너무 크게 출렁여요.</p>
+      </div></details>
+      <div style="font-size:12px; font-weight:700; color:var(--ink); margin:14px 0 6px;">사는 시간 · 장 끝나기 전 정리</div>
       <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:10px; align-items:end;">
-        <div><label>매수 시작</label><input type="time" id="atDtBuyStart" class="mono" style="width:100%;"></div>
-        <div><label>매수 끝</label><input type="time" id="atDtBuyEnd" class="mono" style="width:100%;"></div>
-        <div><label>전량 청산 시각</label><input type="time" id="atDtCloseAt" class="mono" style="width:100%;"></div>
+        <div><label>이 시각부터 사기</label><input type="time" id="atDtBuyStart" class="mono" style="width:100%;"></div>
+        <div><label>이 시각 이후엔 안 사기</label><input type="time" id="atDtBuyEnd" class="mono" style="width:100%;"></div>
+        <div><label>이 시각에 전부 팔기</label><input type="time" id="atDtCloseAt" class="mono" style="width:100%;"></div>
       </div>
-      <div style="font-size:12px; font-weight:700; color:var(--ink); margin:14px 0 6px;">위험 관리</div>
+      <div style="font-size:12px; font-weight:700; color:var(--ink); margin:14px 0 6px;">손해 줄이기</div>
       <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:10px; align-items:end;">
-        <div><label>손절(%)</label><input type="number" step="0.1" id="atDtStop" class="mono" style="width:100%;"></div>
-        <div><label>익절(%)</label><input type="number" step="0.1" id="atDtTake" class="mono" style="width:100%;"></div>
-        <div><label>1회 매수 비중(%)</label><input type="number" step="1" id="atDtPos" class="mono" style="width:100%;"></div>
-        <div><label>하루 손실한도(원금 대비 %)</label><input type="number" step="0.5" id="atDtLossLimit" class="mono" style="width:100%;"></div>
-        <div><label>하루 최대 매수 횟수</label><input type="number" step="1" id="atDtMaxBuys" class="mono" style="width:100%;"></div>
-        <div><label>재매수 대기(분)</label><input type="number" step="5" id="atDtCooldown" class="mono" style="width:100%;"></div>
+        <div><label>몇 % 떨어지면 팔기(손절)</label><input type="number" step="0.1" id="atDtStop" class="mono" style="width:100%;"></div>
+        <div><label>몇 % 오르면 팔기(익절)</label><input type="number" step="0.1" id="atDtTake" class="mono" style="width:100%;"></div>
+        <div><label>한 번에 가진 돈의 몇 %로 사기</label><input type="number" step="1" id="atDtPos" class="mono" style="width:100%;"></div>
+        <div><label>하루에 원금의 몇 % 잃으면 그만</label><input type="number" step="0.5" id="atDtLossLimit" class="mono" style="width:100%;"></div>
+        <div><label>하루에 최대 몇 번 사기</label><input type="number" step="1" id="atDtMaxBuys" class="mono" style="width:100%;"></div>
+        <div><label>판 주식은 몇 분 뒤에 다시 사기</label><input type="number" step="5" id="atDtCooldown" class="mono" style="width:100%;"></div>
       </div>
-      <p style="color:var(--muted-2); font-size:11.5px; margin:10px 0 0;">국내 주식은 한 번 사고팔 때 수수료·세금·슬리피지로 약 0.33%가 빠져요. 익절 폭이 이보다 충분히 커야 남는 게 있어요.</p>
+      <p style="color:var(--muted-2); font-size:11.5px; margin:10px 0 0;">국내 주식은 한 번 사고팔 때 수수료·세금 등으로 약 0.33%가 빠져요. 그래서 "몇 % 오르면 팔기"가 이것보다 충분히 커야 남는 돈이 있어요.</p>
       <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-top:12px;">
         <button class="btn" id="atDtSave">저장</button>
         <button class="btn ghost" id="atDtReset">기본값으로</button>
         <span id="atDtMsg" style="font-size:12.5px; color:var(--muted);"></span>
       </div>
-    </div>
-
-    <div class="panel pad" style="margin-bottom:20px;">
-      <h3 style="margin-top:0; font-size:15px;">내장 전략 위험 파라미터 수동 수정</h3>
-      <p style="color:var(--muted-2); font-size:12px; margin:0 0 12px;">매수 조건(언제 살지)은 바꿀 수 없지만, 손절/익절/비중/일일한도는 전략별로 직접 바꿀 수 있어요. 저장하면 다음 자동매매 실행부터 바로 적용되고 "전략 변경 이력"에도 남아요(진화형 전략은 가중치 기반이라 제외).</p>
-      <div style="display:flex; gap:10px; align-items:flex-end; flex-wrap:wrap; margin-bottom:10px;">
-        <div>
-          <label>전략 선택</label>
-          <select id="atManualStrat" style="min-width:180px;"></select>
-        </div>
-        <div><label>손절(%)</label><input type="number" id="atManualStop" class="mono" style="width:90px;"></div>
-        <div><label>익절(%)</label><input type="number" id="atManualTake" class="mono" style="width:90px;"></div>
-        <div><label>비중(%)</label><input type="number" id="atManualPos" class="mono" style="width:90px;"></div>
-        <div><label>일일한도</label><input type="number" id="atManualMax" class="mono" style="width:90px;"></div>
-        <button class="btn" id="atManualSave">이 전략에 적용</button>
-      </div>
-      <span id="atManualMsg" style="font-size:12.5px; color:var(--muted);"></span>
-    </div>
+    </div></div>
 
     <div class="panel pad" style="margin-bottom:20px;">
       <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:10px; flex-wrap:wrap;">
         <div>
-          <h3 style="margin-top:0; font-size:15px;">매매 비용·세금 설정</h3>
-          <p style="color:var(--muted-2); font-size:12px; margin:0 0 12px;">자동매매와 전략연구실 백테스트가 사고팔 때마다 이 값만큼 비용을 빼서 실제 수익률에 가깝게 계산해요. 증권사나 이벤트에 따라 수수료가 다르니 쓰는 곳에 맞게 바꿔주세요. 저장하면 다음 매매부터 적용돼요(이미 끝난 매매 기록은 그대로).</p>
+          <h3 style="margin-top:0; font-size:15px;">사고팔 때 드는 돈(수수료·세금)</h3>
+          <p class="easy">주식을 사고팔 때마다 증권사와 나라에 내는 돈이에요. 가짜 계좌도 이만큼 빼서 실제와 비슷하게 계산해요.</p>
         </div>
         <span id="atCostBroker" class="mono" style="font-size:11.5px; color:var(--brand); border:1px solid var(--brand-dim); border-radius:999px; padding:2px 10px; white-space:nowrap;"></span>
       </div>
@@ -674,7 +745,15 @@
         <div><label>세율(%, 지방세 포함)</label><input type="number" step="0.1" id="atCostTaxRate" class="mono" style="width:100%;"></div>
         <div><label>기본공제(원)</label><input type="number" step="10000" id="atCostTaxDeduct" class="mono" style="width:100%;"></div>
       </div>
-      <p style="color:var(--muted-2); font-size:11.5px; margin:10px 0 0;">환전 비용은 원화→달러(살 때), 달러→원화(팔 때) 각각 한 번씩 빠져요. 토스증권은 평일 낮 환전이 약 0.05%, 그 외 시간은 약 0.5%예요. 달러를 계속 들고 거래한다면 0으로 두세요. 국내 주식은 대주주가 아니면 양도세가 없어서, 증권거래세만 반영돼요. 슬리피지는 증권사 비용이 아니라 "원하는 가격보다 살짝 불리하게 체결되는 차이"의 추정치예요. 가상계좌는 지금 가격에 바로 체결된다고 가정해서, 매매가 잦을수록 실제보다 좋아 보이는 걸 이 값으로 보정해요.</p>
+      <details class="more" style="margin-top:10px;"><summary>각 항목이 무슨 뜻인지 자세히 보기</summary><div class="more-body">
+        <p><b>수수료</b>: 증권사가 "주문을 대신 넣어준 값"으로 가져가는 돈이에요. 100만원어치를 사면 0.015%인 150원을 내요. 증권사나 이벤트마다 달라서, 쓰는 곳에 맞게 바꿔주세요.</p>
+        <p><b>증권거래세</b>: 국내 주식을 <u>팔 때만</u> 나라에 내는 세금이에요(0.20%). 100만원어치를 팔면 2,000원이에요.</p>
+        <p><b><span class="term" data-term="슬리피지">슬리피지</span></b>: 생각한 가격보다 조금 손해 보고 사지거나 팔리는 차이예요. 1만원에 사려 했는데 10,005원에 사지는 식이죠. 가짜 계좌는 늘 원하는 가격에 바로 사진다고 계산해서, 매매가 많을수록 실제보다 좋아 보여요. 그래서 이만큼 미리 빼요.</p>
+        <p><b>SEC Fee</b>: 미국 주식을 팔 때 미국 금융당국에 내는 아주 작은 수수료예요.</p>
+        <p><b>환전 비용</b>: 원화를 달러로(살 때), 달러를 원화로(팔 때) 바꿀 때마다 빠지는 돈이에요. 토스증권은 평일 낮에 약 0.05%, 그 외 시간엔 약 0.5%예요. 달러를 계속 갖고 거래하면 0으로 두세요.</p>
+        <p><b>해외주식 <span class="term" data-term="양도세">양도세</span></b>: 미국 주식으로 1년 동안 번 돈에서 250만원을 뺀 나머지의 22%를 다음 해 5월에 내요. 국내 주식은 큰손(대주주)이 아니면 이 세금이 없어요.</p>
+        <p>저장하면 다음 매매부터 적용돼요. 이미 끝난 매매 기록은 바뀌지 않아요.</p>
+      </div></details>
       <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-top:12px;">
         <button class="btn" id="atCostSave">저장</button>
         <button class="btn ghost" id="atCostReset">토스증권 기본값으로</button>
@@ -683,20 +762,23 @@
     </div>
 
     <div class="panel pad" style="margin-bottom:20px;">
-      <h3 style="margin-top:0; font-size:15px;">커스텀 전략</h3>
-      <p style="color:var(--muted-2); font-size:12px; margin:0 0 12px;">전략연구실의 "진화형 탐색" 결과를 이름 붙여 저장해둔 전략들이에요(국내 종목만 지원). 켜고 끌 수 있고, 완전히 삭제도 할 수 있어요.</p>
-      <div id="atCustomList"><div style="color:var(--muted-2); font-size:12.5px;">저장된 커스텀 전략이 없어요. 전략연구실 &gt; 진화형 탐색 결과에서 저장해보세요.</div></div>
-    </div>
-
-    <div class="panel pad" style="margin-bottom:20px;">
       <h3 style="margin-top:0; font-size:15px;">오늘 단타 성적</h3>
-      <p style="color:var(--muted-2); font-size:12px; margin:0 0 10px;">"데이트레이딩(당일 청산)" 전략의 오늘 하루 기록이에요. 단타는 매매가 잦아서 비용이 수익을 얼마나 깎는지 같이 보세요.</p>
+      <p class="easy">"데이트레이딩" 전략이 오늘 하루 몇 번 사고팔았고, 얼마를 벌거나 잃었는지예요.</p>
+      <details class="more"><summary>자세히 보기</summary><div class="more-body">
+        <p><b>승률</b>: 판 횟수 중에서 돈을 번 횟수의 비율이에요. 10번 팔아서 6번 벌었으면 60%예요.</p>
+        <p><b>비용</b>: 단타는 자주 사고팔아서 수수료·세금이 금방 쌓여요. 번 돈(실현손익)은 이 비용을 이미 뺀 금액이에요. 비용이 번 돈보다 크다면 너무 자주 사고팔고 있다는 신호일 수 있어요.</p>
+      </div></details>
       <div id="atDaytradeToday" style="font-size:13.5px;">—</div>
     </div>
 
     <div class="panel pad" style="margin-bottom:20px;">
-      <h3 style="margin-top:0; font-size:15px;">전략 경쟁 비교</h3>
-      <p style="color:var(--muted-2); font-size:12px; margin:0 0 14px;">국내+해외 가상계좌를 합산한 누적 손익률 기준이에요. 매매할 때마다 수수료·거래세·환전비용을 빼고, 보유 종목도 "지금 팔면 남는 금액"으로 계산해서 실제 계좌 수익률에 가깝게 보여줘요. 가장 높은 전략에 1위 표시가 붙어요.</p>
+      <h3 style="margin-top:0; font-size:15px;">전략 성적 순위</h3>
+      <p class="easy">처음 받은 가짜 돈에 비해 지금 몇 % 늘었는지(줄었는지) 비교해요. 1등에 표시가 붙어요.</p>
+      <details class="more"><summary>자세히 보기</summary><div class="more-body">
+        <p>예를 들어 1,000만원으로 시작해서 지금 1,050만원이 됐으면 <span class="up">+5%</span>예요.</p>
+        <p>지금 갖고 있는 주식은 "지금 바로 판다면 손에 남는 돈"(수수료·세금을 뺀 금액)으로 계산해요. 그래서 실제 계좌와 비슷해요.</p>
+        <p><b>종합</b>: 국내 계좌(원)와 해외 계좌(달러)는 돈 단위가 달라서 그냥 더할 수 없어요. 그래서 각 계좌의 % 성적을 시작 금액 크기에 맞춰 섞어서 하나의 %로 만들었어요.</p>
+      </div></details>
       <table id="atStrategyTable">
         <thead><tr><th>전략</th><th>국내 손익률</th><th>해외 손익률</th><th>종합 손익률</th><th></th></tr></thead>
         <tbody id="atStrategyBody"></tbody>
@@ -705,7 +787,13 @@
 
     <div class="panel pad" style="margin-bottom:20px;">
       <h3 style="margin-top:0; font-size:15px;" id="atTaxTitle">올해 실현손익과 해외주식 양도세(추정)</h3>
-      <p style="color:var(--muted-2); font-size:12px; margin:0 0 14px;">해외주식 양도세는 1년 동안 실현한 이익과 손실을 합친 뒤 기본공제를 빼고 매겨져요. 전략마다 따로 운용하는 가상계좌라서 "이 전략만 썼다면 낼 세금"으로 계산했어요. 달러 손익은 매도 당시 환율로 원화 환산했어요. 실제 신고 금액은 증권사·국세청 안내로 꼭 다시 확인하세요.</p>
+      <p class="easy">올해 팔아서 확정된 돈과, 미국 주식으로 번 돈에 붙는 세금을 미리 계산해 봤어요.</p>
+      <details class="more"><summary>자세히 보기</summary><div class="more-body">
+        <p><b>실현손익</b>: 주식을 팔아서 "확정된" 번 돈이나 잃은 돈이에요. 아직 갖고 있는 주식의 오르내림은 들어가지 않아요.</p>
+        <p><b>해외주식 <span class="term" data-term="양도세">양도세</span></b>: 1년 동안 미국 주식으로 번 돈과 잃은 돈을 합친 뒤, 250만원을 빼고 남은 금액의 22%예요. 예를 들어 1년에 300만원을 벌었으면 (300만 − 250만) × 22% = 11만원이에요.</p>
+        <p>전략마다 계좌가 따로라서 "이 전략 하나만 썼다면 낼 세금"으로 계산했어요. 달러는 판 날의 환율로 원화로 바꿨어요.</p>
+        <p>실제 신고할 금액은 꼭 증권사·국세청 안내로 다시 확인하세요.</p>
+      </div></details>
       <table id="atTaxTable">
         <thead><tr><th>전략</th><th>국내 실현손익</th><th>해외 실현손익</th><th>원화 환산</th><th>예상 양도세</th><th>해외 세후 손익</th></tr></thead>
         <tbody id="atTaxBody"></tbody>
@@ -716,7 +804,8 @@
     </div>
 
     <div class="panel pad" style="margin-bottom:20px;">
-      <h3 style="margin-top:0; font-size:15px;">보유 종목</h3>
+      <h3 style="margin-top:0; font-size:15px;">지금 갖고 있는 주식</h3>
+      <p class="easy">전략들이 사서 아직 팔지 않은 주식이에요. "평가손익"은 지금 판다면 벌거나 잃을 돈(수수료·세금 뺀 금액)이에요.</p>
       <table id="atPosTable">
         <thead><tr><th>전략</th><th>시장</th><th>종목</th><th>수량</th><th>평균단가</th><th>현재가</th><th>평가금액</th><th>평가손익</th><th>선정사유</th></tr></thead>
         <tbody id="atPosBody"></tbody>
@@ -729,6 +818,7 @@
 
     <div class="panel pad">
       <h3 style="margin-top:0; font-size:15px;">매매 기록</h3>
+      <p class="easy">최근에 사고판 기록이에요. 위 버튼으로 날짜별·전략별 등으로 묶어서 볼 수 있어요. 지난 기록은 "캘린더" 탭에서 달력으로 볼 수 있어요.</p>
       <div class="at-log-tabs" id="atLogGroupTabs">
         <button type="button" data-group="date" class="active">날짜별</button>
         <button type="button" data-group="strategy">전략별</button>
@@ -754,8 +844,12 @@
     </div>
 
     <div class="banner">
-      <b>하루에 한 번, 자동으로 점검하고 조정돼요</b><br>
-      전략별로 최근 성과가 충분히 쌓이면(14일 내 마감거래 5건 이상) AI가 왜 그런 성과가 나왔는지 진단하고, 손절%·익절%·1회 비중%·일일 매매한도를 스스로 조정해요. 조정 안 해도 괜찮다고 판단하면 그대로 두고, 여기엔 "실제로 바뀐" 경우만 기록돼요.
+      <b>전략의 규칙이 언제, 왜, 어떻게 바뀌었는지 모아둔 곳이에요</b><br>
+      AI가 성적을 보고 스스로 고친 것, 내가 직접 고친 것, 가짜 계좌를 초기화한 것이 모두 여기 남아요.
+      <details class="more" style="margin:8px 0 0;"><summary>자세히 보기</summary><div class="more-body">
+        <p><b>AI 자동조정</b>: 최근 2주 동안 마무리된 거래가 5번 이상 쌓인 전략을 AI가 하루 한 번 살펴봐요. 왜 그런 성적이 나왔는지 따져 보고, 필요하면 <span class="term" data-term="손절">손절</span>·<span class="term" data-term="익절">익절</span> 기준, 한 번에 사는 양(<span class="term" data-term="비중">비중</span>), 하루 최대 횟수를 조금씩 바꿔요. 안 바꿔도 된다고 판단하면 기록하지 않아요.</p>
+        <p><b>변경 이후 성과</b>: 바꾼 뒤에 실제로 성적이 좋아졌는지 보여줘요. 이걸 보고 "그 변경이 잘한 건지" 판단할 수 있어요.</p>
+      </div></details>
     </div>
 
     <div class="panel pad" id="scResult">
@@ -932,10 +1026,15 @@
     </div>
 
     <div class="panel pad" style="margin-top:14px;">
-      <h3 style="margin:0 0 10px;">손익 캘린더 (자동매매, 최근 2개월)</h3>
+      <h3 style="margin:0 0 6px;">손익 캘린더 (자동매매)</h3>
+      <p class="easy">날마다 자동매매로 번 돈(<span class="up">빨강</span>)과 잃은 돈(<span class="down">파랑</span>)을 달력으로 보여줘요. 색이 진할수록 금액이 커요. 날짜를 누르면 그날 기록을 자세히 볼 수 있어요.</p>
+      <details class="more"><summary>자세히 보기</summary><div class="more-body">
+        <p>칸에 적힌 돈은 그날 <b>판 주식</b>으로 확정된 손익이에요(수수료·세금을 뺀 금액). 산 것만 있고 안 판 날은 손익 없이 횟수만 보여요.</p>
+        <p>국내 주식은 원, 미국 주식은 달러로 따로 계산해요. 칸에는 국내 손익을 먼저 보여주고, 국내 매매가 없는 날엔 미국 손익을 보여줘요.</p>
+        <p>매매 기록은 날짜별 장부에 따로 쌓여서, 오래된 달도 그대로 볼 수 있어요. 다만 이 장부가 생기기 전에 이미 지워진 아주 오래된 기록은 되살릴 수 없어요.</p>
+      </div></details>
       <div id="calHeatmap"></div>
-      <p style="color:var(--muted-2); font-size:11px; margin-top:10px;">칸을 누르면 그날의 매매 기록을 볼 수 있어요. 초록이 짙을수록 수익, 빨강이 짙을수록 손실입니다.</p>
-      <div id="calDayDetail" style="margin-top:12px;"></div>
+      <div id="calDayDetail" class="cal-detail" style="margin-top:14px;"></div>
     </div>
   </section>
 
@@ -1619,7 +1718,7 @@
     if(btn.dataset.view === 'autotrade' && !atLoaded){
       loadAutoTradeConfig();
       loadAutoTradeStatus();
-      loadCustomStrategies();
+      loadStrategyCards();
       loadCostConfig();
       loadDaytradeConfig();
     }
@@ -2585,125 +2684,85 @@
     return side;
   }
 
+  // 전략 설명 — easy: 한 줄 설명(중학생도 알 수 있게), detail: "자세히 보기"에 나오는 긴 설명, tag: 카드 이름 옆 꼬리표
   var AT_STRATEGY_DEFS = [
-    { id:'momentum', name:'모멘텀(추세 추종)', desc:'관심종목 +3%, AI 추천 +1% 이상 — 손절/익절은 위 설정값 사용' },
-    { id:'pullback', name:'눌림목(과열 회피)', desc:'0~2% 완만한 상승만 매수, 손절 4%/익절 8%' },
-    { id:'breakout', name:'강한 돌파', desc:'관심종목 +6%, AI 추천 +4% 이상, 손절 7%/익절 15%' },
-    { id:'reversal', name:'역추세(저가 반등)', desc:'-2%~-6% 하락한 종목의 반등 노림, 손절 3%/익절 6%' },
-    { id:'scalp', name:'초단타(잦은 매매)', desc:'관심종목 +1.5%, AI +0.5%부터 매수, 손절 2%/익절 3%, 하루 최대 8회' },
-    { id:'selective', name:'신중한 선별(엄격)', desc:'관심종목 +4%, AI +2.5% 이상만, 대신 종목당 8% 비중으로 크게' },
-    { id:'wideswing', name:'광폭 스윙(길게 보유)', desc:'모멘텀과 매수조건은 비슷하지만 손절 10%/익절 25%로 폭넓게' },
-    { id:'baseline', name:'기준선(대조군)', desc:'조건 없이 후보를 그대로 매수 — 다른 전략이 실제로 더 나은지 비교하는 기준' },
-    { id:'daytrade', name:'데이트레이딩(당일 청산)', desc:'하루 안에 사고파는 단타 — 오늘 시가 대비 오르고 고가 근처에서 버티는 종목을 정해둔 시간에만 매수하고, 청산 시각에 전부 팔아 다음 날로 안 넘김. 사는 조건·시간·손절/익절·손실한도·매수 횟수는 아래 "데이트레이딩 설정"에서 바꿀 수 있음 (국내 종목만 해당)' },
-    { id:'evolved', name:'진화형(자동탐색)', desc:'전략연구실의 "진화형 탐색"이 백테스트로 계속 찾아낸 가중치 점수 방식으로 매수 판단, 손절/익절/비중도 그 결과를 그대로 따름 (국내 종목만 해당)' },
-    { id:'regime-adaptive', name:'시장적응형(구간별 자동전환)', desc:'오늘의 시장 상황(상승/하락/횡보 × 평온/고변동, 최대 6구간)을 매일 분류해서, 전략연구실의 "시장 상황 적응형 탐색"이 그 구간 전용으로 찾아둔 전략으로 매일 자동 전환 (국내 종목만 해당)' }
+    { id:'momentum', name:'모멘텀(추세 추종)', tag:'스윙',
+      easy:'오늘 많이 오르고 있는 주식을 따라 사요.',
+      detail:'"오르는 주식은 계속 오르는 경향이 있다"는 생각으로 사는 전략이에요. 관심종목은 어제보다 3% 이상, AI 추천 종목은 1% 이상 오르면 사요. 며칠씩 갖고 있을 수 있어요.' },
+    { id:'pullback', name:'눌림목(과열 회피)', tag:'스윙',
+      easy:'조금만(0~2%) 오른 주식을 사요. 너무 많이 오른 건 피해요.',
+      detail:'이미 크게 오른 주식은 다시 떨어질 위험이 커요. 그래서 이제 막 천천히 오르기 시작한(어제보다 0~2%) 주식을 골라요.' },
+    { id:'breakout', name:'강한 돌파', tag:'스윙',
+      easy:'아주 힘있게(6% 이상) 오르는 주식만 사서 오래 태워요.',
+      detail:'관심종목은 어제보다 6% 이상, AI 추천은 4% 이상 오를 때만 사요. 큰 흐름을 타려고 손절·익절 폭을 넓게 잡아요.' },
+    { id:'reversal', name:'역추세(저가 반등)', tag:'스윙',
+      easy:'조금 떨어진(-2~-6%) 주식이 다시 오를 걸 노려요.',
+      detail:'"떨어진 주식은 다시 조금 오르곤 한다"는 생각이에요. 어제보다 2~6% 떨어진 주식을 사요. 예상이 틀리면 빨리 빠지려고 손절 폭을 좁게 잡아요.' },
+    { id:'scalp', name:'초단타(잦은 매매)', tag:'스윙',
+      easy:'조건을 낮춰 자주 사고, 조금만 오르거나 내려도 바로 팔아요.',
+      detail:'관심종목은 1.5%, AI 추천은 0.5%만 올라도 사요. 손절·익절 폭을 아주 좁게 잡아 빠르게 치고 빠져요. 이름은 초단타지만 장이 끝나도 다음 날까지 갖고 있을 수 있어요(하루 안에 다 파는 건 "데이트레이딩"이에요).' },
+    { id:'selective', name:'신중한 선별(엄격)', tag:'스윙',
+      easy:'아주 확실해 보일 때만, 대신 한 번에 크게 사요.',
+      detail:'관심종목은 4%, AI 추천은 2.5% 이상 오를 때만 사요. 자주 안 사는 대신 한 번에 큰 비중으로 사요.' },
+    { id:'wideswing', name:'광폭 스윙(길게 보유)', tag:'스윙',
+      easy:'모멘텀처럼 사지만, 오르내림을 크게 참고 오래 갖고 있어요.',
+      detail:'사는 조건은 모멘텀과 비슷해요. 대신 손절·익절 폭을 아주 넓게 잡아서, 작은 흔들림에 팔지 않고 큰 흐름을 노려요.' },
+    { id:'baseline', name:'기준선(대조군)', tag:'비교용',
+      easy:'아무 조건 없이 그냥 사요. 다른 전략과 비교하는 "기준"이에요.',
+      detail:'과학 실험의 "대조군"과 같아요. 다른 전략이 이것보다 성적이 좋아야 "규칙이 실제로 도움이 됐다"고 말할 수 있어요. 이것보다 못한 전략은 규칙이 오히려 손해라는 뜻이에요.' },
+    { id:'daytrade', name:'데이트레이딩(당일 청산)', tag:'단타',
+      easy:'하루 안에 사고팔고, 장이 끝나기 전에 전부 팔아요.',
+      detail:'오늘 아침 시작 가격(시가)보다 오르고 있고, 오늘 최고가 근처에서 버티는 주식을 사요. 정해둔 시각이 되면 이익이든 손해든 전부 팔아서 다음 날로 넘기지 않아요. 판 주식은 잠깐 쉬었다가 다시 사고, 하루에 정해둔 만큼 잃으면 그날은 더 사지 않아요. 국내 주식만 해요. 숫자는 모두 [수정]에서 바꿀 수 있어요.' },
+    { id:'evolved', name:'진화형(자동탐색)', tag:'AI 탐색',
+      easy:'전략연구실이 과거 데이터로 찾아낸 "가장 좋았던 조합"을 따라 해요.',
+      detail:'전략연구실의 "진화형 탐색"이 여러 지표(이동평균, RSI 등)에 점수를 매기는 방법을 수없이 바꿔 보며 과거에 가장 잘 됐던 조합을 찾아요. 이 전략은 그 최신 결과대로 사고팔아요. 그래서 여기서 직접 숫자를 바꿀 수는 없어요. 국내 주식만 해요.' },
+    { id:'regime-adaptive', name:'시장적응형(구간별 자동전환)', tag:'AI 탐색',
+      easy:'오늘 시장 분위기에 맞는 전략으로 매일 바꿔 끼워요.',
+      detail:'매일 시장이 "오르는 중 / 떨어지는 중 / 옆으로 기는 중"인지, "잔잔한지 / 출렁이는지"를 따져서 6가지 상황 중 하나로 나눠요. 그리고 전략연구실이 그 상황 전용으로 찾아둔 전략으로 그날 사고팔아요. 국내 주식만 해요.' }
   ];
   var AT_STRATEGY_NAMES = {};
   var AT_STRATEGY_DESC = {};
-  var AT_STRATEGY_ORDER = AT_STRATEGY_DEFS.map(function(d){ AT_STRATEGY_NAMES[d.id] = d.name; AT_STRATEGY_DESC[d.id] = d.desc; return d.id; });
+  var AT_STRATEGY_DEF = {};
+  var AT_STRATEGY_ORDER = AT_STRATEGY_DEFS.map(function(d){ AT_STRATEGY_NAMES[d.id] = d.name; AT_STRATEGY_DESC[d.id] = d.easy; AT_STRATEGY_DEF[d.id] = d; return d.id; });
 
-  /* ---- 내장 전략 위험 파라미터 수동 수정 ---- */
-  // 데이트레이딩은 전용 "데이트레이딩 설정"에서만 바꿔요(두 곳에서 바뀌면 헷갈리니까).
-  var AT_MANUAL_EDITABLE = AT_STRATEGY_DEFS.filter(function(d){ return d.id !== 'evolved' && d.id !== 'regime-adaptive' && d.id !== 'daytrade'; });
-  document.getElementById('atManualStrat').innerHTML = AT_MANUAL_EDITABLE.map(function(d){
-    return '<option value="'+d.id+'">'+escapeHtml(d.name)+'</option>';
-  }).join('');
-
-  document.getElementById('atManualSave').addEventListener('click', function(){
-    var msg = document.getElementById('atManualMsg');
-    if(!currentUser){ msg.textContent = '로그인 후 적용할 수 있어요.'; msg.style.color = 'var(--down)'; return; }
-    var strategyId = document.getElementById('atManualStrat').value;
-    var risk = {
-      stopLossPct: Number(document.getElementById('atManualStop').value),
-      takeProfitPct: Number(document.getElementById('atManualTake').value),
-      positionPct: Number(document.getElementById('atManualPos').value),
-      maxTradesPerDay: Number(document.getElementById('atManualMax').value)
-    };
-    if(!risk.stopLossPct || !risk.takeProfitPct || !risk.positionPct || !risk.maxTradesPerDay){
-      msg.textContent = '손절/익절/비중/일일한도를 모두 입력해주세요.'; msg.style.color = 'var(--down)'; return;
-    }
-    msg.textContent = '적용 중…'; msg.style.color = 'var(--muted-2)';
-    currentUser.getIdToken().then(function(token){
-      return fetch('/api/auto-trade-status?action=manual-edit', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
-        body: JSON.stringify({ strategyId: strategyId, risk: risk })
-      });
-    }).then(function(r){ return r.json().then(function(d){ return {ok:r.ok, d:d}; }); }).then(function(res){
-      if(!res.ok){ msg.textContent = res.d.error || '적용 실패'; msg.style.color = 'var(--down)'; return; }
-      msg.textContent = '적용했어요. 다음 자동매매 실행부터 반영되고, 전략 변경 이력에도 남아요.';
-      msg.style.color = 'var(--up)';
-    }).catch(function(){ msg.textContent = '적용 중 오류가 발생했어요.'; msg.style.color = 'var(--down)'; });
-  });
-
-  /* ---- 커스텀 전략 목록(켜기/끄기/삭제) ---- */
-  function loadCustomStrategies(){
-    var box = document.getElementById('atCustomList');
-    fetch('/api/auto-trade-status?action=custom').then(function(r){ return r.json(); }).then(function(data){
-      var list = data.strategies || [];
-      if(list.length === 0){
-        box.innerHTML = '<div style="color:var(--muted-2); font-size:12.5px;">저장된 커스텀 전략이 없어요. 전략연구실 &gt; 진화형 탐색 결과에서 저장해보세요.</div>';
-        return;
-      }
-      box.innerHTML = list.map(function(s){
-        return '<div style="display:flex; align-items:center; gap:10px; padding:8px 0; border-bottom:1px solid var(--line);">' +
-          '<label style="display:flex; align-items:center; gap:6px; flex:1; font-size:13px;">' +
-          '<input type="checkbox" data-custom-toggle="'+s.id+'" '+(s.enabled!==false?'checked':'')+' style="width:16px; height:16px;"> '+escapeHtml(s.name)+
-          '</label>' +
-          '<span style="color:var(--muted-2); font-size:11px;">'+new Date(s.createdAt).toLocaleDateString()+'</span>' +
-          '<button class="icon-btn" data-custom-delete="'+s.id+'">✕</button>' +
-        '</div>';
-      }).join('');
-    }).catch(function(e){ box.innerHTML = '<div style="color:var(--muted-2); font-size:12.5px;">'+errMsg(e)+'</div>'; });
-  }
-  document.getElementById('atCustomList').addEventListener('change', function(e){
-    var el = e.target.closest('[data-custom-toggle]');
-    if(!el) return;
-    if(!currentUser){ alert('로그인 후 변경할 수 있어요.'); el.checked = !el.checked; return; }
-    currentUser.getIdToken().then(function(token){
-      return fetch('/api/auto-trade-status?action=custom', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
-        body: JSON.stringify({ op: 'toggle', id: el.dataset.customToggle, enabled: el.checked })
-      });
-    }).catch(function(){});
-  });
-  document.getElementById('atCustomList').addEventListener('click', function(e){
-    var el = e.target.closest('[data-custom-delete]');
-    if(!el) return;
-    if(!currentUser){ alert('로그인 후 삭제할 수 있어요.'); return; }
-    if(!confirm('이 커스텀 전략을 완전히 삭제할까요? (쌓인 가상매매 기록도 같이 삭제돼요)')) return;
-    currentUser.getIdToken().then(function(token){
-      return fetch('/api/auto-trade-status?action=custom', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
-        body: JSON.stringify({ op: 'delete', id: el.dataset.customDelete })
-      });
-    }).then(function(){ loadCustomStrategies(); }).catch(function(){});
-  });
+  // 어려운 말 풀이 — 점선 밑줄(.term)을 누르면 말풍선으로 떠요(전략 ⓘ 설명과 같은 말풍선).
+  var GLOSSARY = {
+    '손절': '손해가 더 커지기 전에, 산 가격보다 정해둔 만큼 떨어지면 파는 것. 예: 손절 5%면 1만원에 산 주식이 9,500원이 될 때 팔아요.',
+    '익절': '번 돈을 확정하려고, 산 가격보다 정해둔 만큼 오르면 파는 것. 예: 익절 10%면 1만원에 산 주식이 11,000원이 될 때 팔아요.',
+    '비중': '한 번 살 때 가진 돈의 몇 %를 쓰는지. 예: 비중 5%면 1,000만원 중 50만원어치를 사요.',
+    '시가': '오늘 아침 장이 열릴 때 처음 정해진 가격.',
+    '고가': '오늘 하루 중 가장 비쌌던 가격.',
+    '상한가': '한국 주식이 하루에 오를 수 있는 최대치(어제보다 +30%).',
+    '동시호가': '장 끝나기 직전(15:20~15:30)에 주문을 모았다가 한 가격에 한꺼번에 사고파는 시간.',
+    '슬리피지': '생각한 가격보다 조금 손해 보고 사지거나 팔리는 차이. 예: 1만원에 사려 했는데 10,005원에 사짐.',
+    '양도세': '주식을 팔아서 번 돈에 붙는 세금. 미국 주식은 1년에 번 돈에서 250만원을 뺀 나머지의 22%.',
+    '승률': '판 횟수 중에서 돈을 번 횟수의 비율. 10번 팔아서 6번 벌었으면 60%.',
+    '실현손익': '주식을 팔아서 확정된 번 돈(또는 잃은 돈).'
+  };
 
   // 표에 전략 이름을 넣을 때 이 함수를 쓰면, 이름 옆에 작은 ⓘ 아이콘이 같이 붙어요.
-  // 클릭하면 전략 설명이 말풍선으로 뜹니다(아래 전략 설명 팝업 로직 참고).
+  // 클릭하면 전략 설명이 말풍선으로 뜹니다(아래 설명 팝업 로직 참고).
   function atStratLabel(id){
     var name = AT_STRATEGY_NAMES[id] || id;
     if(!AT_STRATEGY_DESC[id]) return escapeHtml(name);
     return escapeHtml(name) + '<span class="at-info" data-strat="'+id+'" role="button" tabindex="0" aria-label="'+escapeHtml(name)+' 설명 보기">ⓘ</span>';
   }
 
-  // ---- 전략 설명 팝업(클릭식 — 모바일에서도 쓸 수 있게 hover 대신 click) ----
-  (function setupStrategyInfoPopup(){
+  // ---- 설명 말풍선(클릭식 — 모바일에서도 쓸 수 있게 hover 대신 click) ----
+  // 전략 이름 옆 ⓘ 아이콘과, 어려운 말(.term) 둘 다 같은 말풍선을 써요.
+  (function setupInfoPopup(){
     var popup = null;
     function closePopup(){
       if(popup){ popup.remove(); popup = null; }
     }
-    function openPopup(icon, id){
+    function openPopup(anchor, key, text){
       closePopup();
       popup = document.createElement('div');
       popup.className = 'at-info-popup';
-      popup.dataset.for = id;
-      popup.textContent = AT_STRATEGY_DESC[id] || '설명이 없어요.';
+      popup.dataset.for = key;
+      popup.textContent = text || '설명이 없어요.';
       document.body.appendChild(popup);
-      var r = icon.getBoundingClientRect();
+      var r = anchor.getBoundingClientRect();
       var top = r.bottom + window.scrollY + 6;
       var left = r.left + window.scrollX;
       var maxLeft = window.scrollX + document.documentElement.clientWidth - popup.offsetWidth - 10;
@@ -2712,12 +2771,14 @@
       popup.style.left = left + 'px';
     }
     document.addEventListener('click', function(e){
-      var icon = e.target.closest ? e.target.closest('.at-info') : null;
-      if(icon){
+      var anchor = e.target.closest ? e.target.closest('.at-info, .term') : null;
+      if(anchor){
         e.stopPropagation();
-        var id = icon.getAttribute('data-strat');
-        if(popup && popup.dataset.for === id){ closePopup(); return; }
-        openPopup(icon, id);
+        e.preventDefault(); // <summary> 안의 말을 눌렀을 때 접었다 펴지지 않게
+        var isTerm = anchor.classList.contains('term');
+        var key = isTerm ? 'term:' + anchor.getAttribute('data-term') : anchor.getAttribute('data-strat');
+        if(popup && popup.dataset.for === key){ closePopup(); return; }
+        openPopup(anchor, key, isTerm ? GLOSSARY[anchor.getAttribute('data-term')] : AT_STRATEGY_DESC[key]);
         return;
       }
       if(popup && !popup.contains(e.target)) closePopup();
@@ -2726,32 +2787,220 @@
     window.addEventListener('scroll', closePopup, true);
   })();
 
-  (function renderStrategyChecks(){
-    var box = document.getElementById('atStrategyChecks');
-    box.innerHTML = AT_STRATEGY_DEFS.map(function(d){
-      return '<label style="display:flex; align-items:flex-start; gap:8px; margin-bottom:10px; font-size:13px;">' +
-        '<input type="checkbox" id="atStrat-'+d.id+'" style="width:16px; height:16px; margin-top:2px;">' +
-        '<span><b>'+d.name+'</b><br><span style="color:var(--muted-2); font-size:11.5px;">'+d.desc+'</span></span>' +
-        '</label>';
-    }).join('');
-  })();
+  /* ---------------- 내 전략 카드 (켜기/끄기·수정·자세히 보기·기록 초기화·숨기기·삭제) ---------------- */
+  var atCards = null; // 서버(action=strategies)가 준 전략 목록 — null이면 아직 불러오는 중
+  var atPerf = {}; // 전략별 성적(아래 "전략 성적 순위" 계산 결과를 재사용)
+  var atShowHidden = false;
+  var atOpen = { id:null, panel:null }; // 지금 펼쳐진 카드와 패널('edit' | 'detail')
+
+  // 로그인 확인 + 토큰을 붙여서 POST하고, 실패하면 서버가 준 오류 문구로 에러를 던져요.
+  function atPost(action, body){
+    if(!currentUser) return Promise.reject(new Error('로그인한 뒤에 바꿀 수 있어요.'));
+    return currentUser.getIdToken().then(function(token){
+      return fetch('/api/auto-trade-status?action='+action, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+        body: JSON.stringify(body)
+      });
+    }).then(function(r){
+      return r.json().then(function(d){ if(!r.ok) throw new Error((d && d.error) || '저장하지 못했어요.'); return d; });
+    });
+  }
+
+  function loadStrategyCards(){
+    fetch('/api/auto-trade-status?action=strategies').then(function(r){ return r.json(); }).then(function(d){
+      atCards = d.strategies || [];
+      atCards.forEach(function(s){ if(!AT_STRATEGY_NAMES[s.id]) AT_STRATEGY_NAMES[s.id] = s.name; });
+      renderStrategyCards();
+    }).catch(function(e){
+      document.getElementById('atCards').innerHTML = '<div style="color:var(--muted-2); font-size:12.5px;">'+errMsg(e)+'</div>';
+    });
+  }
+
+  function atFindCard(id){
+    return (atCards || []).filter(function(s){ return s.id === id; })[0] || null;
+  }
+
+  // 숫자 규칙을 문장으로: "1% 떨어지면 팔고, 1.5% 오르면 팔아요. …"
+  function atRiskWords(r){
+    if(!r) return '';
+    return '산 가격보다 <b>'+fmt(r.stopLossPct,1)+'%</b> 떨어지면 팔고(<span class="term" data-term="손절">손절</span>), <b>'+fmt(r.takeProfitPct,1)+'%</b> 오르면 팔아요(<span class="term" data-term="익절">익절</span>). ' +
+      '한 번 살 때 가진 돈의 <b>'+fmt(r.positionPct,0)+'%</b>를 쓰고, 하루에 최대 <b>'+fmt(r.maxTradesPerDay,0)+'번</b>까지 사요.';
+  }
+
+  function atCardHtml(s){
+    var def = AT_STRATEGY_DEF[s.id];
+    var tag = s.kind === 'custom' ? '내가 만든 전략' : (def ? def.tag : '');
+    var easy = s.kind === 'custom' ? '전략연구실에서 찾은 조합을 저장해 둔 전략이에요.' : (def ? def.easy : '');
+    var meta = [];
+    if(s.risk){
+      meta.push('손절 <b>'+fmt(s.risk.stopLossPct,1)+'%</b>', '익절 <b>'+fmt(s.risk.takeProfitPct,1)+'%</b>',
+        '비중 <b>'+fmt(s.risk.positionPct,0)+'%</b>', '하루 최대 <b>'+fmt(s.risk.maxTradesPerDay,0)+'번</b>');
+    } else {
+      meta.push('<span style="color:var(--muted-2);">사고파는 기준은 전략연구실 결과를 따라요</span>');
+    }
+    var p = atPerf[s.id];
+    if(p){
+      meta.push('수익률 '+atPctBadge(p.pct));
+      if(p.holding) meta.push('보유 <b>'+p.holding+'</b>종목');
+    }
+    function btn(act, label, extra){
+      var on = atOpen.id === s.id && atOpen.panel === act;
+      return '<button type="button" data-act="'+act+'" class="'+(extra||'')+(on?' on':'')+'">'+label+'</button>';
+    }
+    var actions = s.hidden
+      ? [btn('unhide','다시 보이기')]
+      : [btn('edit','수정'), btn('detail','자세히 보기'), btn('reset','기록 초기화'), s.kind === 'custom' ? btn('delete','삭제','danger') : btn('hide','숨기기')];
+    var sw = s.hidden ? '<span style="font-size:11.5px; color:var(--muted-2);">숨김</span>'
+      : '<label class="switch" title="켜기/끄기"><input type="checkbox" data-act="toggle" '+(s.enabled?'checked':'')+' aria-label="'+escapeHtml(s.name)+' 켜기"><span></span></label>';
+    var editing = atOpen.id === s.id && atOpen.panel === 'edit';
+    return '<div class="st-card'+(s.enabled?'':' off')+(editing?' editing':'')+'" data-id="'+escapeHtml(s.id)+'">' +
+      '<div class="st-head"><div><div class="st-name">'+escapeHtml(s.name)+(tag?'<span class="st-tag">'+escapeHtml(tag)+'</span>':'')+
+        (s.enabled || s.hidden ? '' : ' <span style="font-size:11px; color:var(--muted-2); font-weight:400;">꺼짐</span>')+'</div>' +
+        '<div class="st-easy">'+escapeHtml(easy)+'</div></div>'+sw+'</div>' +
+      '<div class="st-meta">'+meta.map(function(m){ return '<span>'+m+'</span>'; }).join('')+'</div>' +
+      '<div class="st-actions">'+actions.join('')+'</div>' +
+      '<div class="st-panel"></div>' +
+    '</div>';
+  }
+
+  function renderStrategyCards(){
+    var box = document.getElementById('atCards');
+    // 데이트레이딩 입력칸이 카드 안에 들어가 있으면, 다시 그리기 전에 원래 자리로 돌려놔요(같이 지워지지 않게).
+    document.getElementById('atDtFormHome').appendChild(document.getElementById('atDtForm'));
+    var hiddenCount = (atCards || []).filter(function(s){ return s.hidden; }).length;
+    var toggleBtn = document.getElementById('atShowHidden');
+    toggleBtn.textContent = atShowHidden ? '전체 전략 보기' : ('숨긴 전략 보기' + (hiddenCount ? ' ('+hiddenCount+')' : ''));
+    if(atCards === null){ box.innerHTML = '<div style="color:var(--muted-2); font-size:12.5px;">불러오는 중…</div>'; return; }
+    var list = atCards.filter(function(s){ return atShowHidden ? s.hidden : !s.hidden; });
+    if(!list.length){
+      box.innerHTML = '<div style="color:var(--muted-2); font-size:12.5px;">'+(atShowHidden ? '숨긴 전략이 없어요.' : '보이는 전략이 없어요. "숨긴 전략 보기"에서 다시 꺼낼 수 있어요.')+'</div>';
+      return;
+    }
+    box.innerHTML = list.map(atCardHtml).join('');
+    if(atOpen.id) fillCardPanel(atOpen.id, atOpen.panel);
+  }
+
+  function atCardEl(id){
+    return Array.prototype.filter.call(document.querySelectorAll('#atCards .st-card'), function(c){ return c.dataset.id === id; })[0] || null;
+  }
+
+  function fillCardPanel(id, panel){
+    var card = atCardEl(id), s = atFindCard(id);
+    if(!card || !s) return;
+    var el = card.querySelector('.st-panel');
+    var def = AT_STRATEGY_DEF[id];
+    if(panel === 'detail'){
+      var text = s.kind === 'custom'
+        ? '전략연구실의 "진화형 탐색" 결과를 이름 붙여 저장한 전략이에요. 여러 지표에 점수를 매겨서 점수가 기준을 넘으면 사요. 저장한 순간의 규칙을 그대로 써서, 탐색 결과가 바뀌어도 이 전략은 안 바뀌어요. 국내 주식만 해요.'
+        : (def ? def.detail : '');
+      el.innerHTML = '<p style="margin:0 0 6px;">'+escapeHtml(text)+'</p>' + (s.risk ? '<p style="margin:0;">지금 규칙: '+atRiskWords(s.risk)+'</p>' : '');
+      return;
+    }
+    if(panel === 'edit'){
+      if(s.kind === 'daytrade'){
+        el.innerHTML = '';
+        el.appendChild(document.getElementById('atDtForm'));
+        loadDaytradeConfig();
+      } else if(s.kind === 'builtin'){
+        var r = s.risk || {};
+        el.innerHTML = '<p style="margin:0 0 8px;">사는 조건(언제 살지)은 전략마다 정해져 있고, 아래 숫자는 바꿀 수 있어요. 저장하면 다음 매매부터 적용되고 "전략 변경 이력"에 남아요.</p>' +
+          '<div class="row">' +
+            '<div><label>몇 % 떨어지면 팔기(손절)</label><input type="number" step="0.5" data-f="stopLossPct" class="mono" style="width:100%;" value="'+r.stopLossPct+'"></div>' +
+            '<div><label>몇 % 오르면 팔기(익절)</label><input type="number" step="0.5" data-f="takeProfitPct" class="mono" style="width:100%;" value="'+r.takeProfitPct+'"></div>' +
+            '<div><label>한 번에 가진 돈의 몇 %로 사기</label><input type="number" step="1" data-f="positionPct" class="mono" style="width:100%;" value="'+r.positionPct+'"></div>' +
+            '<div><label>하루에 최대 몇 번 사기</label><input type="number" step="1" data-f="maxTradesPerDay" class="mono" style="width:100%;" value="'+r.maxTradesPerDay+'"></div>' +
+          '</div>' +
+          '<div style="margin-top:10px;"><button type="button" class="btn" data-act="save-risk">저장</button><span class="st-msg"></span></div>';
+      } else {
+        el.innerHTML = '<p style="margin:0;">이 전략은 전략연구실이 찾은 결과를 그대로 따라가서, 여기서 숫자를 직접 바꿀 수 없어요. 바꾸고 싶으면 전략연구실에서 탐색을 다시 돌리거나, 마음에 드는 결과를 "커스텀 전략"으로 저장해서 쓰세요. 켜고 끄기는 스위치로 할 수 있어요.</p>';
+      }
+    }
+  }
+
+  document.getElementById('atShowHidden').addEventListener('click', function(){
+    atShowHidden = !atShowHidden;
+    atOpen = { id:null, panel:null };
+    renderStrategyCards();
+  });
+
+  // 스위치(켜기/끄기) — 누르는 순간 바로 저장해요. 실패하면 원래대로 돌려놓아요.
+  document.getElementById('atCards').addEventListener('change', function(e){
+    var input = e.target.closest('[data-act="toggle"]');
+    if(!input) return;
+    var id = input.closest('.st-card').dataset.id, s = atFindCard(id);
+    var want = input.checked;
+    atPost('strategy-toggle', { strategyId: id, enabled: want }).then(function(){
+      s.enabled = want;
+      renderStrategyCards();
+    }).catch(function(err){
+      input.checked = !want;
+      alert(err.message);
+    });
+  });
+
+  document.getElementById('atCards').addEventListener('click', function(e){
+    var b = e.target.closest('button[data-act]');
+    if(!b) return;
+    var card = b.closest('.st-card'), id = card.dataset.id, s = atFindCard(id), act = b.dataset.act;
+    if(!s) return;
+
+    if(act === 'edit' || act === 'detail'){
+      atOpen = (atOpen.id === id && atOpen.panel === act) ? { id:null, panel:null } : { id:id, panel:act };
+      renderStrategyCards();
+      return;
+    }
+    if(act === 'save-risk'){
+      var msg = card.querySelector('.st-msg');
+      var risk = {};
+      Array.prototype.forEach.call(card.querySelectorAll('[data-f]'), function(inp){ risk[inp.dataset.f] = Number(inp.value); });
+      if(!risk.stopLossPct || !risk.takeProfitPct || !risk.positionPct || !risk.maxTradesPerDay){
+        msg.textContent = '네 칸을 모두 0보다 큰 숫자로 채워주세요.'; msg.style.color = 'var(--down)'; return;
+      }
+      msg.textContent = '저장 중…'; msg.style.color = 'var(--muted-2)';
+      atPost('manual-edit', { strategyId: id, risk: risk }).then(function(d){
+        s.risk = { stopLossPct: d.overrides.stopLossPct, takeProfitPct: d.overrides.takeProfitPct, positionPct: d.overrides.positionPct, maxTradesPerDay: d.overrides.maxTradesPerDay };
+        atOpen = { id:null, panel:null };
+        renderStrategyCards();
+      }).catch(function(err){ msg.textContent = err.message; msg.style.color = 'var(--down)'; });
+      return;
+    }
+    if(act === 'reset'){
+      if(!confirm('"'+s.name+'"의 가짜 계좌를 처음 상태로 되돌릴까요?\n\n· 현금이 처음 돈(국내 1,000만원 / 해외 7,000달러)으로 돌아가요.\n· 지금 갖고 있는 주식은 없어져요.\n· 전략 설정, 지난 매매 기록, 캘린더는 그대로 남아요.')) return;
+      atPost('reset-account', { strategyId: id }).then(function(){
+        loadAutoTradeStatus();
+        alert('초기화했어요. 다음 매매부터 처음 돈으로 다시 시작해요.');
+      }).catch(function(err){ alert(err.message); });
+      return;
+    }
+    if(act === 'hide' || act === 'unhide'){
+      var hide = act === 'hide';
+      if(hide && !confirm('"'+s.name+'"을(를) 끄고 목록에서 숨길까요?\n"숨긴 전략 보기"에서 언제든 다시 꺼낼 수 있어요.')) return;
+      atPost('strategy-toggle', { strategyId: id, hidden: hide }).then(function(d){
+        s.hidden = d.hidden; s.enabled = d.enabled;
+        if(atOpen.id === id) atOpen = { id:null, panel:null };
+        renderStrategyCards();
+      }).catch(function(err){ alert(err.message); });
+      return;
+    }
+    if(act === 'delete'){
+      var holding = (atPerf[id] && atPerf[id].holding) || 0;
+      if(!confirm('"'+s.name+'" 전략을 완전히 삭제할까요? 되돌릴 수 없어요.\n\n· 이 전략의 가짜 계좌'+(holding ? '와 갖고 있는 주식 '+holding+'종목' : '')+'도 같이 지워져요.\n· 지난 매매 기록과 캘린더는 남아요.')) return;
+      atPost('custom', { op: 'delete', id: id }).then(function(){
+        atCards = atCards.filter(function(x){ return x.id !== id; });
+        if(atOpen.id === id) atOpen = { id:null, panel:null };
+        renderStrategyCards();
+        loadAutoTradeStatus();
+      }).catch(function(err){ alert(err.message); });
+    }
+  });
 
   function loadAutoTradeConfig(){
     fetch(AT_CONFIG_URL).then(function(r){ return r.json(); }).then(function(cfg){
       document.getElementById('atEnabled').checked = !!cfg.enabled;
       document.getElementById('atUseAi').checked = cfg.useAiCandidates !== false;
-      var risk = cfg.risk || {};
-      document.getElementById('atPositionPct').value = risk.positionPct || 5;
-      document.getElementById('atStopLoss').value = risk.stopLossPct || 5;
-      document.getElementById('atTakeProfit').value = risk.takeProfitPct || 10;
-      document.getElementById('atMaxTrades').value = risk.maxTradesPerDay || 3;
       document.getElementById('atAdjustInterval').value = cfg.adjustIntervalHours || 24;
       document.getElementById('atEvolveInterval').value = cfg.evolveIntervalHours || 24;
-      var strategies = cfg.strategies || {};
-      AT_STRATEGY_ORDER.forEach(function(id){
-        var el = document.getElementById('atStrat-'+id);
-        if(el) el.checked = strategies[id] !== false;
-      });
       atLoaded = true;
     }).catch(function(e){ console.error('auto-trade config load failed', e); });
   }
@@ -2973,6 +3222,14 @@
       var bestId = null, bestPct = -Infinity;
       rows.forEach(function(r){ if(r.combinedPct > bestPct){ bestPct = r.combinedPct; bestId = r.id; } });
 
+      // "내 전략" 카드에도 수익률과 보유 종목 수를 같이 보여줘요.
+      atPerf = {};
+      rows.forEach(function(r){
+        var s = strategies[r.id];
+        atPerf[r.id] = { pct: r.combinedPct, holding: Object.keys((s.kr && s.kr.positions) || {}).length + Object.keys((s.us && s.us.positions) || {}).length };
+      });
+      renderStrategyCards();
+
       var stratBody = document.getElementById('atStrategyBody');
       stratBody.innerHTML = rows.map(function(r){
         var badge = r.id === bestId ? '<span style="background:#FFECEE; color:var(--up); font-size:11px; font-weight:700; padding:2px 8px; border-radius:999px;">1위</span>' : '';
@@ -3122,7 +3379,7 @@
   document.getElementById('atRefresh').addEventListener('click', function(){
     loadAutoTradeConfig();
     loadAutoTradeStatus();
-    loadCustomStrategies();
+    loadStrategyCards();
     loadCostConfig();
     loadDaytradeConfig();
   });
@@ -3170,6 +3427,7 @@
       // 서버가 범위를 벗어난 값을 자동으로 고쳐서 돌려주니, 실제로 저장된 값으로 다시 채워요.
       fillDaytradeForm(res.d.daytrade);
       msg.textContent = doneText; msg.style.color = 'var(--up)';
+      loadStrategyCards(); // 카드에 보이는 손절·익절 숫자도 새 값으로
     }).catch(function(){ msg.textContent = '저장하지 못했어요.'; msg.style.color = 'var(--down)'; });
   }
   document.getElementById('atDtSave').addEventListener('click', function(){
@@ -3201,10 +3459,14 @@
     return '손절 '+r.stopLossPct+'% · 익절 '+r.takeProfitPct+'% · 비중 '+r.positionPct+'% · 일일한도 '+r.maxTradesPerDay+'회';
   }
   function scSourceBadge(source){
+    // 누가/무엇을 보고 바꿨는지: 과거 데이터 시험(전략연구실) / 내가 직접 / AI가 실제(가짜 계좌) 성적을 보고
     if(source === 'backtest'){
-      return '<span style="background:#EAF2FF; color:var(--brand); font-size:10.5px; font-weight:700; padding:2px 8px; border-radius:999px;">백테스트 기반</span>';
+      return '<span style="background:#EAF2FF; color:var(--brand); font-size:10.5px; font-weight:700; padding:2px 8px; border-radius:999px;">과거 데이터로 찾은 결과</span>';
     }
-    return '<span style="background:#F2F4F6; color:var(--muted); font-size:10.5px; font-weight:700; padding:2px 8px; border-radius:999px;">실거래 기반</span>';
+    if(source === 'manual'){
+      return '<span style="background:#FFF4E5; color:#B25E00; font-size:10.5px; font-weight:700; padding:2px 8px; border-radius:999px;">내가 직접 바꿈</span>';
+    }
+    return '<span style="background:#F2F4F6; color:var(--muted); font-size:10.5px; font-weight:700; padding:2px 8px; border-radius:999px;">AI가 성적 보고 바꿈</span>';
   }
   function loadStrategyChanges(){
     var box = document.getElementById('scResult');
@@ -3272,58 +3534,198 @@
       });
   }
 
+  /* ---- 손익 캘린더(월 달력) ----
+     서버의 날짜별 장부(action=calendar)를 한 달씩 불러와 진짜 달력처럼 그려요. 예전엔 최근 매매 80건만으로 그려서
+     오래된 날이 빈칸이 됐는데, 이제 장부가 따로 쌓여서 지난달로 넘겨도 기록이 보여요.
+     색은 사이트 전체와 같게 빨강=번 날, 파랑=잃은 날이에요. */
+  var calMonth = null; // 지금 보고 있는 달 'YYYY-MM'
+  var calData = null; // 서버 응답 { month, today, days, names }
+  var calSelected = null; // 선택한 날짜 'YYYY-MM-DD'
+
+  function calMonthAdd(ym, delta){
+    var d = new Date(Date.UTC(Number(ym.slice(0,4)), Number(ym.slice(5,7)) - 1 + delta, 1));
+    return d.toISOString().slice(0,7);
+  }
+  // 칸 색과 금액은 국내 손익 기준, 국내 매도가 없는 날은 해외 손익 기준으로 보여줘요.
+  function calDayPnl(info){
+    if(info.krPnl !== 0 || !info.usPnl) return { v: info.krPnl, market: 'KR' };
+    return { v: info.usPnl, market: 'US' };
+  }
+  function calSigned(v, market){
+    return (v >= 0 ? '+' : '−') + atFmtPrice(market, Math.abs(v));
+  }
+  // 휴대폰처럼 칸이 좁을 때 쓰는 짧은 금액: +1.2만, −3,400, +$12
+  function calShort(v, market){
+    var sign = v >= 0 ? '+' : '−', a = Math.abs(v);
+    if(market === 'US') return sign + '$' + (a >= 100 ? Math.round(a) : a.toFixed(1));
+    return sign + (a >= 10000 ? (a/10000).toFixed(a >= 100000 ? 0 : 1) + '만' : Math.round(a).toLocaleString());
+  }
+
   function loadPnlHeatmap(){
+    if(!calMonth) calMonth = todayKST().slice(0,7);
     var box = document.getElementById('calHeatmap');
     box.innerHTML = '<div style="color:var(--muted); font-size:13px;"><span class="spinner"></span>&nbsp; 불러오는 중…</div>';
-    fetch(AT_LOG_URL).then(function(r){ return r.json(); }).then(function(data){
-      var log = data.log || [];
-      var byDate = {}; // date -> {count, krPnl, usPnl}
-      log.forEach(function(e){
-        if(e.side !== 'TAKE_PROFIT' && e.side !== 'STOP_LOSS' && e.side !== 'DAY_CLOSE') return;
-        if(!byDate[e.date]) byDate[e.date] = { count:0, krPnl:0, usPnl:0 };
-        byDate[e.date].count++;
-        if(e.market==='KR') byDate[e.date].krPnl += (e.pnlAmount||0);
-        else byDate[e.date].usPnl += (e.pnlAmount||0);
-      });
-      var days = [];
-      for(var i=59;i>=0;i--){
-        var d = new Date(Date.now() + 9*60*60*1000 - i*86400000);
-        days.push(d.toISOString().slice(0,10));
-      }
-      // 국내 손익을 기준으로 칸 색을 정하고(대부분의 전략이 국내 위주), 국내 기록이 없는 날은 해외 손익으로 판단합니다.
-      function dayPnl(info){ return info.krPnl !== 0 ? info.krPnl : info.usPnl; }
-      var maxAbs = 1;
-      days.forEach(function(d){ var info=byDate[d]; if(info) maxAbs = Math.max(maxAbs, Math.abs(dayPnl(info))); });
-
-      box.innerHTML = '<div style="display:grid; grid-template-columns:repeat(10, 1fr); gap:4px; max-width:420px;">' +
-        days.map(function(d){
-          var info = byDate[d];
-          var bg = 'var(--panel-2)';
-          if(info){
-            var p = dayPnl(info);
-            var intensity = Math.min(1, Math.abs(p) / maxAbs);
-            bg = p >= 0
-              ? 'rgba(37, 181, 113, ' + (0.15 + intensity*0.6).toFixed(2) + ')'
-              : 'rgba(239, 68, 68, ' + (0.15 + intensity*0.6).toFixed(2) + ')';
-          }
-          return '<div class="clickable" data-day="'+d+'" title="'+d+(info?' · 매매 '+info.count+'건':' · 기록 없음')+'" ' +
-            'style="aspect-ratio:1; border-radius:4px; background:'+bg+'; cursor:pointer;"></div>';
-        }).join('') + '</div>';
-      calHeatmapByDate = byDate;
+    fetch('/api/auto-trade-status?action=calendar&month=' + calMonth).then(function(r){ return r.json(); }).then(function(data){
+      if(data.error) throw new Error(data.error);
+      calData = data;
+      Object.keys(data.names || {}).forEach(function(id){ if(!AT_STRATEGY_NAMES[id]) AT_STRATEGY_NAMES[id] = data.names[id]; });
+      renderCalendar();
     }).catch(function(e){
       box.innerHTML = '<div style="color:var(--muted-2); font-size:13px;">'+errMsg(e)+'</div>';
     });
   }
-  var calHeatmapByDate = {};
+
+  function renderCalendar(){
+    var box = document.getElementById('calHeatmap');
+    var days = calData.days || {};
+    var today = calData.today || todayKST();
+    var ym = calMonth, y = Number(ym.slice(0,4)), m = Number(ym.slice(5,7));
+    var firstDow = new Date(Date.UTC(y, m - 1, 1)).getUTCDay();
+    var lastDate = new Date(Date.UTC(y, m, 0)).getUTCDate();
+
+    // 이번 달 합계
+    var sum = { kr:0, us:0, gainDays:0, lossDays:0, sells:0, wins:0, trades:0 };
+    var maxAbs = { KR: 1, US: 0.01 };
+    Object.keys(days).forEach(function(d){
+      var info = days[d];
+      sum.kr += info.krPnl || 0; sum.us += info.usPnl || 0;
+      sum.sells += info.sells || 0; sum.wins += info.wins || 0; sum.trades += (info.buys || 0) + (info.sells || 0);
+      if(info.sells){
+        var p = calDayPnl(info);
+        if(p.v > 0) sum.gainDays++; else if(p.v < 0) sum.lossDays++;
+        maxAbs[p.market] = Math.max(maxAbs[p.market], Math.abs(p.v));
+      }
+    });
+    function signedSpan(v, market){ return '<span class="'+(v>=0?'up':'down')+'">'+calSigned(v, market)+'</span>'; }
+
+    var isCurrent = ym >= today.slice(0,7);
+    var html = '<div class="cal-nav">' +
+      '<button type="button" data-cal="prev">◀ 이전 달</button>' +
+      '<div class="cal-title">'+y+'년 '+m+'월</div>' +
+      '<div style="display:flex; gap:6px;">' +
+        (isCurrent ? '' : '<button type="button" data-cal="today">이번 달</button>') +
+        '<button type="button" data-cal="next"'+(isCurrent?' disabled':'')+'>다음 달 ▶</button>' +
+      '</div></div>';
+
+    html += '<div class="cal-sum">' +
+      '<div>국내 손익<b>'+signedSpan(sum.kr,'KR')+'</b></div>' +
+      '<div>해외 손익<b>'+signedSpan(sum.us,'US')+'</b></div>' +
+      '<div>번 날 / 잃은 날<b><span class="up">'+sum.gainDays+'일</span> / <span class="down">'+sum.lossDays+'일</span></b></div>' +
+      '<div><span class="term" data-term="승률">승률</span><b>'+(sum.sells ? fmt(sum.wins/sum.sells*100,0)+'%' : '—')+'</b></div>' +
+      '<div>사고판 횟수<b>'+sum.trades+'번</b></div>' +
+    '</div>';
+
+    html += '<div class="cal-grid">';
+    ['일','월','화','수','목','금','토'].forEach(function(w, i){
+      html += '<div class="cal-dow'+(i===0?' sun':(i===6?' sat':''))+'">'+w+'</div>';
+    });
+    for(var b = 0; b < firstDow; b++) html += '<div class="cal-cell blank"></div>';
+    for(var dnum = 1; dnum <= lastDate; dnum++){
+      var ds = ym + '-' + String(dnum).padStart(2,'0');
+      var dow = (firstDow + dnum - 1) % 7;
+      var info = days[ds];
+      var cls = 'cal-cell', style = '', inner = '<span class="cal-d">'+dnum+'</span>';
+      if(dow === 0 || dow === 6) cls += ' weekend';
+      if(ds === today) cls += ' today';
+      if(ds === calSelected) cls += ' selected';
+      if(info){
+        var count = (info.buys || 0) + (info.sells || 0);
+        if(info.sells){
+          var p = calDayPnl(info);
+          var alpha = (0.10 + 0.45 * Math.min(1, Math.abs(p.v) / maxAbs[p.market])).toFixed(2);
+          cls += p.v >= 0 ? ' gain' : ' loss';
+          style = ' style="--a:'+alpha+'"';
+          inner += '<span class="cal-pnl '+(p.v>=0?'up':'down')+'"><span class="long">'+calSigned(p.v, p.market)+'</span><span class="short">'+calShort(p.v, p.market)+'</span></span>';
+        }
+        inner += '<span class="cal-cnt">'+count+'번 매매</span>';
+      }
+      var label = ds + (info ? ' 매매 '+((info.buys||0)+(info.sells||0))+'번' : ' 기록 없음');
+      html += '<button type="button" class="'+cls+'"'+style+' data-day="'+ds+'" aria-label="'+label+'">'+inner+'</button>';
+    }
+    html += '</div>';
+    if(!Object.keys(days).length){
+      html += '<p style="color:var(--muted-2); font-size:12.5px; margin:10px 0 0;">이 달에는 자동매매 기록이 없어요.</p>';
+    }
+    box.innerHTML = html;
+  }
+
   document.getElementById('calHeatmap').addEventListener('click', function(e){
+    var nav = e.target.closest('[data-cal]');
+    if(nav){
+      var act = nav.getAttribute('data-cal');
+      calMonth = act === 'today' ? todayKST().slice(0,7) : calMonthAdd(calMonth, act === 'prev' ? -1 : 1);
+      calSelected = null;
+      document.getElementById('calDayDetail').innerHTML = '';
+      loadPnlHeatmap();
+      return;
+    }
     var cell = e.target.closest('[data-day]');
     if(!cell) return;
-    var d = cell.dataset.day;
-    var info = calHeatmapByDate[d];
-    var box = document.getElementById('calDayDetail');
-    if(!info){ box.innerHTML = '<div style="color:var(--muted-2); font-size:12.5px;">'+d+' — 마감된 매매 기록이 없어요.</div>'; return; }
-    box.innerHTML = '<div style="font-size:12.5px;"><b>'+d+'</b> — 매매 '+info.count+'건 · 국내 손익 <span class="'+(info.krPnl>=0?'up':'down')+'">'+(info.krPnl>=0?'+':'')+Math.round(info.krPnl).toLocaleString()+'원</span> · 해외 손익 <span class="'+(info.usPnl>=0?'up':'down')+'">'+(info.usPnl>=0?'+':'')+info.usPnl.toFixed(2)+'달러</span></div>';
+    calSelected = cell.dataset.day;
+    renderCalendar();
+    loadCalDayDetail(calSelected);
   });
+
+  // 날짜를 누르면: 그날 요약 → 전략별 성적 → 매매 하나하나(자세히 보기)
+  function loadCalDayDetail(date){
+    var box = document.getElementById('calDayDetail');
+    var dowName = ['일','월','화','수','목','금','토'][new Date(date + 'T00:00:00Z').getUTCDay()];
+    var title = '<h4 style="margin:0 0 8px; font-size:14.5px;">'+date+' ('+dowName+') 기록</h4>';
+    var info = calData && calData.days ? calData.days[date] : null;
+    if(!info){
+      box.innerHTML = title + '<div style="color:var(--muted-2); font-size:12.5px;">이날은 자동매매 기록이 없어요. (주말·공휴일이거나, 사는 조건에 맞는 주식이 없었던 날이에요)</div>';
+      return;
+    }
+    box.innerHTML = title + '<div style="color:var(--muted); font-size:13px;"><span class="spinner"></span>&nbsp; 불러오는 중…</div>';
+    fetch('/api/auto-trade-status?action=calendar-day&date=' + date).then(function(r){ return r.json(); }).then(function(d){
+      if(d.error) throw new Error(d.error);
+      Object.keys(d.names || {}).forEach(function(id){ if(!AT_STRATEGY_NAMES[id]) AT_STRATEGY_NAMES[id] = d.names[id]; });
+      var s = d.summary || info;
+      function money(v, market){ return '<span class="'+(v>=0?'up':'down')+'">'+calSigned(v, market)+'</span>'; }
+
+      var html = title;
+      html += '<p style="font-size:13px; margin:0 0 10px;">산 횟수 <b>'+(s.buys||0)+'</b>번 · 판 횟수 <b>'+(s.sells||0)+'</b>번' +
+        (s.sells ? ' · <span class="term" data-term="승률">승률</span> <b>'+fmt(s.wins/s.sells*100,0)+'%</b>' : '') +
+        ' · 국내 '+money(s.krPnl||0,'KR')+(s.usPnl ? ' · 해외 '+money(s.usPnl,'US') : '') +
+        ' <span style="color:var(--muted-2); font-size:12px;">(수수료·세금 '+atFmtPrice('KR', s.krFee||0)+(s.usFee ? ' + '+atFmtPrice('US', s.usFee) : '')+' 뺀 금액)</span></p>';
+
+      // 전략별 성적
+      var by = s.byStrategy || {};
+      var ids = Object.keys(by).sort(function(a,b){
+        var ia = AT_STRATEGY_ORDER.indexOf(a), ib = AT_STRATEGY_ORDER.indexOf(b);
+        return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib);
+      });
+      if(ids.length){
+        html += '<div style="font-size:12.5px; font-weight:700; margin:12px 0 6px;">전략별로 보면</div>' +
+          '<div class="cal-scroll"><table><thead><tr><th>전략</th><th>산 횟수</th><th>판 횟수</th><th>국내 손익</th><th>해외 손익</th></tr></thead><tbody>' +
+          ids.map(function(id){
+            var r = by[id];
+            return '<tr><td>'+atStratLabel(id)+'</td><td>'+(r.buys||0)+'</td><td>'+(r.sells||0)+'</td>' +
+              '<td>'+(r.krPnl ? money(r.krPnl,'KR') : '—')+'</td><td>'+(r.usPnl ? money(r.usPnl,'US') : '—')+'</td></tr>';
+          }).join('') + '</tbody></table></div>';
+      }
+
+      // 매매 하나하나
+      var trades = d.trades || [];
+      if(trades.length){
+        html += '<details class="more" style="margin-top:12px;"'+(trades.length <= 15 ? ' open' : '')+'><summary>매매 하나하나 자세히 보기 ('+trades.length+'건)</summary>' +
+          '<div class="cal-scroll wide" style="margin-top:8px;"><table><thead><tr><th>시각</th><th>전략</th><th>종목</th><th>구분</th><th>수량</th><th>가격</th><th>손익</th><th>이유</th></tr></thead><tbody>' +
+          trades.map(function(e){
+            var t = new Date(e.ts);
+            var hhmm = String(t.getHours()).padStart(2,'0') + ':' + String(t.getMinutes()).padStart(2,'0');
+            return '<tr><td>'+hhmm+'</td><td>'+atStratLabel(e.strategy || 'momentum')+'</td>' +
+              '<td>'+escapeHtml(e.name || e.symbol)+'</td><td>'+atSideLabel(e.side)+'</td><td>'+fmt(e.qty,0)+'</td>' +
+              '<td>'+atFmtPrice(e.market||'KR', e.price)+'</td><td>'+atLogPnlCell(e)+'</td>' +
+              '<td style="color:var(--muted); font-size:12px; max-width:240px;">'+escapeHtml(e.aiReason || e.reason || '')+'</td></tr>';
+          }).join('') + '</tbody></table></div></details>';
+      } else {
+        html += '<p style="color:var(--muted-2); font-size:12px; margin:10px 0 0;">이날의 매매 하나하나 기록은 남아 있지 않아요(장부가 생기기 전에 지워진 기록이에요). 위 합계만 볼 수 있어요.</p>';
+      }
+      box.innerHTML = html;
+    }).catch(function(e){
+      box.innerHTML = title + '<div style="color:var(--muted-2); font-size:13px;">'+errMsg(e)+'</div>';
+    });
+  }
 
   function loadCalendar(){
     loadEarningsCalendar();
@@ -3380,19 +3782,9 @@
       enabled: document.getElementById('atEnabled').checked,
       useAiCandidates: document.getElementById('atUseAi').checked,
       symbols: state.watchlist || [],
-      risk: {
-        positionPct: Number(document.getElementById('atPositionPct').value) || 5,
-        stopLossPct: Number(document.getElementById('atStopLoss').value) || 5,
-        takeProfitPct: Number(document.getElementById('atTakeProfit').value) || 10,
-        maxTradesPerDay: Number(document.getElementById('atMaxTrades').value) || 3
-      },
+      // 전략 켜기/끄기와 손절·익절 등은 "내 전략" 카드에서 바로 저장되니, 여기서는 안 보내요(서버가 기존 값을 그대로 둬요).
       adjustIntervalHours: Number(document.getElementById('atAdjustInterval').value) || 24,
-      evolveIntervalHours: Number(document.getElementById('atEvolveInterval').value) || 24,
-      strategies: AT_STRATEGY_ORDER.reduce(function(acc, id){
-        var el = document.getElementById('atStrat-'+id);
-        acc[id] = el ? el.checked : true;
-        return acc;
-      }, {})
+      evolveIntervalHours: Number(document.getElementById('atEvolveInterval').value) || 24
     };
     msg.textContent = '저장 중…';
     msg.style.color = 'var(--muted)';
