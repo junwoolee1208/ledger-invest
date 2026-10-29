@@ -19,6 +19,7 @@
 //   action=experiments,     GET  : 학습하는 자동조정의 실험 기록·가장 좋았던 설정·경고(사는 조건 문제 등)
 //   action=scorecard,       GET  : 전략별 7개 부문 채점표(하루 한 번 계산, ?refresh=1) + 점수 기록 + 최근 심층 평가서
 //   action=scorecard-weights, POST: 채점표 부문별 가중치 저장
+//   action=scorecard-detail, GET : strategy=ID&period=7|30|90|all — 전략 상세 성적표(세부 지표·기준선 비교·개선 가이드·나눠 보기)
 //   action=deep-eval,       GET  : 최근 AI 심층 평가서 / POST(로그인) 또는 GET ?auto=1&key=…(주 1회 스케줄러): 새로 받기
 //   action=chat,            POST : AI 전략 상담(로그인, 하루 30번) — 데이터 조회·그래프·표·변경 "제안"
 //   action=reset-all-risk,  POST : 모든 전략의 숫자를 처음 값으로 되돌리고 실험을 새로 시작(선택: 가상계좌도 초기화)
@@ -34,7 +35,8 @@ import { STRATEGY_IDS, STRATEGY_NAMES, WEIGHT_BASED_IDS, OWN_SETTINGS_IDS, BASE_
 import { isSellSide, ensureBackfilled, DAILY_KEY_PREFIX, TRADES_KEY_PREFIX } from './_ledger.js';
 import { EXPERIMENTS_KEY, BEST_RISK_KEY, FLAGS_KEY, LEARN, lessonLine, VERDICT_TEXT } from './_learning.js';
 import {
-  SCORECARD_CACHE_KEY, SCORECARD_HISTORY_KEY, SCORECARD_WEIGHTS_KEY, CATEGORIES, normalizeWeights, scoreStrategy, totalOf, gradeOf
+  SCORECARD_CACHE_KEY, SCORECARD_HISTORY_KEY, SCORECARD_WEIGHTS_KEY, SCORECARD_DETAIL_PREFIX, CATEGORIES,
+  normalizeWeights, scoreStrategy, scoreProfit, totalOf, gradeOf
 } from './_scorecard.js';
 import { runDeepEval, DEEPEVAL_LATEST_KEY, DEEPEVAL_HISTORY_KEY } from './_deepeval.js';
 import { fetchSymbolHistory } from './_backtest-core.js';
@@ -588,16 +590,21 @@ async function buildScorecard() {
 
   const history = await kvGetJson(SCORECARD_HISTORY_KEY, []);
   const weekAgo = history.find((h) => h.date <= kstDateMinus(7));
-  const baselinePct = pctOf('baseline');
   const enabledMap = cfg.strategies || {};
+  const analyze = (id) => scoreStrategy({
+    id, trades: trades.filter((t) => (t.strategy || 'momentum') === id), accountPct: pctOf(id),
+    experiments: experiments.filter((e) => e.strategyId === id), histories,
+    startingCash: { KR: accounts[id].kr.startingCash, US: accounts[id].us.startingCash },
+    learnable: isLearnable(id, customList), isDaytrade: id === 'daytrade'
+  });
+  // 수익성은 같은 기간 기준선(대조군)의 확정 손익과 비교해요
+  const baselineRes = analyze('baseline');
   const strategies = ids.map((id) => {
     const mine = experiments.filter((e) => e.strategyId === id);
     const custom = customList.find((c) => c.id === id);
-    const res = scoreStrategy({
-      id, trades: trades.filter((t) => (t.strategy || 'momentum') === id), accountPct: pctOf(id), baselinePct,
-      experiments: mine, histories, startingCash: { KR: accounts[id].kr.startingCash, US: accounts[id].us.startingCash },
-      isBaseline: id === 'baseline', learnable: !WEIGHT_BASED_IDS.includes(id) && id !== 'baseline' && id !== 'daytrade' && !custom
-    });
+    const res = id === 'baseline' ? baselineRes : analyze(id);
+    const profit = scoreProfit(res.analysis, baselineRes.realizedPct, id === 'baseline');
+    if (profit) res.cats.profit = profit;
     const total = totalOf(res.cats, weights);
     let risk = null;
     if (BASE_RISK[id]) risk = Object.assign({}, id === 'momentum' ? Object.assign({}, BASE_RISK.momentum, cfg.risk || {}) : BASE_RISK[id], overrides[id] || {});
@@ -629,6 +636,108 @@ async function buildScorecard() {
   const nextHistory = [{ date: today, totals }].concat(history.filter((h) => h.date !== today)).slice(0, 120);
   await Promise.all([kvSetJson(SCORECARD_CACHE_KEY, data), kvSetJson(SCORECARD_HISTORY_KEY, nextHistory)]);
   return data;
+}
+
+function isLearnable(id, customList) {
+  return !WEIGHT_BASED_IDS.includes(id) && id !== 'baseline' && id !== 'daytrade' && !customList.find((c) => c.id === id);
+}
+
+// ---- 전략 상세 성적표: 기간(7·30·90일·전체) 선택, 부문별 세부 지표 + 기준선 같은 지표, 개선 가이드, 나눠 보기 ----
+// 계산이 무거워서(시세 조회) 전략·기간마다 하루 한 번 계산해 저장해 두고 다시 써요. ?refresh=1이면 새로 계산.
+const DETAIL_PERIODS = { '7': 7, '30': 30, '90': 90, all: 120 };
+
+async function buildScorecardDetail(id, period) {
+  const days = DETAIL_PERIODS[period] || 30;
+  const [cfgRaw, overrides, customList, experiments, flags, weightsRaw, trades] = await Promise.all([
+    kvGetJson(CONFIG_KEY, null), kvGetJson(OVERRIDES_KEY, {}), kvGetJson(CUSTOM_KEY, []),
+    kvGetJson(EXPERIMENTS_KEY, []), kvGetJson(FLAGS_KEY, {}), kvGetJson(SCORECARD_WEIGHTS_KEY, null), loadRecentTrades(days)
+  ]);
+  const cfg = cfgRaw || DEFAULT_CONFIG;
+  const names = Object.assign({}, STRATEGY_NAMES);
+  customList.forEach((c) => { names[c.id] = c.name; });
+  if (!names[id]) return null;
+  const weights = normalizeWeights(weightsRaw);
+
+  const accounts = {};
+  for (const sid of [id, 'baseline']) {
+    const [kr, us] = await Promise.all([loadAccount(sid, 'KR'), loadAccount(sid, 'US')]);
+    accounts[sid] = { kr, us };
+  }
+  const costs = await loadCosts();
+  let token = null;
+  if (process.env.KIS_APP_KEY && process.env.KIS_APP_SECRET) {
+    try { token = await getKisToken(); await attachLivePrices(accounts, token, costs); } catch (e) { token = null; }
+  }
+  const pctOf = (sid) => {
+    const a = accounts[sid];
+    return (accountPct(a.kr) * a.kr.startingCash + accountPct(a.us) * a.us.startingCash) / (a.kr.startingCash + a.us.startingCash);
+  };
+  const mineTrades = trades.filter((t) => (t.strategy || 'momentum') === id);
+  const baseTrades = trades.filter((t) => t.strategy === 'baseline');
+
+  // 산 뒤·판 뒤 가격(1·3·5거래일)을 보려고 국내 종목 일봉을 가져와요(이 전략 우선, 최대 40종목, 5개씩 동시에)
+  const histories = {};
+  if (token) {
+    const symbols = Array.from(new Set(mineTrades.concat(baseTrades).filter((t) => /^\d{6}$/.test(t.symbol)).map((t) => t.symbol))).slice(0, 40);
+    for (let i = 0; i < symbols.length; i += 5) {
+      await Promise.all(symbols.slice(i, i + 5).map(async (s) => {
+        try { histories[s] = await fetchSymbolHistory(token, s, days + 20); } catch (e) { histories[s] = []; }
+      }));
+    }
+  }
+
+  const run = (sid, list) => scoreStrategy({
+    id: sid, trades: list, accountPct: pctOf(sid), experiments: experiments.filter((e) => e.strategyId === sid), histories,
+    startingCash: { KR: accounts[sid].kr.startingCash, US: accounts[sid].us.startingCash },
+    learnable: isLearnable(sid, customList), isDaytrade: sid === 'daytrade'
+  });
+  const base = run('baseline', baseTrades);
+  const mine = id === 'baseline' ? base : run(id, mineTrades);
+  const profit = scoreProfit(mine.analysis, base.realizedPct, id === 'baseline');
+  if (profit) mine.cats.profit = profit;
+  const baseProfit = scoreProfit(base.analysis, base.realizedPct, true);
+  if (baseProfit) base.cats.profit = baseProfit;
+
+  // 세부 지표마다 기준선의 같은 지표를 붙여요(괄호 속 날짜·건수는 빼고 이름으로 짝지음)
+  const keyOf = (label) => label.replace(/\(.*?\)/g, '').trim();
+  const metrics = {};
+  Object.keys(mine.analysis.metrics).forEach((cat) => {
+    metrics[cat] = mine.analysis.metrics[cat].map((m) => {
+      const b = (base.analysis.metrics[cat] || []).find((x) => keyOf(x.label) === keyOf(m.label));
+      return Object.assign({}, m, { baseline: b && id !== 'baseline' ? b.value : null });
+    });
+  });
+
+  const total = totalOf(mine.cats, weights);
+  let risk = null;
+  if (BASE_RISK[id]) risk = Object.assign({}, id === 'momentum' ? Object.assign({}, BASE_RISK.momentum, cfg.risk || {}) : BASE_RISK[id], overrides[id] || {});
+  if (flags[id]) mine.analysis.guides.unshift({ cat: 'entry', level: 'bad', text: '⚠️ ' + flags[id].note });
+
+  return {
+    id, name: names[id], period, days, date: todayKST(), computedAt: Date.now(), priced: !!token,
+    total, grade: gradeOf(total), cats: mine.cats, baselineCats: base.cats, baselineTotal: totalOf(base.cats, weights),
+    metrics, guides: mine.analysis.guides, breakdowns: mine.analysis.breakdowns,
+    sells: mine.sells, buys: mine.buys, confidence: mine.confidence, risk,
+    lessons: experiments.filter((e) => e.strategyId === id && e.status === 'judged').slice(0, 8).map(lessonLine),
+    categories: CATEGORIES, weights
+  };
+}
+
+async function handleScorecardDetail(req, res) {
+  const id = String(req.query.strategy || '');
+  const period = DETAIL_PERIODS[String(req.query.period)] ? String(req.query.period) : '30';
+  try {
+    const key = SCORECARD_DETAIL_PREFIX + id + ':' + period;
+    const cached = await kvGetJson(key, null);
+    if (cached && cached.date === todayKST() && req.query.refresh !== '1') { res.status(200).json(cached); return; }
+    const data = await buildScorecardDetail(id, period);
+    if (!data) { res.status(404).json({ error: '그런 전략이 없어요.' }); return; }
+    await kvSetJson(key, data);
+    res.status(200).json(data);
+  } catch (e) {
+    console.error('auto-trade-status.js(scorecard-detail) error:', e);
+    res.status(500).json({ error: '서버 오류가 발생했습니다.' });
+  }
 }
 
 async function handleScorecard(req, res) {
@@ -703,6 +812,8 @@ const CHAT_TOOLS = [
     input_schema: { type: 'object', properties: { strategyId: { type: 'string' } } } },
   { name: 'get_scorecard', description: '전략별 채점표(수익성·안정성·승률손익비·매수 정확도·매도 타이밍·비용 효율·학습 7개 부문 점수와 근거, 종합 등급)를 가져온다.',
     input_schema: { type: 'object', properties: {} } },
+  { name: 'get_scorecard_detail', description: '전략 하나의 상세 성적표를 가져온다: 부문별 세부 지표(기준선 같은 지표와 비교), 개선 가이드(원인 거래 포함), 종목·월·주·시장 상황·시간대별 성적. "왜 ○○ 점수가 낮아?" 같은 질문에 쓴다.',
+    input_schema: { type: 'object', properties: { strategyId: { type: 'string' }, period: { type: 'string', enum: ['7', '30', '90', 'all'] } }, required: ['strategyId'] } },
   { name: 'get_calendar', description: '한 달의 날짜별 손익 요약(전략별 포함)을 가져온다.',
     input_schema: { type: 'object', properties: { month: { type: 'string', description: 'YYYY-MM' } }, required: ['month'] } },
   { name: 'get_pick_report', description: '종목 고르기 성적표(고른 종목·걸러낸 종목의 3거래일 뒤 결과, 상태별 교훈)를 가져온다.',
@@ -804,6 +915,16 @@ async function handleChat(req, res) {
       const cached = await kvGetJson(SCORECARD_CACHE_KEY, null);
       const sc = cached || await buildScorecard();
       return { date: sc.date, strategies: sc.strategies.map((s) => ({ id: s.id, name: s.name, total: s.total, grade: s.grade, confidence: s.confidence, trend: s.trend, cats: s.cats })), system: sc.system };
+    }
+    if (name === 'get_scorecard_detail') {
+      const period = DETAIL_PERIODS[String(input.period)] ? String(input.period) : '30';
+      const key = SCORECARD_DETAIL_PREFIX + input.strategyId + ':' + period;
+      const cached = await kvGetJson(key, null);
+      const d = (cached && cached.date === today) ? cached : await buildScorecardDetail(String(input.strategyId), period);
+      if (!d) return { error: '그런 전략이 없어요.' };
+      if (d !== cached) await kvSetJson(key, d);
+      return { name: d.name, period: d.period, total: d.total, grade: d.grade, confidence: d.confidence, cats: d.cats, baselineCats: d.baselineCats,
+        metrics: d.metrics, guides: d.guides.map((g) => ({ cat: g.cat, text: g.text, trades: (g.trades || []).slice(0, 8) })), breakdowns: d.breakdowns };
     }
     if (name === 'get_calendar') {
       const month = /^\d{4}-\d{2}$/.test(String(input.month)) ? input.month : today.slice(0, 7);
@@ -1363,6 +1484,7 @@ export default async function handler(req, res) {
   if (action === 'reset-all-risk') return handleResetAllRisk(req, res);
   if (action === 'scorecard') return handleScorecard(req, res);
   if (action === 'scorecard-weights') return handleScorecardWeights(req, res);
+  if (action === 'scorecard-detail') return handleScorecardDetail(req, res);
   if (action === 'deep-eval') return handleDeepEval(req, res);
   if (action === 'chat') return handleChat(req, res);
   return handleConfig(req, res);

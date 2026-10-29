@@ -890,7 +890,7 @@
     </div>
 
     <div class="banner">
-      <b>전략마다 7개 부문을 0~100점으로 채점해요</b><br>
+      <b>전략마다 9개 부문을 0~100점으로 채점해요</b><br>
       성적표처럼 부문별 점수와 종합 등급(A~F)을 보여줘요. 점수는 계산식으로 매겨서 늘 같은 기준이고, 점수마다 "왜 이 점수인지" 근거가 붙어요.
       <details class="more" style="margin:8px 0 0;"><summary>자세히 보기</summary><div class="more-body">
         <p><b>계산 범위</b>: 최근 30일의 매매 기록과 지금 가짜 계좌로 계산해요. 하루 한 번 계산해서 저장해 두고, [다시 계산]을 누르면 새로 계산해요(시세를 여러 번 조회해서 10~20초 걸릴 수 있어요).</p>
@@ -898,8 +898,13 @@
         <p><b>근거 부족</b>: 거래가 5번도 안 되는 부문은 점수를 매기지 않아요. 종합 점수는 점수가 있는 부문만으로 계산해요.</p>
         <p><b>추세(↑↓)</b>: 1주 전 종합 점수와 비교한 변화예요.</p>
         <p><b>가중치</b>: 어떤 부문을 더 중요하게 볼지 정할 수 있어요. 예를 들어 손해를 싫어하면 "안정성"을 2로 올리세요.</p>
+        <p><b>상세 보기</b>: 카드의 [상세 보기]를 누르면 기간(1주·30일·90일·전체)을 골라, 부문마다 세부 지표를 기준선과 나란히 보고, 개선 가이드(원인이 된 거래 목록 포함)와 시장 상황·월·주·종목·시각별 성적을 볼 수 있어요.</p>
+        <p><b>새 부문</b>: 📆 꾸준함(번 주의 비율)과 🌦️ 시장 적응력(상승장·하락장·횡보장별 성적)이 생겼어요. 시장 적응력은 이번 업데이트부터 매매마다 시장 상황을 기록하기 시작해서, 기록이 쌓일 때까지 "근거 부족"으로 보여요.</p>
       </div></details>
     </div>
+
+    <!-- 전략 상세 성적표: 카드의 [상세 보기]를 누르면 여기 열려요 -->
+    <div class="panel pad" id="scdDetailPanel" style="margin-bottom:20px; display:none;"></div>
 
     <div class="panel pad" style="margin-bottom:20px;">
       <div id="scdMeta" style="font-size:12.5px; color:var(--muted); margin-bottom:10px;"></div>
@@ -3139,6 +3144,7 @@
         ? '전략연구실의 "진화형 탐색" 결과를 이름 붙여 저장한 전략이에요. 여러 지표에 점수를 매겨서 점수가 기준을 넘으면 사요. 저장한 순간의 규칙을 그대로 써서, 탐색 결과가 바뀌어도 이 전략은 안 바뀌어요. 국내 주식만 해요.'
         : (def ? def.detail : '');
       el.innerHTML = '<p style="margin:0 0 6px;">'+escapeHtml(text)+'</p>' + (s.risk ? '<p style="margin:0;">지금 규칙: '+atRiskWords(s.risk)+'</p>' : '') +
+        '<div class="st-actions" style="margin-top:8px;"><button type="button" data-act="scorecard">📊 상세 성적표 보기 →</button></div>' +
         '<div class="st-lessons"></div>';
       if(s.kind === 'builtin' && s.id !== 'baseline') atLoadLessons(id, el.querySelector('.st-lessons'));
       return;
@@ -3204,6 +3210,7 @@
     var card = b.closest('.st-card'), id = card.dataset.id, s = atFindCard(id), act = b.dataset.act;
     if(!s) return;
 
+    if(act === 'scorecard'){ openScorecardDetail(id); return; }
     if(act === 'more'){
       atMenuOpen = atMenuOpen === id ? null : id;
       renderStrategyCards();
@@ -3975,6 +3982,7 @@
         (s.flag ? '<div style="font-size:12px; color:var(--up);">⚠️ '+escapeHtml(s.flag)+'</div>' : '') +
         '<div>'+rows+'</div>' +
         (s.lessons && s.lessons.length ? '<details class="more" style="margin:0;"><summary>실험에서 배운 것 '+s.lessons.length+'개</summary><div class="more-body"><ul style="margin:0; padding-left:18px;">'+s.lessons.map(function(l){ return '<li>'+escapeHtml(l)+'</li>'; }).join('')+'</ul></div></details>' : '') +
+        '<div class="st-actions"><button type="button" data-scd-detail="'+escapeHtml(s.id)+'">상세 보기 →</button></div>' +
       '</div>';
     }).join('');
 
@@ -4045,6 +4053,162 @@
     }
     box.innerHTML = html;
   }
+
+  /* ---- 전략 상세 성적표 ---- */
+  var scdDetail = { id:null, period:'30', compare:'', data:null, chart:null };
+  var SCD_PERIODS = [['7','1주'],['30','30일'],['90','90일'],['all','전체']];
+
+  // 다른 탭(내 전략 카드 등)에서도 부를 수 있어요: 채점표 탭으로 옮긴 뒤 그 전략의 상세 성적표를 열어요
+  function openScorecardDetail(id){
+    var tabBtn = document.querySelector('#tabs button[data-view="scorecard"]');
+    if(tabBtn && !tabBtn.classList.contains('active')) tabBtn.click();
+    scdDetail.id = id;
+    scdDetail.compare = '';
+    loadScorecardDetail(false);
+  }
+
+  function loadScorecardDetail(refresh){
+    var panel = document.getElementById('scdDetailPanel');
+    panel.style.display = '';
+    panel.innerHTML = '<div style="color:var(--muted); font-size:13px;"><span class="spinner"></span>&nbsp; '+escapeHtml(AT_STRATEGY_NAMES[scdDetail.id] || scdDetail.id)+' 상세 성적표를 계산하는 중… (처음엔 20~30초 걸릴 수 있어요)</div>';
+    panel.scrollIntoView({ behavior:'smooth', block:'start' });
+    fetch('/api/auto-trade-status?action=scorecard-detail&strategy='+encodeURIComponent(scdDetail.id)+'&period='+scdDetail.period+(refresh?'&refresh=1':''))
+      .then(function(r){ return r.json(); }).then(function(d){
+        if(d.error) throw new Error(d.error);
+        scdDetail.data = d;
+        renderScorecardDetail();
+      }).catch(function(e){ panel.innerHTML = '<div style="color:var(--muted-2); font-size:13px;">'+errMsg(e)+'</div>'; });
+  }
+
+  // 지표 값 보여주기: 값 + 기준선 값, 그리고 "더 높으면 좋은/낮으면 좋은" 지표면 기준선보다 나은지 표시
+  function scdMetricRow(m){
+    var fmtV = function(v){ return (v === null || v === undefined) ? '—' : (m.unit === '원' ? Math.round(v).toLocaleString()+'원' : fmt(v, Math.abs(v) >= 100 ? 0 : 2)+m.unit); };
+    var mark = '';
+    if(m.better && m.value !== null && m.baseline !== null && m.baseline !== undefined && m.value !== m.baseline){
+      var good = m.better === 'high' ? m.value > m.baseline : m.value < m.baseline;
+      mark = good ? '<span style="color:#1D9E75;">▲ 기준선보다 좋음</span>' : '<span style="color:var(--muted-2);">▼ 기준선보다 나쁨</span>';
+    }
+    return '<tr><td>'+escapeHtml(m.label)+(m.note ? '<div style="color:var(--muted-2); font-size:11px;">'+escapeHtml(m.note)+'</div>' : '')+'</td>' +
+      '<td style="text-align:right; font-weight:600; white-space:nowrap;">'+fmtV(m.value)+'</td>' +
+      '<td style="text-align:right; color:var(--muted); white-space:nowrap;">'+fmtV(m.baseline)+'</td><td style="font-size:11px; white-space:nowrap;">'+mark+'</td></tr>';
+  }
+
+  function scdTradesTable(list){
+    return '<div style="overflow-x:auto;"><table style="min-width:520px; font-size:12px;"><thead><tr><th>날짜</th><th>종목</th><th>구분</th><th>가격</th><th>손익</th><th>산 날 상승률</th><th>판 뒤 3일</th></tr></thead><tbody>' +
+      list.map(function(t){
+        return '<tr><td>'+escapeHtml(t.date||'')+'</td><td>'+escapeHtml(t.name||t.symbol)+'</td><td>'+atSideLabel(t.side)+'</td><td>'+fmt(t.price,0)+'</td>' +
+          '<td>'+(typeof t.pnlPct === 'number' ? '<span class="'+(t.pnlPct>=0?'up':'down')+'">'+(t.pnlPct>=0?'+':'')+fmt(t.pnlPct,2)+'%</span>' : '—')+'</td>' +
+          '<td>'+(typeof t.entryChangePct === 'number' ? (t.entryChangePct>=0?'+':'')+fmt(t.entryChangePct,1)+'%' : '—')+'</td>' +
+          '<td>'+(typeof t.after3 === 'number' ? (t.after3>=0?'+':'')+fmt(t.after3,1)+'%' : '—')+'</td></tr>';
+      }).join('') + '</tbody></table></div>';
+  }
+
+  function renderScorecardDetail(){
+    var d = scdDetail.data;
+    var panel = document.getElementById('scdDetailPanel');
+    var color = d.grade ? SCD_GRADE_COLOR[d.grade] : 'var(--muted-2)';
+    var others = (scdData && scdData.strategies || []).filter(function(s){ return s.id !== d.id && s.id !== 'baseline'; });
+    var html = '<div style="display:flex; justify-content:space-between; align-items:flex-start; gap:10px; flex-wrap:wrap;">' +
+      '<div><div style="font-size:12px; color:var(--muted-2);">상세 성적표</div><div style="font-size:17px; font-weight:800;">'+atStratLabel(d.id)+'</div>' +
+      '<div style="font-size:12px; color:var(--muted);">신뢰도 '+escapeHtml(d.confidence)+' · 판 '+d.sells+'번 · 산 '+d.buys+'번'+(d.priced ? '' : ' · <span style="color:var(--up);">시세를 못 불러와 일부 부문 빠짐</span>')+'</div></div>' +
+      '<div style="display:flex; align-items:center; gap:14px;"><div style="text-align:center;"><div style="font-size:34px; font-weight:800; color:'+color+'; line-height:1;">'+(d.grade||'—')+'</div><div style="font-size:12px;">'+(d.total===null?'—':d.total+'점')+'</div></div>' +
+      '<div style="font-size:11.5px; color:var(--muted);">기준선<br><b>'+(d.baselineTotal===null||d.baselineTotal===undefined?'—':d.baselineTotal+'점')+'</b></div>' +
+      '<button type="button" class="icon-btn" id="scdDetailClose" aria-label="닫기">✕</button></div></div>';
+
+    html += '<div style="display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap; margin:10px 0;">' +
+      '<div class="at-log-tabs" id="scdPeriodTabs" style="margin:0;">'+SCD_PERIODS.map(function(p){ return '<button type="button" data-period="'+p[0]+'" class="'+(d.period===p[0]?'active':'')+'">'+p[1]+'</button>'; }).join('')+'</div>' +
+      '<button type="button" class="btn ghost" id="scdDetailRefresh" style="font-size:12px; padding:6px 12px;">다시 계산</button></div>';
+
+    // 부문 비교 그래프(거미줄 모양): 이 전략 vs 기준선 (+ 비교할 전략, 30일 채점표 기준)
+    html += '<div style="display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap;"><b style="font-size:13px;">부문 비교</b>' +
+      '<label style="font-size:12px;">함께 볼 전략 <select id="scdCompare"><option value="">없음</option>'+others.map(function(s){ return '<option value="'+escapeHtml(s.id)+'"'+(scdDetail.compare===s.id?' selected':'')+'>'+escapeHtml(s.name)+'</option>'; }).join('')+'</select></label></div>' +
+      '<p class="easy" style="font-size:12px; margin:4px 0;">바깥으로 넓을수록 점수가 높아요. 점선은 기준선(아무 조건 없이 산 대조군)이에요. 함께 볼 전략은 30일 채점표 점수로 그려요.</p>' +
+      '<div class="chart-wrap small" style="height:300px;"><canvas id="scdRadar"></canvas></div>';
+
+    // 개선 가이드 모음
+    if(d.guides && d.guides.length){
+      html += '<div style="margin:14px 0 6px; font-weight:700; font-size:13.5px;">🔧 개선 가이드</div>' + d.guides.map(function(g, gi){
+        return '<div class="chat-proposal" style="background:'+(g.level==='bad'?'#FFF5F5':'#FFF8EC')+'; border-color:transparent;">'+escapeHtml(g.text) +
+          (g.trades && g.trades.length ? '<details class="more" style="margin:6px 0 0;"><summary>'+escapeHtml(g.tradesLabel || '해당 거래')+' '+g.trades.length+'건 보기</summary><div class="more-body" style="padding:6px;">'+scdTradesTable(g.trades)+'</div></details>' : '') + '</div>';
+      }).join('');
+    }
+
+    // 부문별 세부 지표
+    html += '<div style="margin:14px 0 6px; font-weight:700; font-size:13.5px;">부문별 세부 지표</div>';
+    html += d.categories.map(function(c){
+      var v = d.cats[c.id], bv = d.baselineCats ? d.baselineCats[c.id] : null;
+      var rows = (d.metrics[c.id] || []);
+      return '<details class="at-log-group"><summary style="display:grid; grid-template-columns:1fr 120px; gap:8px; align-items:center;">' +
+        '<span>'+c.icon+' '+escapeHtml(c.label)+' <span style="font-weight:400; color:var(--muted-2); font-size:12px;">'+(v ? gradeLetter(v.score) : '근거 부족')+(bv && d.id !== 'baseline' ? ' · 기준선 '+bv.score : '')+'</span></span>'+scdBar(v ? v.score : null)+'</summary>' +
+        '<div style="padding:10px 14px; font-size:12.5px;">' +
+          '<p style="margin:0 0 6px; color:var(--muted);">'+escapeHtml(c.easy)+'</p>' +
+          (v ? '<p style="margin:0 0 8px;"><b>점수 근거</b> — '+escapeHtml(v.why)+'</p>' : '<p style="margin:0 0 8px; color:var(--muted-2);">거래가 적거나 해당하지 않아서 점수를 안 매겼어요.</p>') +
+          (rows.length ? '<div style="overflow-x:auto;"><table style="min-width:420px;"><thead><tr><th>세부 지표</th><th style="text-align:right;">이 전략</th><th style="text-align:right;">기준선</th><th></th></tr></thead><tbody>'+rows.map(scdMetricRow).join('')+'</tbody></table></div>' : '') +
+          '<details class="more" style="margin:8px 0 0;"><summary>점수 기준</summary><div class="more-body">'+escapeHtml(c.rubric || '')+'<br>등급: A 80점 이상 · B 65 · C 50 · D 35 · F 그 아래</div></details>' +
+        '</div></details>';
+    }).join('');
+
+    // 나눠 보기
+    var br = d.breakdowns || {};
+    var bars = function(list, key, labelFn){
+      var max = Math.max.apply(null, list.map(function(x){ return Math.abs(x[key]) || 0; }).concat([0.01]));
+      return list.map(function(x){
+        var v = x[key] || 0, w = Math.round(Math.abs(v) / max * 100);
+        return '<div style="display:grid; grid-template-columns:90px 1fr 64px; gap:8px; align-items:center; font-size:12px; margin:3px 0;"><span>'+escapeHtml(labelFn(x))+'</span>' +
+          '<span style="height:8px; background:var(--panel-2); border-radius:999px; overflow:hidden;"><span style="display:block; height:100%; width:'+w+'%; background:'+(v>=0?'var(--up)':'var(--down)')+';"></span></span>' +
+          '<span class="'+(v>=0?'up':'down')+'" style="text-align:right;">'+(v>=0?'+':'')+fmt(v,2)+'%</span></div>';
+      }).join('');
+    };
+    html += '<div style="margin:16px 0 6px; font-weight:700; font-size:13.5px;">나눠 보기</div><div class="st-cards">';
+    html += '<div class="st-card" style="min-height:0;"><b style="font-size:13px;">🌦️ 시장 상황별</b>' + ((br.byRegime||[]).length
+      ? '<table style="font-size:12px;"><thead><tr><th>상황</th><th>판 횟수</th><th>평균 손익</th><th>승률</th></tr></thead><tbody>'+br.byRegime.map(function(r){ return '<tr><td>'+escapeHtml(r.regime)+'</td><td>'+r.n+'</td><td class="'+(r.avgPnlPct>=0?'up':'down')+'">'+(r.avgPnlPct>=0?'+':'')+r.avgPnlPct+'%</td><td>'+r.winRate+'%</td></tr>'; }).join('')+'</tbody></table>'
+      : '<p class="easy" style="font-size:12px;">데이터 쌓는 중이에요. 이번 업데이트부터 매매할 때마다 그날 시장 상황을 기록해요.</p>') + '</div>';
+    html += '<div class="st-card" style="min-height:0;"><b style="font-size:13px;">📅 월별 확정 손익(원금 대비)</b>'+((br.byMonth||[]).length ? bars(br.byMonth, 'pnlPct', function(x){ return x.month; }) : '<p class="easy" style="font-size:12px;">아직 판 거래가 없어요.</p>')+'</div>';
+    html += '<div class="st-card" style="min-height:0;"><b style="font-size:13px;">📆 주별 확정 손익</b>'+((br.byWeek||[]).length ? bars(br.byWeek.slice(-8), 'pnlPct', function(x){ return x.week.slice(5); }) : '<p class="easy" style="font-size:12px;">아직 판 거래가 없어요.</p>')+'</div>';
+    var symTable = function(list){ return list.length ? '<table style="font-size:12px;"><tbody>'+list.map(function(x){ return '<tr><td>'+escapeHtml(x.name)+'</td><td>'+x.n+'번</td><td class="'+(x.pnlPct>=0?'up':'down')+'" style="text-align:right;">'+(x.pnlPct>=0?'+':'')+x.pnlPct+'%</td></tr>'; }).join('')+'</tbody></table>' : '<p class="easy" style="font-size:12px;">없음</p>'; };
+    html += '<div class="st-card" style="min-height:0;"><b style="font-size:13px;">🏆 가장 번 종목</b>'+symTable(br.topSymbols||[])+'<b style="font-size:13px; margin-top:6px;">🩹 가장 잃은 종목</b>'+symTable(br.bottomSymbols||[])+'</div>';
+    if((br.byBuyHour||[]).length){
+      html += '<div class="st-card" style="min-height:0;"><b style="font-size:13px;">⏰ 산 시각별 평균 손익</b>'+bars(br.byBuyHour, 'avgPnlPct', function(x){ return x.hour+'시대 ('+x.n+'번)'; })+'</div>';
+    }
+    html += '</div>';
+    if(d.lessons && d.lessons.length){
+      html += '<details class="more" style="margin-top:12px;"><summary>📚 실험에서 배운 것 '+d.lessons.length+'개</summary><div class="more-body"><ul style="margin:0; padding-left:18px;">'+d.lessons.map(function(l){ return '<li>'+escapeHtml(l)+'</li>'; }).join('')+'</ul></div></details>';
+    }
+    panel.innerHTML = html;
+    scdDrawRadar();
+  }
+
+  function scdDrawRadar(){
+    var d = scdDetail.data;
+    if(scdDetail.chart){ scdDetail.chart.destroy(); scdDetail.chart = null; }
+    var labels = d.categories.map(function(c){ return c.label; });
+    var vals = function(cats){ return d.categories.map(function(c){ return cats && cats[c.id] ? cats[c.id].score : null; }); };
+    var datasets = [{ label: d.name, data: vals(d.cats), borderColor:'#378ADD', backgroundColor:'rgba(55,138,221,0.18)', pointRadius:3, spanGaps:true }];
+    if(d.id !== 'baseline') datasets.push({ label:'기준선', data: vals(d.baselineCats), borderColor:'#888780', backgroundColor:'rgba(136,135,128,0.06)', borderDash:[4,4], pointRadius:2, spanGaps:true });
+    if(scdDetail.compare && scdData){
+      var other = scdData.strategies.filter(function(s){ return s.id === scdDetail.compare; })[0];
+      if(other) datasets.push({ label: other.name+' (30일)', data: vals(other.cats), borderColor:'#D85A30', backgroundColor:'rgba(216,90,48,0.10)', pointRadius:2, spanGaps:true });
+    }
+    scdDetail.chart = new Chart(document.getElementById('scdRadar').getContext('2d'), {
+      type:'radar', data:{ labels: labels, datasets: datasets },
+      options:{ responsive:true, maintainAspectRatio:false, scales:{ r:{ min:0, max:100, ticks:{ stepSize:25, font:{ size:10 } }, pointLabels:{ font:{ size:11 } } } },
+        plugins:{ legend:{ position:'bottom', labels:{ boxWidth:10, font:{ size:11 } } } } }
+    });
+  }
+
+  document.getElementById('scdDetailPanel').addEventListener('click', function(e){
+    if(e.target.closest('#scdDetailClose')){ this.style.display = 'none'; if(scdDetail.chart){ scdDetail.chart.destroy(); scdDetail.chart = null; } return; }
+    if(e.target.closest('#scdDetailRefresh')){ loadScorecardDetail(true); return; }
+    var p = e.target.closest('[data-period]');
+    if(p){ scdDetail.period = p.dataset.period; loadScorecardDetail(false); }
+  });
+  document.getElementById('scdDetailPanel').addEventListener('change', function(e){
+    if(e.target.id === 'scdCompare'){ scdDetail.compare = e.target.value; scdDrawRadar(); }
+  });
+  document.getElementById('scdCards').addEventListener('click', function(e){
+    var b = e.target.closest('[data-scd-detail]');
+    if(b){ scdDetail.id = b.dataset.scdDetail; scdDetail.compare = ''; loadScorecardDetail(false); }
+  });
 
   document.getElementById('scdRefresh').addEventListener('click', function(){ loadScorecard(true); });
   document.getElementById('scdWeightsSave').addEventListener('click', function(){

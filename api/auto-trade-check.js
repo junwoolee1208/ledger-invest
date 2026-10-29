@@ -623,7 +623,9 @@ async function processStrategyMarket(strategyDef, marketKey, fetchQuote, cfg, ca
         fee: Math.round(sell.fee * digits) / digits,
         mode: 'dryrun',
         reason: pos.reason || null,
-        entryChangePct: typeof pos.entryChangePct === 'number' ? pos.entryChangePct : null // 산 날의 전일 대비 등락률(고점 매수 분석용)
+        entryChangePct: typeof pos.entryChangePct === 'number' ? pos.entryChangePct : null, // 산 날의 전일 대비 등락률(고점 매수 분석용)
+        // 채점표 상세 분석용: 산 날·산 때 시장 상황 → 보유 기간, 시장 상황별 성적을 계산해요
+        entryDate: pos.entryDate || null, entryRegime: pos.entryRegime || null, regime: cfg._regime || null
       };
       // 단타는 손절이 자주 나서, 매번 AI에게 원인을 묻지 않습니다(API 비용 절약).
       if (side === 'STOP_LOSS' && !intraday) {
@@ -678,13 +680,14 @@ async function processStrategyMarket(strategyDef, marketKey, fetchQuote, cfg, ca
       positions[cand.symbol] = {
         qty, avgPrice: q.price, costBasis: Math.round(buy.total * digits) / digits,
         entryDate: today, name: displayName, excd: q.excd || null, reason: cand.reason || null,
-        entryChangePct: q.changePct // 산 순간 이미 어제보다 몇 % 올라 있었는지 — 팔 때 기록에 옮겨 "고점 매수" 여부를 따져요
+        entryChangePct: q.changePct, // 산 순간 이미 어제보다 몇 % 올라 있었는지 — 팔 때 기록에 옮겨 "고점 매수" 여부를 따져요
+        entryRegime: cfg._regime || null // 산 날의 시장 상황(상승장·하락장…) — 시장 상황별 성적용
       };
       const entry = {
         ts: Date.now(), date: today, market: marketKey, strategy: strategyDef.id,
         symbol: cand.symbol, name: displayName, side: 'BUY',
         qty, price: q.price, amount: Math.round(buy.total * digits) / digits,
-        fee: Math.round(buy.fee * digits) / digits, reason: cand.reason, mode: 'dryrun', entryChangePct: q.changePct
+        fee: Math.round(buy.fee * digits) / digits, reason: cand.reason, mode: 'dryrun', entryChangePct: q.changePct, regime: cfg._regime || null
       };
       actions.push(entry);
     }
@@ -777,6 +780,15 @@ export default async function handler(req, res) {
     const strategiesEnabled = cfg.strategies || {};
     const activeDefs = STRATEGY_DEFS.filter((def) => strategiesEnabled[def.id] !== false);
 
+    // 오늘의 시장 상황(상승장·하락장·횡보장 × 평온·고변동)을 매매 기록마다 남겨서, 채점표의 "시장 적응력"을 계산해요.
+    // 하루 한 번만 계산해 저장하니(classifyTodayRegime 캐시) 자주 불려도 부담이 없어요. 실패해도 매매는 계속돼요.
+    // cfg._regime은 이번 실행 동안만 쓰는 값이에요(설정에 저장되지 않음).
+    try {
+      cfg._regime = krCandidates.length ? await classifyTodayRegime(token, krCandidates, today) : ((await kvGetJson(REGIME_CACHE_KEY, null)) || {}).label || null;
+    } catch (e) {
+      cfg._regime = null;
+    }
+
     const results = {};
     const allActions = [];
 
@@ -815,7 +827,7 @@ export default async function handler(req, res) {
     // 시장적응형: 오늘의 시장 상황(구간)을 분류하고, backtest.js가 그 구간 전용으로 찾아둔 전략을 가져옵니다.
     let regimeStrategy = null, regimeLabel = null;
     if (strategiesEnabled['regime-adaptive'] !== false) {
-      regimeLabel = await classifyTodayRegime(token, krCandidates, today);
+      regimeLabel = cfg._regime || await classifyTodayRegime(token, krCandidates, today);
       const regimeState = await kvGetJson(REGIME_KEY_PREFIX + regimeLabel, null);
       regimeStrategy = regimeState && regimeState.globalBest && regimeState.globalBest.strategy;
 
