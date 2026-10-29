@@ -20,6 +20,7 @@ import { getKisToken, kisHeaders, num, KIS_BASE } from './_kis.js';
 import { kvGetJson, kvSetJson, kvReady } from './_kv.js';
 import { fetchSymbolHistory, annotateWithFactors, scoreForStrategy, classifyRegimeByDate } from './_backtest-core.js';
 import { loadCosts, planBuy, planSell, positionCostBasis, fetchUsdKrw, REALIZED_KEY_PREFIX } from './_costs.js';
+import { normalizeDaytrade, hhmmToMin } from './_daytrade.js';
 
 export const config = { maxDuration: 30 };
 
@@ -153,6 +154,30 @@ const STRATEGY_DEFS = [
     getRisk: () => ({ positionPct: 5, stopLossPct: 5, takeProfitPct: 10, maxTradesPerDay: 3 }),
     // 등락률 조건 없이 후보에 오르면 그냥 삽니다 — 다른 전략들이 "무조건 사는 것"보다 실제로 나은지 비교하는 대조군.
     shouldBuy: () => true
+  },
+  {
+    id: 'daytrade',
+    name: '데이트레이딩(당일 청산)',
+    // 다른 전략은 며칠씩 들고 가는 "스윙"이고, 이 전략만 하루 안에 사고팔고 장 마감 전에 전부 정리합니다.
+    // 국내 종목만 지원(미국장은 한국 시간 밤이라 우선 국내로 검증).
+    // 모든 숫자(사는 조건·시간·손절/익절·손실한도·매수 횟수)는 사용자가 "데이트레이딩 설정"에서 정한 값(cfg.daytrade)을 따르고,
+    // 기본값은 _daytrade.js에 있어요. 그래서 AI 자동조정·수동 수정 대상에서는 빠집니다(설정이 한 곳에서만 바뀌도록).
+    intraday: true,
+    krOnly: true,
+    getRisk: (cfg) => {
+      const s = normalizeDaytrade(cfg.daytrade);
+      return { positionPct: s.positionPct, stopLossPct: s.stopLossPct, takeProfitPct: s.takeProfitPct, maxTradesPerDay: s.maxBuysPerDay };
+    },
+    // 전일 종가가 아니라 "오늘 시가 대비" 정해둔 범위만큼 오르고, 오늘 고가에서 많이 밀리지 않은(버티는) 종목만 삽니다.
+    // 전일 대비 너무 급등한 종목은 상한가 근처라 변동이 커서 피합니다.
+    shouldBuy: (cand, q, cfg) => {
+      if (!q.open || !q.high || q.changePct === null) return false;
+      const s = normalizeDaytrade(cfg.daytrade);
+      const fromOpenPct = ((q.price - q.open) / q.open) * 100;
+      const offHighPct = ((q.high - q.price) / q.high) * 100;
+      return fromOpenPct >= s.minFromOpenPct && fromOpenPct <= s.maxFromOpenPct &&
+        offHighPct <= s.maxOffHighPct && q.changePct <= s.maxChangePct;
+    }
   }
 ];
 
@@ -175,6 +200,36 @@ function todayKST() {
   return d.toISOString().slice(0, 10);
 }
 
+// ---- 장 운영시간 ----
+// 장이 닫혀 있을 때 받은 시세는 "마지막 체결가"라 실제로는 그 가격에 사고팔 수 없어요. 예전엔 스케줄러가 밤에 불러도
+// 그대로 가상매매가 일어나 결과가 부풀려질 수 있었기 때문에, 이제 모든 전략이 장중에만 매매합니다.
+// 국내는 15:20부터 동시호가(한 번에 체결되는 마감 경매)라 그 전까지만, 미국은 정규장(뉴욕 09:30~16:00)만 봅니다.
+// 공휴일 달력은 따로 없어서, 평일 공휴일엔 시세가 안 움직여 사실상 매수 조건에 잘 안 걸리는 정도로만 걸러져요.
+const KR_OPEN_MIN = 9 * 60;
+const KR_CLOSE_MIN = 15 * 60 + 20;
+const US_OPEN_MIN = 9 * 60 + 30; // 뉴욕 현지 시각 — 서머타임은 Intl이 알아서 반영
+const US_CLOSE_MIN = 16 * 60;
+
+// minutes: 그 시장 현지 시각을 "자정부터 몇 분"으로 바꾼 값 (단타 전략의 시간대 규칙에 씀)
+function marketClock(marketKey) {
+  if (marketKey === 'KR') {
+    const d = new Date(Date.now() + 9 * 60 * 60 * 1000);
+    const day = d.getUTCDay();
+    const minutes = d.getUTCHours() * 60 + d.getUTCMinutes();
+    return { open: day >= 1 && day <= 5 && minutes >= KR_OPEN_MIN && minutes < KR_CLOSE_MIN, minutes };
+  }
+  const parts = {};
+  new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', weekday: 'short', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' })
+    .formatToParts(new Date()).forEach((p) => { parts[p.type] = p.value; });
+  const minutes = Number(parts.hour) * 60 + Number(parts.minute);
+  const weekday = parts.weekday !== 'Sat' && parts.weekday !== 'Sun';
+  return { open: weekday && minutes >= US_OPEN_MIN && minutes < US_CLOSE_MIN, minutes };
+}
+
+function isSellSide(side) {
+  return side === 'STOP_LOSS' || side === 'TAKE_PROFIT' || side === 'DAY_CLOSE';
+}
+
 async function fetchDomesticQuote(token, symbol) {
   const url = `${KIS_BASE}/uapi/domestic-stock/v1/quotations/inquire-price?FID_COND_MRKT_DIV_CODE=J&FID_INPUT_ISCD=${symbol}`;
   const r = await fetch(url, { headers: kisHeaders(token, 'FHKST01010100') });
@@ -184,7 +239,8 @@ async function fetchDomesticQuote(token, symbol) {
   const o = data.output;
   return {
     symbol, name: o.hts_kor_isnm || symbol,
-    price: num(o.stck_prpr), changePct: num(o.prdy_ctrt)
+    price: num(o.stck_prpr), changePct: num(o.prdy_ctrt),
+    open: num(o.stck_oprc), high: num(o.stck_hgpr) // 오늘 시가·고가 — 데이트레이딩 전략이 장중 흐름을 볼 때 씀(추가 API 호출 없음)
   };
 }
 
@@ -276,7 +332,7 @@ function clipRisk(r, fallback) {
 function computeRecentStats(log, strategyId, lookbackDays, today) {
   const cutoff = Date.parse(today + 'T00:00:00Z') - lookbackDays * 86400000;
   const closed = log
-    .filter((e) => e.strategy === strategyId && (e.side === 'STOP_LOSS' || e.side === 'TAKE_PROFIT') && e.ts >= cutoff)
+    .filter((e) => e.strategy === strategyId && isSellSide(e.side) && e.ts >= cutoff)
     .sort((a, b) => b.ts - a.ts);
   if (closed.length === 0) return null;
   const wins = closed.filter((e) => e.pnlPct > 0);
@@ -349,6 +405,7 @@ async function maybeRunDailyAdjust(cfg, apiKey, today, log) {
     let changesDirty = false;
 
     for (const def of STRATEGY_DEFS) {
+      if (def.intraday) continue; // 단타 설정은 사용자가 "데이트레이딩 설정"에서만 바꿈
       const stats = computeRecentStats(log, def.id, ADJUST_LOOKBACK_DAYS, today);
       if (!stats || stats.trades < ADJUST_MIN_TRADES) continue;
 
@@ -408,7 +465,16 @@ async function processStrategyMarket(strategyDef, marketKey, fetchQuote, cfg, ca
   let cash = await kvGetJson(keys.cashKey, keys.startingCash);
   if (typeof cash !== 'number') cash = keys.startingCash;
 
-  const tradesToday = log.filter((e) => e.date === today && e.market === marketKey && e.strategy === strategyDef.id && e.side !== 'STOP_LOSS').length;
+  // 장이 닫혀 있으면 아무것도 하지 않습니다(손절·익절도 — 닫힌 장의 가격으론 실제로 팔 수 없으니까요).
+  const clock = marketClock(marketKey);
+  if (!clock.open) return { actions: [], cash, positions };
+  const intraday = !!strategyDef.intraday;
+  const dt = intraday ? normalizeDaytrade(cfg.daytrade) : null; // 단타 설정(시간·손실한도·재매수 대기)
+
+  // 오늘 매매 횟수: 스윙 전략은 기존처럼 "매수+익절"을 세고, 단타는 "매수"만 셉니다
+  // (단타는 파는 건 언제든 할 수 있어야 하니까 — 익절/청산이 한도에 막혀 못 팔면 안 돼요).
+  const tradesToday = log.filter((e) => e.date === today && e.market === marketKey && e.strategy === strategyDef.id &&
+    (intraday ? e.side === 'BUY' : e.side !== 'STOP_LOSS')).length;
   const positionPct = risk.positionPct || 5;
   const stopLossPct = risk.stopLossPct || 5;
   const takeProfitPct = risk.takeProfitPct || 10;
@@ -424,8 +490,10 @@ async function processStrategyMarket(strategyDef, marketKey, fetchQuote, cfg, ca
     const pnlPct = ((q.price - pos.avgPrice) / pos.avgPrice) * 100;
 
     let side = null;
-    if (pnlPct <= -stopLossPct) side = 'STOP_LOSS';
-    else if (pnlPct >= takeProfitPct && tradesToday < maxTradesPerDay) side = 'TAKE_PROFIT';
+    // 단타: 청산 시각이 넘었거나, (스케줄러가 멈췄던 등의 이유로) 어제 산 게 남아 있으면 손익과 상관없이 정리합니다.
+    if (intraday && (clock.minutes >= hhmmToMin(dt.closeAt) || pos.entryDate !== today)) side = 'DAY_CLOSE';
+    else if (pnlPct <= -stopLossPct) side = 'STOP_LOSS';
+    else if (pnlPct >= takeProfitPct && (intraday || tradesToday < maxTradesPerDay)) side = 'TAKE_PROFIT';
 
     if (side) {
       const sell = planSell(costs, marketKey, pos.qty, q.price);
@@ -447,7 +515,8 @@ async function processStrategyMarket(strategyDef, marketKey, fetchQuote, cfg, ca
         mode: 'dryrun',
         reason: pos.reason || null
       };
-      if (side === 'STOP_LOSS') {
+      // 단타는 손절이 자주 나서, 매번 AI에게 원인을 묻지 않습니다(API 비용 절약).
+      if (side === 'STOP_LOSS' && !intraday) {
         const holdingDays = Math.max(0, Math.round((Date.parse(today) - Date.parse(pos.entryDate)) / 86400000));
         entry.aiReason = await explainStopLoss({
           strategyName: strategyDef.name, stopLossPct,
@@ -460,17 +529,32 @@ async function processStrategyMarket(strategyDef, marketKey, fetchQuote, cfg, ca
     }
   }
 
+  // 단타 전용 매수 제한: 매수 가능 시간대 + 오늘 손실한도 + 판 지 30분 안 된 종목 제외
+  let intradayBuyAllowed = true;
+  const recentlySold = new Set();
+  if (intraday) {
+    const mine = (e) => e.strategy === strategyDef.id && e.market === marketKey;
+    const todaysSells = log.filter((e) => mine(e) && e.date === today && isSellSide(e.side)).concat(actions);
+    const realizedToday = todaysSells.reduce((sum, e) => sum + (e.pnlAmount || 0), 0);
+    const lossLimit = keys.startingCash * (dt.dailyLossLimitPct / 100);
+    intradayBuyAllowed = clock.minutes >= hhmmToMin(dt.buyStart) && clock.minutes < hhmmToMin(dt.buyEnd) && realizedToday > -lossLimit;
+    const cooldownFrom = Date.now() - dt.cooldownMin * 60 * 1000;
+    log.filter((e) => mine(e) && isSellSide(e.side) && e.ts >= cooldownFrom).concat(actions)
+      .forEach((e) => recentlySold.add(e.symbol));
+  }
+
   // 2) 신규 매수 후보 평가 (일일 매매 한도 내에서만)
-  const currentTradesToday = tradesToday + actions.filter((a) => a.side === 'TAKE_PROFIT').length;
-  if (currentTradesToday < maxTradesPerDay) {
+  const currentTradesToday = tradesToday + (intraday ? 0 : actions.filter((a) => a.side === 'TAKE_PROFIT').length);
+  if (currentTradesToday < maxTradesPerDay && intradayBuyAllowed) {
     for (const cand of candidates) {
       if (positions[cand.symbol]) continue; // 이미 보유 중이면 스킵
+      if (recentlySold.has(cand.symbol)) continue; // 단타: 방금 판 종목은 잠시 쉬었다가
       const remainingSlots = maxTradesPerDay - (tradesToday + actions.filter((a) => a.side === 'BUY').length);
       if (remainingSlots <= 0) break;
 
       const q = await fetchQuote(cand.symbol);
       if (!q || q.price === null || q.changePct === null) continue;
-      if (!strategyDef.shouldBuy(cand, q)) continue;
+      if (!strategyDef.shouldBuy(cand, q, cfg)) continue;
 
       const budget = cash * (positionPct / 100);
       // 매수비용(수수료, 해외는 환전비용까지)을 포함해도 예산을 넘지 않는 최대 수량
@@ -560,6 +644,11 @@ export default async function handler(req, res) {
     res.status(200).json({ skipped: true, reason: 'disabled' });
     return;
   }
+  // 국내·미국 둘 다 장이 닫혀 있으면 시세 조회·AI 호출 없이 바로 끝냅니다(스케줄러가 자주 불러도 낭비 없음).
+  if (!marketClock('KR').open && !marketClock('US').open) {
+    res.status(200).json({ skipped: true, reason: 'market-closed' });
+    return;
+  }
 
   try {
     const token = await getKisToken();
@@ -593,10 +682,13 @@ export default async function handler(req, res) {
     // 처리해도 안전합니다 — 순서대로 하나씩 기다리던 것보다 전체 실행 시간이 훨씬 짧아집니다.
     await Promise.all(activeDefs.map(async (def) => {
       // 전략별로 AI가 자동 조정한 값(오버라이드)이 있으면 하드코딩된 기본값/사용자 설정 위에 덮어씁니다.
-      const risk = Object.assign({}, def.getRisk(cfg), overrides[def.id] || {});
+      // (단타는 사용자 설정만 따르므로 오버라이드를 적용하지 않음)
+      const risk = def.intraday ? def.getRisk(cfg) : Object.assign({}, def.getRisk(cfg), overrides[def.id] || {});
       const [krResult, usResult] = await Promise.all([
         processStrategyMarket(def, 'KR', fetchKrQuote, cfg, krCandidates, today, risk, apiKey, log, costs),
-        processStrategyMarket(def, 'US', fetchUsQuote, cfg, usCandidates, today, risk, apiKey, log, costs)
+        def.krOnly
+          ? { actions: [], cash: STARTING_CASH_US, positions: {} } // 국내 전용 전략(단타)은 해외 계좌를 쓰지 않음
+          : processStrategyMarket(def, 'US', fetchUsQuote, cfg, usCandidates, today, risk, apiKey, log, costs)
       ]);
       results[def.id] = { kr: { cash: krResult.cash, positions: krResult.positions }, us: { cash: usResult.cash, positions: usResult.positions } };
       allActions.push(...krResult.actions, ...usResult.actions);
@@ -688,7 +780,7 @@ export default async function handler(req, res) {
     // 연간 실현손익 장부 — 해외주식 양도세(연 단위 합산)를 계산하려면 1년치 합계가 필요한데,
     // 매매 기록은 최근 400건만 남으니 매도가 생길 때마다 여기에 따로 누적합니다.
     // 달러 손익은 "매도 당시" 환율로 원화 환산해서 쌓습니다(실제 신고도 거래일 환율 기준이라 이게 더 정확해요).
-    const isSell = (a) => a.side === 'STOP_LOSS' || a.side === 'TAKE_PROFIT';
+    const isSell = (a) => isSellSide(a.side);
     const newSells = allActions.filter(isSell);
     if (newSells.length) {
       try {

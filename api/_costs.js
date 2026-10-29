@@ -9,6 +9,10 @@
 //   해외(미국) 매매수수료 0.1%(매수·매도 각각), SEC Fee 0.00206%(매도 시, 2026.4.2~),
 //   환전 비용 0.05%(평일 낮 95% 환율우대 기준 — 그 외 시간엔 약 0.5%라 직접 바꾸세요)
 //   해외주식 양도세 22%(지방세 포함), 연 250만원 기본공제
+//
+// 슬리피지(체결 오차): 가상계좌는 "지금 가격에 바로 체결"된다고 가정하지만, 실제로는 원하는 가격보다 살짝
+// 불리하게(살 땐 비싸게, 팔 땐 싸게) 체결되는 경우가 많아요. 매매가 잦을수록 이 차이가 쌓여 시뮬레이션이 실제보다
+// 좋아 보이므로, 살 때·팔 때 각각 이 비율만큼 비용으로 더 빼서 현실에 가깝게 맞춥니다. (증권사 수수료가 아니라 추정치)
 
 import { kvGetJson } from './_kv.js';
 
@@ -17,8 +21,8 @@ export const REALIZED_KEY_PREFIX = 'autotrade:realized:'; // + 연도(YYYY) → 
 
 export const DEFAULT_COSTS = {
   broker: '토스증권',
-  kr: { buyFeePct: 0.015, sellFeePct: 0.015, sellTaxPct: 0.20 },
-  us: { buyFeePct: 0.1, sellFeePct: 0.1, sellRegFeePct: 0.00206, fxSpreadPct: 0.05 },
+  kr: { buyFeePct: 0.015, sellFeePct: 0.015, sellTaxPct: 0.20, slippagePct: 0.05 },
+  us: { buyFeePct: 0.1, sellFeePct: 0.1, sellRegFeePct: 0.00206, fxSpreadPct: 0.05, slippagePct: 0.05 },
   overseasTax: { ratePct: 22, deductionKrw: 2_500_000 },
   updatedAt: null
 };
@@ -39,13 +43,15 @@ export function normalizeCosts(raw) {
     kr: {
       buyFeePct: clipNum(kr.buyFeePct, 0, 2, d.kr.buyFeePct),
       sellFeePct: clipNum(kr.sellFeePct, 0, 2, d.kr.sellFeePct),
-      sellTaxPct: clipNum(kr.sellTaxPct, 0, 2, d.kr.sellTaxPct)
+      sellTaxPct: clipNum(kr.sellTaxPct, 0, 2, d.kr.sellTaxPct),
+      slippagePct: clipNum(kr.slippagePct, 0, 2, d.kr.slippagePct)
     },
     us: {
       buyFeePct: clipNum(us.buyFeePct, 0, 2, d.us.buyFeePct),
       sellFeePct: clipNum(us.sellFeePct, 0, 2, d.us.sellFeePct),
       sellRegFeePct: clipNum(us.sellRegFeePct, 0, 1, d.us.sellRegFeePct),
-      fxSpreadPct: clipNum(us.fxSpreadPct, 0, 3, d.us.fxSpreadPct)
+      fxSpreadPct: clipNum(us.fxSpreadPct, 0, 3, d.us.fxSpreadPct),
+      slippagePct: clipNum(us.slippagePct, 0, 2, d.us.slippagePct)
     },
     overseasTax: {
       ratePct: clipNum(tx.ratePct, 0, 60, d.overseasTax.ratePct),
@@ -63,18 +69,21 @@ export function marketOfSymbol(symbol) {
   return /^\d{6}$/.test(String(symbol)) ? 'KR' : 'US';
 }
 
-// 살 때 드는 비용 비율(%) — 해외는 원화→달러 환전 비용 포함
+// 살 때 드는 비용 비율(%) — 해외는 원화→달러 환전 비용 포함, 둘 다 슬리피지 포함
+// (KV에 저장된 옛 설정엔 slippagePct가 없을 수 있어 `|| 0`으로 안전하게 처리)
 export function buyCostPct(costs, market) {
   const c = costs || DEFAULT_COSTS;
-  return market === 'KR' ? c.kr.buyFeePct : c.us.buyFeePct + c.us.fxSpreadPct;
+  return market === 'KR'
+    ? c.kr.buyFeePct + (c.kr.slippagePct || 0)
+    : c.us.buyFeePct + c.us.fxSpreadPct + (c.us.slippagePct || 0);
 }
 
-// 팔 때 드는 비용 비율(%) — 국내는 수수료+거래세, 해외는 수수료+SEC Fee+달러→원화 환전 비용
+// 팔 때 드는 비용 비율(%) — 국내는 수수료+거래세, 해외는 수수료+SEC Fee+달러→원화 환전 비용, 둘 다 슬리피지 포함
 export function sellCostPct(costs, market) {
   const c = costs || DEFAULT_COSTS;
   return market === 'KR'
-    ? c.kr.sellFeePct + c.kr.sellTaxPct
-    : c.us.sellFeePct + c.us.sellRegFeePct + c.us.fxSpreadPct;
+    ? c.kr.sellFeePct + c.kr.sellTaxPct + (c.kr.slippagePct || 0)
+    : c.us.sellFeePct + c.us.sellRegFeePct + c.us.fxSpreadPct + (c.us.slippagePct || 0);
 }
 
 // 예산(budget) 안에서 비용까지 내고 살 수 있는 최대 수량과, 실제로 빠져나가는 총액

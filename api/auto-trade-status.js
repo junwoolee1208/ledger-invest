@@ -4,7 +4,7 @@
 // (Hobby) 플랜의 "배포당 서버리스 함수 12개" 제한을 넘어서 배포가 실패하는 문제가 생겨 하나로
 // 합쳤습니다. 각 기능의 내부 로직은 그대로입니다.)
 //
-// 쿼리: action=config (기본값) | log
+// 쿼리: action=config (기본값) | log | changes | custom | manual-edit | cost-config | daytrade-config
 //   action=config, GET  : 설정 조회 (인증 불필요 — auto-trade-check.js도 같이 씀)
 //   action=config, POST : 설정 저장 (로그인한 본인만, Firebase ID 토큰 필요)
 //   action=log,    GET  : 전략별 계좌 현황 + 보유종목(실시간 평가금액/손익 포함) + 매매기록 조회
@@ -15,6 +15,7 @@ import {
   COST_CONFIG_KEY, REALIZED_KEY_PREFIX, DEFAULT_COSTS, normalizeCosts, loadCosts,
   planSell, positionCostBasis, estimateOverseasTax
 } from './_costs.js';
+import { DEFAULT_DAYTRADE, normalizeDaytrade, describeDaytrade } from './_daytrade.js';
 
 export const config = { maxDuration: 30 };
 
@@ -43,14 +44,17 @@ function clipRisk(r, fallback) {
   };
 }
 
-const STRATEGY_IDS = ['momentum', 'pullback', 'breakout', 'reversal', 'scalp', 'selective', 'wideswing', 'baseline', 'evolved', 'regime-adaptive'];
+const STRATEGY_IDS = ['momentum', 'pullback', 'breakout', 'reversal', 'scalp', 'selective', 'wideswing', 'baseline', 'daytrade', 'evolved', 'regime-adaptive'];
 const STRATEGY_NAMES = {
   momentum: '모멘텀(추세 추종)', pullback: '눌림목(과열 회피)', breakout: '강한 돌파',
   reversal: '역추세(저가 반등)', scalp: '초단타(잦은 매매)', selective: '신중한 선별(엄격)',
-  wideswing: '광폭 스윙(길게 보유)', baseline: '기준선(대조군)', evolved: '진화형(자동탐색)',
-  'regime-adaptive': '시장적응형(구간별 자동전환)'
+  wideswing: '광폭 스윙(길게 보유)', baseline: '기준선(대조군)', daytrade: '데이트레이딩(당일 청산)',
+  evolved: '진화형(자동탐색)', 'regime-adaptive': '시장적응형(구간별 자동전환)'
 };
+// 매도 종류: 손절 / 익절 / 장마감 청산(단타 전략이 장 끝나기 전에 전부 파는 것)
+const isSellSide = (side) => side === 'STOP_LOSS' || side === 'TAKE_PROFIT' || side === 'DAY_CLOSE';
 const WEIGHT_BASED_IDS = ['evolved', 'regime-adaptive']; // 가중치 기반 전략 — 리스크 수동편집 대상에서 제외
+const OWN_SETTINGS_IDS = ['daytrade']; // 자기 전용 설정 화면이 있는 전략 — 수동편집 대상에서 제외(설정이 한 곳에서만 바뀌도록)
 
 const DEFAULT_CONFIG = {
   enabled: false,
@@ -70,7 +74,7 @@ const DEFAULT_CONFIG = {
   evolveIntervalHours: 24, // 진화형 탐색 자동 실행 주기
   strategies: {
     momentum: true, pullback: true, breakout: true, reversal: true,
-    scalp: true, selective: true, wideswing: true, baseline: true, evolved: true,
+    scalp: true, selective: true, wideswing: true, baseline: true, daytrade: true, evolved: true,
     'regime-adaptive': true
   },
   updatedAt: null
@@ -124,7 +128,10 @@ async function handleConfig(req, res) {
 
     const risk = Object.assign({}, DEFAULT_CONFIG.risk, body.risk || {});
     const strategiesIn = body.strategies || {};
+    // 데이트레이딩 설정은 따로 저장하는 화면(action=daytrade-config)이 있어서, 이 "설정 저장" 버튼이 덮어쓰지 않도록 기존 값을 그대로 이어받습니다.
+    const prev = await kvGetJson(CONFIG_KEY, null);
     const next = {
+      daytrade: normalizeDaytrade(prev && prev.daytrade),
       enabled: !!body.enabled,
       mode: 'dryrun', // 실거래 전환은 모의투자 검증 후 서버 코드에서 명시적으로만 바꿉니다.
       symbols: Array.isArray(body.symbols) ? body.symbols.slice(0, 50) : [],
@@ -199,6 +206,64 @@ async function handleCostConfig(req, res) {
   next.updatedAt = Date.now();
   await kvSetJson(COST_CONFIG_KEY, next);
   res.status(200).json({ ok: true, costs: next });
+}
+
+/* ==================== action=daytrade-config (데이트레이딩 설정) ====================
+   GET : 현재 설정(없으면 기본값) + 기본값(화면의 "기본값으로" 버튼용)
+   POST: 로그인한 본인만 저장. body: { daytrade } 또는 { reset: true }
+   자동매매 설정(CONFIG_KEY) 안의 daytrade 칸에만 저장하고, 다른 설정은 건드리지 않습니다.
+   바뀐 내용은 "전략 변경 이력"에도 남겨서, 설정을 바꾼 뒤 성과가 어땠는지 비교할 수 있게 합니다. */
+async function handleDaytradeConfig(req, res) {
+  if (req.method === 'GET') {
+    const cfg = await kvGetJson(CONFIG_KEY, null);
+    res.status(200).json({ daytrade: normalizeDaytrade(cfg && cfg.daytrade), defaults: DEFAULT_DAYTRADE });
+    return;
+  }
+  if (req.method !== 'POST') {
+    res.status(405).json({ error: 'GET 또는 POST만 지원합니다.' });
+    return;
+  }
+  const uid = await requireUid(req, res);
+  if (!uid) return;
+  let body = req.body;
+  if (typeof body === 'string') {
+    try { body = JSON.parse(body); } catch (e) { body = {}; }
+  }
+  body = body || {};
+
+  try {
+    const cfg = (await kvGetJson(CONFIG_KEY, null)) || Object.assign({}, DEFAULT_CONFIG);
+    const before = normalizeDaytrade(cfg.daytrade);
+    const after = body.reset ? normalizeDaytrade(DEFAULT_DAYTRADE) : normalizeDaytrade(body.daytrade);
+    cfg.daytrade = after;
+    cfg.updatedAt = Date.now();
+    const ok = await kvSetJson(CONFIG_KEY, cfg);
+    if (!ok) {
+      res.status(500).json({ error: '설정 저장에 실패했습니다.' });
+      return;
+    }
+
+    if (JSON.stringify(before) !== JSON.stringify(after)) {
+      const changes = await kvGetJson(CHANGES_KEY, []);
+      changes.unshift({
+        id: Date.now() + '-daytrade',
+        ts: Date.now(), date: todayKST(),
+        strategyId: 'daytrade', strategyName: STRATEGY_NAMES.daytrade,
+        source: 'manual',
+        diagnosis: body.reset ? '사용자가 데이트레이딩 설정을 기본값으로 되돌렸습니다.' : '사용자가 데이트레이딩 설정을 직접 수정했습니다.',
+        statsAtChange: null,
+        beforeDescription: describeDaytrade(before),
+        afterDescription: describeDaytrade(after)
+      });
+      if (changes.length > MAX_CHANGES) changes.length = MAX_CHANGES;
+      await kvSetJson(CHANGES_KEY, changes);
+    }
+
+    res.status(200).json({ ok: true, daytrade: after });
+  } catch (e) {
+    console.error('auto-trade-status.js(daytrade-config) error:', e);
+    res.status(500).json({ error: '서버 오류가 발생했습니다.' });
+  }
 }
 
 /* ==================== action=custom (커스텀 전략 추가/수정/삭제) ====================
@@ -306,9 +371,9 @@ async function handleManualEdit(req, res) {
   }
   body = body || {};
   const strategyId = body.strategyId;
-  const editableIds = STRATEGY_IDS.filter((id) => !WEIGHT_BASED_IDS.includes(id)); // 가중치 기반 전략은 리스크 수동편집 대상에서 제외
+  const editableIds = STRATEGY_IDS.filter((id) => !WEIGHT_BASED_IDS.includes(id) && !OWN_SETTINGS_IDS.includes(id));
   if (!editableIds.includes(strategyId)) {
-    res.status(400).json({ error: '수동 편집은 내장 전략(진화형/시장적응형 제외)에만 적용할 수 있습니다.' });
+    res.status(400).json({ error: '수동 편집은 내장 전략(진화형/시장적응형/데이트레이딩 제외)에만 적용할 수 있습니다. 데이트레이딩은 "데이트레이딩 설정"에서 바꿔주세요.' });
     return;
   }
   if (!body.risk || typeof body.risk !== 'object') {
@@ -484,9 +549,23 @@ async function handleLog(req, res) {
       }, estimateOverseasTax(costs, r.usPnlKrw || 0));
     });
 
+    // "오늘 단타 성적" — 화면에 보내는 log는 최근 80건뿐이라, 하루 매매가 많아도 정확하도록 전체 log에서 여기서 계산합니다.
+    const today = todayKST();
+    const dtToday = log.filter((e) => e.strategy === 'daytrade' && e.date === today);
+    const dtSells = dtToday.filter((e) => isSellSide(e.side));
+    const daytradeToday = {
+      date: today,
+      buys: dtToday.filter((e) => e.side === 'BUY').length,
+      sells: dtSells.length,
+      wins: dtSells.filter((e) => e.pnlPct > 0).length,
+      pnlAmount: Math.round(dtSells.reduce((a, e) => a + (e.pnlAmount || 0), 0)),
+      feeAmount: Math.round(dtToday.reduce((a, e) => a + (e.fee || 0), 0)) // 수수료·세금·슬리피지 합계
+    };
+
     res.status(200).json({
       strategies,
       costs,
+      daytradeToday,
       taxSummary: { year, byStrategy: taxByStrategy },
       log: log.slice(0, 80),
       kr: strategies.momentum.kr, us: strategies.momentum.us,
@@ -508,7 +587,7 @@ async function handleChanges(req, res) {
     const log = await kvGetJson(LOG_KEY, []);
 
     const enriched = changes.map((c) => {
-      const after = log.filter((e) => e.strategy === c.strategyId && (e.side === 'STOP_LOSS' || e.side === 'TAKE_PROFIT') && e.ts > c.ts);
+      const after = log.filter((e) => e.strategy === c.strategyId && isSellSide(e.side) && e.ts > c.ts);
       let afterStats = null;
       if (after.length > 0) {
         const wins = after.filter((e) => e.pnlPct > 0);
@@ -541,5 +620,6 @@ export default async function handler(req, res) {
   if (action === 'custom') return handleCustom(req, res);
   if (action === 'manual-edit') return handleManualEdit(req, res);
   if (action === 'cost-config') return handleCostConfig(req, res);
+  if (action === 'daytrade-config') return handleDaytradeConfig(req, res);
   return handleConfig(req, res);
 }
