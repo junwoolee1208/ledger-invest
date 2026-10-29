@@ -17,6 +17,10 @@
 //   action=ai-usage,        GET  : 이번 달 AI 사용액(기능별)·예산·기능별 모델·AI 연결 상태(마지막 실패 이유)
 //   action=ai-config,       POST : 월 AI 예산과 기능별 모델 저장(로그인한 본인만)
 //   action=experiments,     GET  : 학습하는 자동조정의 실험 기록·가장 좋았던 설정·경고(사는 조건 문제 등)
+//   action=scorecard,       GET  : 전략별 7개 부문 채점표(하루 한 번 계산, ?refresh=1) + 점수 기록 + 최근 심층 평가서
+//   action=scorecard-weights, POST: 채점표 부문별 가중치 저장
+//   action=deep-eval,       GET  : 최근 AI 심층 평가서 / POST(로그인) 또는 GET ?auto=1&key=…(주 1회 스케줄러): 새로 받기
+//   action=chat,            POST : AI 전략 상담(로그인, 하루 30번) — 데이터 조회·그래프·표·변경 "제안"
 //   action=reset-all-risk,  POST : 모든 전략의 숫자를 처음 값으로 되돌리고 실험을 새로 시작(선택: 가상계좌도 초기화)
 
 import { getKisToken, kisHeaders, num, KIS_BASE } from './_kis.js';
@@ -35,6 +39,7 @@ import {
 import { runDeepEval, DEEPEVAL_LATEST_KEY, DEEPEVAL_HISTORY_KEY } from './_deepeval.js';
 import { fetchSymbolHistory } from './_backtest-core.js';
 import { PICK_REPORT_KEY } from './_picks.js';
+import { runChat } from './_chat.js';
 import {
   AI_CONFIG_KEY, AI_MODELS, AI_FEATURES, AI_LAST_OK_KEY, AI_LAST_ERROR_KEY, AI_REASON_TEXT,
   normalizeAiConfig, loadAiUsage, modelFor
@@ -234,6 +239,16 @@ function readBody(req) {
    "지금 적용 중인 값" = 기본값(_strategies.js) 위에 수동 수정/AI 자동조정 값(오버라이드)을 덮어쓴 것 — 매매 엔진과 같은 계산이에요. */
 async function handleStrategies(req, res) {
   try {
+    res.status(200).json({ strategies: await buildStrategyList(), daytradeDefaults: DEFAULT_DAYTRADE });
+  } catch (e) {
+    console.error('auto-trade-status.js(strategies) error:', e);
+    res.status(500).json({ error: '서버 오류가 발생했습니다.' });
+  }
+}
+
+// 카드 목록과 AI 상담(get_overview)이 같이 쓰는 "전략 목록 만들기"
+async function buildStrategyList() {
+  {
     const [cfgRaw, overrides, customList, experiments, flags] = await Promise.all([
       kvGetJson(CONFIG_KEY, null), kvGetJson(OVERRIDES_KEY, {}), kvGetJson(CUSTOM_KEY, []),
       kvGetJson(EXPERIMENTS_KEY, []), kvGetJson(FLAGS_KEY, {})
@@ -269,10 +284,7 @@ async function handleStrategies(req, res) {
     customList.forEach((c) => list.push({
       id: c.id, name: c.name, kind: 'custom', enabled: c.enabled !== false, hidden: false, risk: null, createdAt: c.createdAt || null
     }));
-    res.status(200).json({ strategies: list, daytradeDefaults: DEFAULT_DAYTRADE });
-  } catch (e) {
-    console.error('auto-trade-status.js(strategies) error:', e);
-    res.status(500).json({ error: '서버 오류가 발생했습니다.' });
+    return list;
   }
 }
 
@@ -673,6 +685,196 @@ async function handleDeepEval(req, res) {
   }
 }
 
+/* ==================== action=chat (AI 전략 상담) ====================
+   로그인한 본인만, 하루 CHAT_DAILY_LIMIT번까지. 대화 엔진은 _chat.js, 여기는 AI가 쓰는 도구들을 실제로 실행해요.
+   AI는 설정을 직접 바꿀 수 없고 propose_change로 "제안"만 해요 → 화면의 제안 카드에서 사용자가 [적용]을 눌러야 저장돼요. */
+const CHAT_DAILY_LIMIT = 30;
+
+const CHAT_TOOLS = [
+  { name: 'get_overview', description: '모든 전략의 지금 상태(켜짐 여부, 숫자 설정, 가짜 계좌 수익률, 실험 진행 상황, 경고)를 가져온다. 전략에 대한 질문이면 보통 이것부터 부른다.',
+    input_schema: { type: 'object', properties: {} } },
+  { name: 'get_trades', description: '최근 매매 기록(최대 60일)을 가져온다. 전략·종류(sell=판 것, buy=산 것)·기간으로 거를 수 있다.',
+    input_schema: { type: 'object', properties: {
+      strategyId: { type: 'string', description: '전략 id. 비우면 전체' }, days: { type: 'integer', minimum: 1, maximum: 60 },
+      side: { type: 'string', enum: ['sell', 'buy', 'all'] }, limit: { type: 'integer', minimum: 1, maximum: 150 } } } },
+  { name: 'get_changes', description: '전략 설정이 언제·왜·어떻게 바뀌었는지(변경 이력)를 가져온다.',
+    input_schema: { type: 'object', properties: { strategyId: { type: 'string' }, limit: { type: 'integer', minimum: 1, maximum: 50 } } } },
+  { name: 'get_experiments', description: '자동조정 실험 기록(가설, 채점 결과, 배운 것)을 가져온다.',
+    input_schema: { type: 'object', properties: { strategyId: { type: 'string' } } } },
+  { name: 'get_scorecard', description: '전략별 채점표(수익성·안정성·승률손익비·매수 정확도·매도 타이밍·비용 효율·학습 7개 부문 점수와 근거, 종합 등급)를 가져온다.',
+    input_schema: { type: 'object', properties: {} } },
+  { name: 'get_calendar', description: '한 달의 날짜별 손익 요약(전략별 포함)을 가져온다.',
+    input_schema: { type: 'object', properties: { month: { type: 'string', description: 'YYYY-MM' } }, required: ['month'] } },
+  { name: 'get_pick_report', description: '종목 고르기 성적표(고른 종목·걸러낸 종목의 3거래일 뒤 결과, 상태별 교훈)를 가져온다.',
+    input_schema: { type: 'object', properties: {} } },
+  { name: 'get_deep_eval', description: '가장 최근의 주간 AI 심층 평가서를 가져온다.', input_schema: { type: 'object', properties: {} } },
+  { name: 'get_settings', description: '데이트레이딩 설정, 매매 비용(수수료·세금) 설정, 이번 달 AI 사용량을 가져온다.', input_schema: { type: 'object', properties: {} } },
+  { name: 'propose_change', description: '전략 설정 변경을 "제안"한다. 바로 적용되지 않고 사용자 화면에 제안 카드로 뜨며, 사용자가 [적용]을 눌러야 바뀐다. ' +
+      'type=risk: 내장 전략의 손절·익절·비중·하루 횟수(기준선·진화형·시장적응형·데이트레이딩·커스텀은 불가). type=daytrade: 데이트레이딩 설정 일부. type=toggle: 전략 켜기/끄기.',
+    input_schema: { type: 'object', properties: {
+      type: { type: 'string', enum: ['risk', 'daytrade', 'toggle'] }, strategyId: { type: 'string' },
+      values: { type: 'object', description: 'risk: {stopLossPct, takeProfitPct, positionPct, maxTradesPerDay} 중 바꿀 것 / daytrade: {buyStart:"HH:MM", stopLossPct, ...} 중 바꿀 것 / toggle: {enabled: true|false}' },
+      reason: { type: 'string', description: '왜 이렇게 바꾸자고 하는지, 숫자 근거 포함 1~2문장' } }, required: ['type', 'values', 'reason'] } },
+  { name: 'show_chart', description: '사용자 화면의 대화창에 그래프를 그린다. 데이터를 보여달라고 하거나 비교가 필요할 때 쓴다. 그린 뒤 글로 핵심만 요약한다.',
+    input_schema: { type: 'object', properties: {
+      chartType: { type: 'string', enum: ['bar', 'line', 'pie'] }, title: { type: 'string' },
+      labels: { type: 'array', items: { type: 'string' } },
+      datasets: { type: 'array', items: { type: 'object', properties: { label: { type: 'string' }, data: { type: 'array', items: { type: 'number' } } }, required: ['label', 'data'] } } },
+      required: ['chartType', 'title', 'labels', 'datasets'] } },
+  { name: 'show_table', description: '사용자 화면의 대화창에 표를 그린다.',
+    input_schema: { type: 'object', properties: {
+      title: { type: 'string' }, columns: { type: 'array', items: { type: 'string' } },
+      rows: { type: 'array', items: { type: 'array', items: { type: ['string', 'number', 'null'] } } } },
+      required: ['title', 'columns', 'rows'] } }
+];
+
+function chatSystemPrompt(today) {
+  return `너는 LEDGER 사이트의 "AI 전략 상담"이야. 오늘은 ${today}야.
+사용자는 투자 초보이고, 이 사이트는 가짜 돈으로 여러 자동매매 전략을 겨루게 하는 시뮬레이션이야(실제 주문 없음).
+- 답하기 전에 도구로 실제 데이터를 확인하고, 숫자 근거를 들어 중학생도 알 수 있는 쉬운 한국어로 짧게 답해. 모르는 건 지어내지 마.
+- 데이터를 보여달라고 하거나 비교가 도움이 되면 show_chart / show_table로 그래프·표를 그리고, 글로는 핵심만 요약해.
+- 설정을 바꾸자는 요청에는 propose_change로 "제안"만 해. 너는 직접 바꿀 수 없어. 사용자가 화면의 [적용] 버튼을 눌러야 바뀐다고 말하고, 이미 바꿨다고 말하지 마.
+- 기준선(baseline)은 다른 전략과 비교하는 대조군이라 바꾸면 안 돼. 거래가 10건 미만이면 결론을 조심스럽게 말해.
+- 새 매수 규칙(예: RSI 조건 추가), 새 지표, 새 화면 기능처럼 코드가 바뀌어야 하는 요청이면 "코드 수정이 필요해요"라고 말하고,
+  개발자(Claude Code)에게 그대로 전달할 "개발 요청서"를 \`\`\` 블록 안에 정리해 줘: 무엇을 / 왜(데이터 근거) / 어떻게 확인할지.
+- 실제 돈으로 어떤 주식을 사거나 팔라는 개인 맞춤 투자 조언은 하지 마. 이 시뮬레이션 안의 전략 설계 이야기만 해.`;
+}
+
+function compactTrade(t) {
+  return { date: t.date, time: t.ts ? new Date(t.ts + 9 * 3600000).toISOString().slice(11, 16) : null, strategy: t.strategy || 'momentum', market: t.market,
+    symbol: t.symbol, name: t.name, side: t.side, qty: t.qty, price: t.price, pnlPct: t.pnlPct, pnlAmount: t.pnlAmount, fee: t.fee,
+    entryChangePct: t.entryChangePct, reason: t.aiReason || t.reason };
+}
+
+async function handleChat(req, res) {
+  if (req.method !== 'POST') { res.status(405).json({ error: 'POST만 지원합니다.' }); return; }
+  const uid = await requireUid(req, res);
+  if (!uid) return;
+  const body = readBody(req);
+  const history = (Array.isArray(body.messages) ? body.messages : [])
+    .filter((m) => (m.role === 'user' || m.role === 'assistant') && typeof m.content === 'string' && m.content.trim())
+    .slice(-20);
+  if (!history.length || history[history.length - 1].role !== 'user') { res.status(400).json({ error: '보낼 메시지가 없어요.' }); return; }
+  while (history.length && history[0].role !== 'user') history.shift(); // 대화는 사용자 말로 시작해야 해요
+
+  const today = todayKST();
+  const countKey = 'chat:count:' + today;
+  const used = Number(await kvCommand(['INCR', countKey])) || 1;
+  if (used === 1) await kvCommand(['EXPIRE', countKey, '172800']);
+  if (used > CHAT_DAILY_LIMIT) { res.status(429).json({ error: `오늘 AI 상담 횟수(${CHAT_DAILY_LIMIT}번)를 다 썼어요. 내일 다시 이용해 주세요.` }); return; }
+
+  const proposals = [];
+  const visuals = [];
+  const editable = STRATEGY_IDS.filter((id) => !WEIGHT_BASED_IDS.includes(id) && !OWN_SETTINGS_IDS.includes(id) && id !== 'baseline');
+
+  async function execTool(name, input) {
+    if (name === 'get_overview') {
+      const list = await buildStrategyList();
+      const out = [];
+      for (const s of list) {
+        const [kr, us] = await Promise.all([loadAccount(s.id, 'KR'), loadAccount(s.id, 'US')]);
+        out.push({ id: s.id, name: s.name, kind: s.kind, enabled: s.enabled, hidden: s.hidden, risk: s.risk,
+          krReturnPct: Math.round(accountPct(kr) * 100) / 100, usReturnPct: Math.round(accountPct(us) * 100) / 100,
+          holdings: Object.keys(kr.positions || {}).length + Object.keys(us.positions || {}).length,
+          learning: s.learning ? { active: s.learning.active ? { status: s.learning.active.status, progress: `${s.learning.active.sampleCount}/${s.learning.active.needed}`, hypothesis: s.learning.active.hypothesis || null } : null,
+            lastVerdict: s.learning.lastJudged ? s.learning.lastJudged.verdictText : null, flag: s.learning.flag ? s.learning.flag.note : null } : null });
+      }
+      return { note: '수익률은 보유 주식을 산 가격 기준으로 계산한 근사치', strategies: out };
+    }
+    if (name === 'get_trades') {
+      const days = Math.max(1, Math.min(60, Number(input.days) || 14));
+      let list = (await loadRecentTrades(days)).sort((a, b) => b.ts - a.ts);
+      if (input.strategyId) list = list.filter((t) => (t.strategy || 'momentum') === input.strategyId);
+      if (input.side === 'sell') list = list.filter((t) => isSellSide(t.side));
+      if (input.side === 'buy') list = list.filter((t) => t.side === 'BUY');
+      return { total: list.length, trades: list.slice(0, Math.max(1, Math.min(150, Number(input.limit) || 60))).map(compactTrade) };
+    }
+    if (name === 'get_changes') {
+      let list = await kvGetJson(CHANGES_KEY, []);
+      if (input.strategyId) list = list.filter((c) => c.strategyId === input.strategyId);
+      return { changes: list.slice(0, Math.min(50, Number(input.limit) || 20)).map((c) => ({ date: c.date, strategy: c.strategyName, source: c.source,
+        why: String(c.diagnosis || '').slice(0, 300), before: c.before || c.beforeDescription || null, after: c.after || c.afterDescription || null })) };
+    }
+    if (name === 'get_experiments') {
+      let list = await kvGetJson(EXPERIMENTS_KEY, []);
+      if (input.strategyId) list = list.filter((e) => e.strategyId === input.strategyId);
+      return { experiments: list.slice(0, 30).map(slimExperiment) };
+    }
+    if (name === 'get_scorecard') {
+      const cached = await kvGetJson(SCORECARD_CACHE_KEY, null);
+      const sc = cached || await buildScorecard();
+      return { date: sc.date, strategies: sc.strategies.map((s) => ({ id: s.id, name: s.name, total: s.total, grade: s.grade, confidence: s.confidence, trend: s.trend, cats: s.cats })), system: sc.system };
+    }
+    if (name === 'get_calendar') {
+      const month = /^\d{4}-\d{2}$/.test(String(input.month)) ? input.month : today.slice(0, 7);
+      return { month, days: await kvGetJson(DAILY_KEY_PREFIX + month, {}) };
+    }
+    if (name === 'get_pick_report') return (await kvGetJson(PICK_REPORT_KEY, null)) || { summary: '아직 채점된 고르기 기록이 없어요.' };
+    if (name === 'get_deep_eval') {
+      const d = await kvGetJson(DEEPEVAL_LATEST_KEY, null);
+      return d ? { date: d.date, report: d.report || d.rawText } : { note: '아직 받은 심층 평가서가 없어요.' };
+    }
+    if (name === 'get_settings') {
+      const cfg = (await kvGetJson(CONFIG_KEY, null)) || DEFAULT_CONFIG;
+      const usage = await loadAiUsage();
+      return { daytrade: normalizeDaytrade(cfg.daytrade), costs: await loadCosts(), aiUsageThisMonthUsd: Math.round(usage.totalUsd * 1000) / 1000 };
+    }
+    if (name === 'propose_change') {
+      const values = input.values || {};
+      const reason = String(input.reason || '').slice(0, 300);
+      const list = await buildStrategyList();
+      if (input.type === 'toggle') {
+        const s = list.find((x) => x.id === input.strategyId);
+        if (!s) return { error: '그런 전략이 없어요.' };
+        if (typeof values.enabled !== 'boolean') return { error: 'values.enabled는 true/false여야 해요.' };
+        proposals.push({ id: 'p' + (proposals.length + 1), type: 'toggle', strategyId: s.id, strategyName: s.name, before: { enabled: s.enabled }, after: { enabled: values.enabled }, reason });
+        return { ok: true, note: '사용자 화면에 제안 카드로 보여줬어요. 사용자가 [적용]을 눌러야 바뀌어요.' };
+      }
+      if (input.type === 'daytrade') {
+        const cfg = (await kvGetJson(CONFIG_KEY, null)) || DEFAULT_CONFIG;
+        const before = normalizeDaytrade(cfg.daytrade);
+        const after = normalizeDaytrade(Object.assign({}, before, values));
+        if (JSON.stringify(before) === JSON.stringify(after)) return { error: '바뀌는 값이 없어요(허용 범위 밖의 값은 자동으로 맞춰져요).' };
+        proposals.push({ id: 'p' + (proposals.length + 1), type: 'daytrade', strategyId: 'daytrade', strategyName: STRATEGY_NAMES.daytrade, before, after, reason });
+        return { ok: true, applied: false, after, note: '사용자 화면에 제안 카드로 보여줬어요. 사용자가 [적용]을 눌러야 바뀌어요.' };
+      }
+      if (input.type === 'risk') {
+        if (!editable.includes(input.strategyId)) return { error: '이 전략은 숫자를 바꿀 수 없어요(기준선·진화형·시장적응형은 불가, 데이트레이딩은 type=daytrade 사용).' };
+        const s = list.find((x) => x.id === input.strategyId);
+        const before = s.risk;
+        const after = clipRisk(Object.assign({}, before, values), before);
+        if (JSON.stringify(before) === JSON.stringify(after)) return { error: '바뀌는 값이 없어요.' };
+        proposals.push({ id: 'p' + (proposals.length + 1), type: 'risk', strategyId: s.id, strategyName: s.name, before, after, reason });
+        return { ok: true, applied: false, after, note: '사용자 화면에 제안 카드로 보여줬어요. 사용자가 [적용]을 눌러야 바뀌어요(바꾸면 진행 중이던 실험은 중단돼요).' };
+      }
+      return { error: 'type은 risk, daytrade, toggle 중 하나예요.' };
+    }
+    if (name === 'show_chart') {
+      if (visuals.length >= 4) return { error: '한 답에 그래프·표는 4개까지예요.' };
+      const labels = (input.labels || []).slice(0, 60).map(String);
+      const datasets = (input.datasets || []).slice(0, 8).map((d) => ({ label: String(d.label || ''), data: (d.data || []).slice(0, 60).map((v) => (Number.isFinite(Number(v)) ? Number(v) : null)) }));
+      visuals.push({ kind: 'chart', chartType: ['bar', 'line', 'pie'].includes(input.chartType) ? input.chartType : 'bar', title: String(input.title || ''), labels, datasets });
+      return { ok: true, note: '그래프를 그렸어요. 글로는 핵심만 요약하세요.' };
+    }
+    if (name === 'show_table') {
+      if (visuals.length >= 4) return { error: '한 답에 그래프·표는 4개까지예요.' };
+      visuals.push({ kind: 'table', title: String(input.title || ''), columns: (input.columns || []).slice(0, 10).map(String),
+        rows: (input.rows || []).slice(0, 50).map((r) => (Array.isArray(r) ? r.slice(0, 10) : [])) });
+      return { ok: true, note: '표를 그렸어요.' };
+    }
+    return { error: '모르는 도구예요: ' + name };
+  }
+
+  try {
+    const result = await runChat({ system: chatSystemPrompt(today), history, tools: CHAT_TOOLS, execTool });
+    if (!result.ok) { res.status(502).json({ error: 'AI 상담을 하지 못했어요. ' + result.message, reason: result.reason }); return; }
+    res.status(200).json({ reply: result.text, proposals, visuals, costUsd: result.costUsd, usedToday: used, dailyLimit: CHAT_DAILY_LIMIT });
+  } catch (e) {
+    console.error('auto-trade-status.js(chat) error:', e);
+    res.status(500).json({ error: '서버 오류가 발생했습니다.' });
+  }
+}
+
 /* ==================== action=daytrade-config (데이트레이딩 설정) ====================
    GET : 현재 설정(없으면 기본값) + 기본값(화면의 "기본값으로" 버튼용)
    POST: 로그인한 본인만 저장. body: { daytrade } 또는 { reset: true }
@@ -714,8 +916,10 @@ async function handleDaytradeConfig(req, res) {
         id: Date.now() + '-daytrade',
         ts: Date.now(), date: todayKST(),
         strategyId: 'daytrade', strategyName: STRATEGY_NAMES.daytrade,
-        source: 'manual',
-        diagnosis: body.reset ? '사용자가 데이트레이딩 설정을 기본값으로 되돌렸습니다.' : '사용자가 데이트레이딩 설정을 직접 수정했습니다.',
+        source: body.source === 'chat' ? 'chat' : 'manual',
+        diagnosis: body.source === 'chat'
+          ? 'AI 상담에서 제안하고 사용자가 적용했어요. ' + String(body.note || '').slice(0, 300)
+          : (body.reset ? '사용자가 데이트레이딩 설정을 기본값으로 되돌렸습니다.' : '사용자가 데이트레이딩 설정을 직접 수정했습니다.'),
         statsAtChange: null,
         beforeDescription: describeDaytrade(before),
         afterDescription: describeDaytrade(after)
@@ -867,8 +1071,11 @@ async function handleManualEdit(req, res) {
       id: Date.now() + '-' + strategyId,
       ts: Date.now(), date: todayKST(),
       strategyId, strategyName: STRATEGY_NAMES[strategyId],
-      source: 'manual', // 사용자가 직접 수정 — AI 자동조정(live)/백테스트(backtest)와 구분
-      diagnosis: '사용자가 설정 화면에서 직접 위험 파라미터를 수정했습니다.',
+      // 사용자가 직접 수정(manual) 또는 AI 상담 제안을 적용(chat) — AI 자동조정(live)/백테스트(backtest)와 구분
+      source: body.source === 'chat' ? 'chat' : 'manual',
+      diagnosis: body.source === 'chat'
+        ? 'AI 상담에서 제안하고 사용자가 적용했어요. ' + String(body.note || '').slice(0, 300)
+        : '사용자가 설정 화면에서 직접 위험 파라미터를 수정했습니다.',
       statsAtChange: null,
       before, after
     });
@@ -1157,5 +1364,6 @@ export default async function handler(req, res) {
   if (action === 'scorecard') return handleScorecard(req, res);
   if (action === 'scorecard-weights') return handleScorecardWeights(req, res);
   if (action === 'deep-eval') return handleDeepEval(req, res);
+  if (action === 'chat') return handleChat(req, res);
   return handleConfig(req, res);
 }

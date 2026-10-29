@@ -153,14 +153,12 @@ async function loadAiConfigCached() {
   return cfg;
 }
 
-// Claude에게 한 번 물어봅니다.
-// opts: { feature, prompt, system?, maxTokens?, timeoutMs? }
-// 반환: { ok:true, text, model, costUsd } 또는 { ok:false, reason, message } — 오류를 던지지 않아요.
-export async function askClaude(opts) {
-  const feature = opts.feature;
+// ---- 여러 단계로 나눈 호출 도구 (AI 상담처럼 한 대화에서 여러 번 부르는 기능이 같이 써요) ----
+
+// 부르기 전 확인: 키·예산을 보고, 이 기능에 쓸 모델을 정해요. { ok:true, model, effort } 또는 { ok:false, reason, message }
+export async function aiPrepare(feature) {
   const def = AI_FEATURES[feature] || { effort: 'medium', heavy: false };
   if (!process.env.ANTHROPIC_API_KEY) return { ok: false, reason: 'no-key', message: AI_REASON_TEXT['no-key'] };
-
   const cfg = await loadAiConfigCached();
   const used = (await loadAiUsage()).totalUsd;
   if (cfg.monthlyBudgetUsd > 0 && used >= cfg.monthlyBudgetUsd * HARD_STOP_MULTIPLIER) {
@@ -170,43 +168,62 @@ export async function askClaude(opts) {
   if (def.heavy && cfg.monthlyBudgetUsd > 0 && used >= cfg.monthlyBudgetUsd) {
     return { ok: false, reason: 'budget', message: AI_REASON_TEXT.budget };
   }
+  return { ok: true, model: modelFor(cfg, feature), effort: def.effort };
+}
 
-  const model = modelFor(cfg, feature);
+// 실제 요청. Sonnet·Opus는 안전 필터가 요청을 거절하면 다른 모델이 대신 답하도록(fallback) 켜 둡니다.
+// Haiku 5.5는 이 기능이 없어서 일반 요청으로 보내요. 오류는 그대로 던져요(부르는 쪽에서 aiFailure로 처리).
+export async function aiCreate(params, timeoutMs) {
   if (!client) client = new Anthropic({ maxRetries: 1 });
+  const requestOpts = { timeout: timeoutMs || 25_000 };
+  return params.model === 'claude-haiku-5-5'
+    ? client.messages.create(params, requestOpts)
+    : client.beta.messages.create(Object.assign({}, params, { betas: ['server-side-fallback-2026-07-01'], fallbacks: 'default' }), requestOpts);
+}
+
+export async function aiRecordUsage(feature, model, usage) {
+  return recordUsage(feature, model, usage);
+}
+
+export async function aiMarkOk(feature) {
+  await kvSetJson(AI_LAST_OK_KEY, { at: Date.now(), feature });
+}
+
+// 실패 기록 + 쉬운 이유. e는 SDK 오류 또는 { reason, message } 객체
+export async function aiFailure(feature, e) {
+  const reason = e && e.reason ? e.reason : classifyError(e);
+  console.error(`_ai.js(${feature}) ${reason}:`, e && e.message);
+  await recordFailure(feature, reason, e && e.message);
+  return { ok: false, reason, message: AI_REASON_TEXT[reason] };
+}
+
+// Claude에게 한 번 물어봅니다.
+// opts: { feature, prompt, system?, maxTokens?, timeoutMs? }
+// 반환: { ok:true, text, model, costUsd } 또는 { ok:false, reason, message } — 오류를 던지지 않아요.
+export async function askClaude(opts) {
+  const feature = opts.feature;
+  const prep = await aiPrepare(feature);
+  if (!prep.ok) return prep;
   const params = {
-    model,
+    model: prep.model,
     // 새 모델들은 답하기 전에 먼저 "생각"을 하고, 그 생각도 max_tokens에 포함돼요. 그래서 예전보다 넉넉히 잡아요.
     max_tokens: opts.maxTokens || 4000,
-    output_config: { effort: def.effort },
+    output_config: { effort: prep.effort },
     messages: [{ role: 'user', content: opts.prompt }]
   };
   if (opts.system) params.system = opts.system;
 
   try {
-    const requestOpts = { timeout: opts.timeoutMs || 25_000 };
-    // Sonnet·Opus는 안전 필터가 요청을 거절하면 다른 모델이 대신 답하도록(fallback) 켜 둡니다. Haiku 5.5는 이 기능이 없어요.
-    const response = model === 'claude-haiku-5-5'
-      ? await client.messages.create(params, requestOpts)
-      : await client.beta.messages.create(Object.assign({}, params, { betas: ['server-side-fallback-2026-07-01'], fallbacks: 'default' }), requestOpts);
-
-    const costUsd = await recordUsage(feature, model, response.usage);
-    if (response.stop_reason === 'refusal') {
-      await recordFailure(feature, 'refusal', AI_REASON_TEXT.refusal);
-      return { ok: false, reason: 'refusal', message: AI_REASON_TEXT.refusal };
-    }
+    const response = await aiCreate(params, opts.timeoutMs);
+    const costUsd = await recordUsage(feature, prep.model, response.usage);
+    if (response.stop_reason === 'refusal') return aiFailure(feature, { reason: 'refusal', message: AI_REASON_TEXT.refusal });
     // 답 앞에 "생각" 블록이 올 수 있어서, 순서가 아니라 종류(text)로 골라 읽어요.
     const text = (response.content || []).filter((b) => b.type === 'text').map((b) => b.text).join('\n').trim();
-    if (!text) {
-      await recordFailure(feature, 'empty', AI_REASON_TEXT.empty);
-      return { ok: false, reason: 'empty', message: AI_REASON_TEXT.empty };
-    }
-    await kvSetJson(AI_LAST_OK_KEY, { at: Date.now(), feature });
-    return { ok: true, text, model: response.model || model, costUsd };
+    if (!text) return aiFailure(feature, { reason: 'empty', message: AI_REASON_TEXT.empty });
+    await aiMarkOk(feature);
+    return { ok: true, text, model: response.model || prep.model, costUsd };
   } catch (e) {
-    const reason = classifyError(e);
-    console.error(`_ai.js(${feature}) ${reason}:`, e && e.message);
-    await recordFailure(feature, reason, e && e.message);
-    return { ok: false, reason, message: AI_REASON_TEXT[reason] };
+    return aiFailure(feature, e);
   }
 }
 

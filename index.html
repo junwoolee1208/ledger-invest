@@ -382,6 +382,33 @@
     .cal-pnl .long{ display:none; } .cal-pnl .short{ display:inline; }
     .cal-pnl{ font-size:11px; } .cal-cnt{ display:none; }
   }
+  /* ---- AI 전략 상담 (오른쪽 아래 떠 있는 버튼 + 대화창) ---- */
+  .chat-fab{ position:fixed; right:20px; bottom:20px; z-index:80; border:none; border-radius:999px; background:var(--brand); color:#fff; font-weight:700; font-size:14px; padding:12px 18px; box-shadow:0 6px 18px rgba(49,130,246,0.35); cursor:pointer; font-family:inherit; }
+  .chat-panel{ position:fixed; right:20px; bottom:20px; z-index:85; width:420px; max-width:calc(100vw - 32px); height:640px; max-height:calc(100vh - 40px); background:var(--panel); border:1px solid var(--line); border-radius:16px; box-shadow:0 12px 40px rgba(0,0,0,0.18); display:none; flex-direction:column; overflow:hidden; }
+  .chat-panel.open{ display:flex; }
+  .chat-head{ display:flex; align-items:center; justify-content:space-between; gap:8px; padding:12px 14px; border-bottom:1px solid var(--line); }
+  .chat-head b{ font-size:15px; }
+  .chat-head button{ border:none; background:none; cursor:pointer; color:var(--muted); font-size:12.5px; font-family:inherit; padding:4px 6px; }
+  .chat-body{ flex:1; overflow-y:auto; padding:12px 14px; display:flex; flex-direction:column; gap:10px; background:var(--panel-2); }
+  .chat-msg{ max-width:92%; padding:9px 12px; border-radius:12px; font-size:13.5px; line-height:1.6; word-break:break-word; }
+  .chat-msg.user{ align-self:flex-end; background:var(--brand); color:#fff; border-bottom-right-radius:4px; white-space:pre-wrap; }
+  .chat-msg.assistant{ align-self:flex-start; background:var(--panel); border:1px solid var(--line); border-bottom-left-radius:4px; }
+  .chat-msg pre{ background:var(--panel-2); border:1px solid var(--line); border-radius:8px; padding:8px; white-space:pre-wrap; font-size:12px; margin:6px 0; }
+  .chat-visual{ margin-top:8px; background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:8px; }
+  .chat-visual .chart-box{ position:relative; height:200px; }
+  .chat-visual table{ width:100%; font-size:12px; }
+  .chat-visual th, .chat-visual td{ padding:4px 6px; }
+  .chat-proposal{ margin-top:8px; border:1px solid var(--brand-dim); background:#F5F9FF; border-radius:10px; padding:10px; font-size:12.5px; }
+  .chat-proposal .acts{ display:flex; gap:6px; margin-top:8px; }
+  .chat-chips{ display:flex; flex-wrap:wrap; gap:6px; }
+  .chat-chips button{ border:1px solid var(--line); background:var(--panel); border-radius:999px; padding:6px 10px; font-size:12px; cursor:pointer; font-family:inherit; text-align:left; }
+  .chat-foot{ border-top:1px solid var(--line); padding:10px; display:flex; gap:8px; align-items:flex-end; }
+  .chat-foot textarea{ flex:1; resize:none; min-height:40px; max-height:120px; border:1px solid var(--line); border-radius:10px; padding:9px 10px; font-size:13.5px; font-family:inherit; }
+  @media (max-width:640px){
+    .chat-panel{ right:0; bottom:0; width:100vw; max-width:100vw; height:88vh; border-radius:16px 16px 0 0; }
+    .chat-fab{ right:14px; bottom:14px; }
+  }
+
   .cal-detail table{ width:100%; }
   /* 휴대폰에서 표 칸이 찌그러지지 않게: 표는 최소 너비를 두고, 좁으면 옆으로 밀어서 봐요 */
   .cal-scroll{ overflow-x:auto; }
@@ -930,6 +957,7 @@
           <button type="button" data-src="live">AI 실험</button>
           <button type="button" data-src="system">채점·안전장치</button>
           <button type="button" data-src="manual">직접 바꿈</button>
+          <button type="button" data-src="chat">AI 상담</button>
           <button type="button" data-src="backtest">과거 데이터</button>
         </div>
       </div>
@@ -1248,6 +1276,20 @@
 </main>
 
 <footer>LEDGER — 개인용 투자 분석 도구 · 시세 제공: 한국투자증권 Open API · 뉴스/실적: Finnhub · 투자 조언이 아닙니다</footer>
+
+<!-- AI 전략 상담: 어느 탭에서든 오른쪽 아래 버튼으로 열어요 -->
+<button class="chat-fab" id="chatFab" type="button">💬 AI 상담</button>
+<div class="chat-panel" id="chatPanel" role="dialog" aria-label="AI 전략 상담">
+  <div class="chat-head">
+    <div><b>AI 전략 상담</b> <span id="chatCount" style="font-size:11.5px; color:var(--muted-2);"></span></div>
+    <div><button type="button" id="chatNew">새 대화</button><button type="button" id="chatClose" aria-label="닫기">✕</button></div>
+  </div>
+  <div class="chat-body" id="chatBody"></div>
+  <div class="chat-foot">
+    <textarea id="chatInput" rows="1" placeholder="예: 이번 달 전략별 수익을 그래프로 보여줘"></textarea>
+    <button class="btn" id="chatSend" type="button">보내기</button>
+  </div>
+</div>
 
 <script>
 (function(){
@@ -3700,6 +3742,156 @@
     saveDaytradeConfig({ reset: true }, '기본값으로 되돌렸어요.');
   });
 
+  /* ---------------- AI 전략 상담 ----------------
+     대화 내용은 이 브라우저 탭에만 임시 저장돼요(sessionStorage). 서버에는 보낼 때마다 최근 대화(글자만)를 같이 보내요.
+     AI가 "제안"한 변경은 카드로 보여주고, [적용]을 눌러야 실제로 저장돼요. */
+  var chatMsgs = [];
+  var chatBusy = false;
+  var chatCharts = [];
+  var CHAT_STORE = 'ledgerChat';
+  var CHAT_SUGGEST = [
+    '이번 달 전략별 확정 손익을 그래프로 보여줘',
+    '요즘 손해가 제일 큰 전략은 뭐고, 왜 그런 것 같아?',
+    '지금까지 실험에서 배운 걸 전략별로 정리해줘',
+    '데이트레이딩 손절을 1.5%로 바꾸면 어떨까?',
+    '채점표에서 점수가 낮은 부문을 어떻게 개선하면 좋을까?'
+  ];
+  try { chatMsgs = JSON.parse(sessionStorage.getItem(CHAT_STORE) || '[]') || []; } catch(e){ chatMsgs = []; }
+  function chatSave(){ try { sessionStorage.setItem(CHAT_STORE, JSON.stringify(chatMsgs.slice(-40))); } catch(e){} }
+
+  // AI 답의 글자를 안전하게 보여줘요: ``` 블록은 상자로(개발 요청서 복사용), **굵게**, 줄바꿈
+  function chatFormat(text){
+    var parts = String(text || '').split('```');
+    return parts.map(function(p, i){
+      if(i % 2 === 1){
+        var body = p.replace(/^[a-zA-Z]*\n/, '');
+        return '<pre>'+escapeHtml(body)+'</pre><button type="button" class="chat-copy" style="font-size:11.5px; border:1px solid var(--line); background:var(--panel); border-radius:6px; padding:2px 8px; cursor:pointer;">복사</button>';
+      }
+      return escapeHtml(p).replace(/\*\*(.+?)\*\*/g, '<b>$1</b>').replace(/\n/g, '<br>');
+    }).join('');
+  }
+
+  function chatProposalHtml(p, mi, pi){
+    var change = '';
+    if(p.type === 'risk') change = atDescribeChange(p.before, p.after);
+    else if(p.type === 'toggle') change = p.after.enabled ? '전략 켜기' : '전략 끄기';
+    else {
+      change = Object.keys(p.after).filter(function(k){ return JSON.stringify(p.after[k]) !== JSON.stringify(p.before[k]); })
+        .map(function(k){ return k+' '+p.before[k]+' → '+p.after[k]; }).join(', ');
+    }
+    var state = p.state === 'applied' ? '<div style="color:#1D9E75; margin-top:6px;">✔ 적용했어요</div>'
+      : p.state === 'ignored' ? '<div style="color:var(--muted-2); margin-top:6px;">무시했어요</div>'
+      : '<div class="acts"><button type="button" class="btn" data-apply="'+mi+':'+pi+'">적용</button><button type="button" class="btn ghost" data-ignore="'+mi+':'+pi+'">무시</button></div>';
+    return '<div class="chat-proposal"><b>변경 제안 · '+escapeHtml(p.strategyName || p.strategyId)+'</b><br>'+escapeHtml(change)+
+      (p.reason ? '<div style="color:var(--muted); margin-top:4px;">이유: '+escapeHtml(p.reason)+'</div>' : '') + state + '</div>';
+  }
+
+  function chatVisualHtml(v, mi, vi){
+    if(v.kind === 'chart') return '<div class="chat-visual"><div style="font-weight:700; font-size:12.5px; margin-bottom:4px;">'+escapeHtml(v.title)+'</div><div class="chart-box"><canvas data-chart="'+mi+':'+vi+'"></canvas></div></div>';
+    return '<div class="chat-visual" style="overflow-x:auto;"><div style="font-weight:700; font-size:12.5px; margin-bottom:4px;">'+escapeHtml(v.title)+'</div><table><thead><tr>' +
+      v.columns.map(function(c){ return '<th>'+escapeHtml(c)+'</th>'; }).join('') + '</tr></thead><tbody>' +
+      v.rows.map(function(r){ return '<tr>'+r.map(function(c){ return '<td>'+escapeHtml(c === null || c === undefined ? '' : String(c))+'</td>'; }).join('')+'</tr>'; }).join('') +
+      '</tbody></table></div>';
+  }
+
+  function chatRender(){
+    var body = document.getElementById('chatBody');
+    chatCharts.forEach(function(c){ c.destroy(); });
+    chatCharts = [];
+    if(!chatMsgs.length){
+      body.innerHTML = '<div class="chat-msg assistant">안녕하세요! 이 사이트의 자동매매 기록·채점표·실험 결과를 직접 찾아보고 설명해 드려요. 그래프나 표로 보여달라고 해도 되고, 설정을 바꾸고 싶으면 "제안 카드"로 보여드릴게요(적용은 직접 눌러야 돼요).</div>' +
+        '<div class="chat-chips">'+CHAT_SUGGEST.map(function(s){ return '<button type="button" data-suggest="'+escapeHtml(s)+'">'+escapeHtml(s)+'</button>'; }).join('')+'</div>';
+      return;
+    }
+    body.innerHTML = chatMsgs.map(function(m, mi){
+      if(m.role === 'user') return '<div class="chat-msg user">'+escapeHtml(m.content)+'</div>';
+      return '<div class="chat-msg assistant">'+(m.error ? '<span style="color:var(--up);">'+escapeHtml(m.content)+'</span>' : chatFormat(m.content)) +
+        (m.visuals || []).map(function(v, vi){ return chatVisualHtml(v, mi, vi); }).join('') +
+        (m.proposals || []).map(function(p, pi){ return chatProposalHtml(p, mi, pi); }).join('') + '</div>';
+    }).join('') + (chatBusy ? '<div class="chat-msg assistant" style="color:var(--muted);"><span class="spinner"></span>&nbsp; 데이터를 찾아보고 생각하는 중… (최대 1분)</div>' : '');
+    // 그래프 그리기
+    var palette = ['#378ADD','#E24B4A','#1D9E75','#BA7517','#7F77DD','#D4537E','#888780','#5DCAA5'];
+    Array.prototype.forEach.call(body.querySelectorAll('canvas[data-chart]'), function(cv){
+      var idx = cv.dataset.chart.split(':');
+      var v = chatMsgs[+idx[0]].visuals[+idx[1]];
+      var pie = v.chartType === 'pie';
+      chatCharts.push(new Chart(cv.getContext('2d'), {
+        type: v.chartType,
+        data: { labels: v.labels, datasets: v.datasets.map(function(d, i){
+          return { label: d.label, data: d.data, borderColor: pie ? '#fff' : palette[i % palette.length], backgroundColor: pie ? v.labels.map(function(_, j){ return palette[j % palette.length]; }) : palette[i % palette.length], tension: 0.2, pointRadius: 2 };
+        }) },
+        options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: pie || v.datasets.length > 1, position: 'bottom', labels: { boxWidth: 10, font: { size: 11 } } } } }
+      }));
+    });
+    body.scrollTop = body.scrollHeight;
+  }
+
+  function chatSend(text){
+    text = String(text || '').trim();
+    if(!text || chatBusy) return;
+    if(!currentUser){ chatMsgs.push({ role:'user', content:text }, { role:'assistant', content:'로그인한 뒤에 쓸 수 있어요.', error:true }); chatRender(); return; }
+    chatMsgs.push({ role:'user', content:text });
+    chatBusy = true;
+    chatRender();
+    document.getElementById('chatInput').value = '';
+    var history = chatMsgs.filter(function(m){ return !m.error; }).map(function(m){ return { role: m.role, content: m.content }; });
+    atPost('chat', { messages: history }).then(function(d){
+      chatMsgs.push({ role:'assistant', content: d.reply, visuals: d.visuals || [], proposals: (d.proposals || []).map(function(p){ p.state = 'pending'; return p; }) });
+      document.getElementById('chatCount').textContent = '오늘 '+d.usedToday+'/'+d.dailyLimit+'번';
+    }).catch(function(err){
+      chatMsgs.push({ role:'assistant', content: err.message, error:true });
+    }).then(function(){
+      chatBusy = false;
+      chatSave();
+      chatRender();
+    });
+  }
+
+  function chatApply(p){
+    if(p.type === 'risk') return atPost('manual-edit', { strategyId: p.strategyId, risk: p.after, source: 'chat', note: p.reason });
+    if(p.type === 'daytrade') return atPost('daytrade-config', { daytrade: p.after, source: 'chat', note: p.reason });
+    return atPost('strategy-toggle', { strategyId: p.strategyId, enabled: p.after.enabled });
+  }
+
+  document.getElementById('chatFab').addEventListener('click', function(){
+    document.getElementById('chatPanel').classList.add('open');
+    this.style.display = 'none';
+    chatRender();
+    document.getElementById('chatInput').focus();
+  });
+  document.getElementById('chatClose').addEventListener('click', function(){
+    document.getElementById('chatPanel').classList.remove('open');
+    document.getElementById('chatFab').style.display = '';
+  });
+  document.getElementById('chatNew').addEventListener('click', function(){
+    if(chatBusy) return;
+    chatMsgs = []; chatSave(); chatRender();
+  });
+  document.getElementById('chatSend').addEventListener('click', function(){ chatSend(document.getElementById('chatInput').value); });
+  document.getElementById('chatInput').addEventListener('keydown', function(e){
+    if(e.key === 'Enter' && !e.shiftKey && !e.isComposing){ e.preventDefault(); chatSend(this.value); } // 한글 입력 중 Enter는 무시
+  });
+  document.getElementById('chatBody').addEventListener('click', function(e){
+    var sug = e.target.closest('[data-suggest]');
+    if(sug){ chatSend(sug.dataset.suggest); return; }
+    var copy = e.target.closest('.chat-copy');
+    if(copy){
+      var pre = copy.previousElementSibling;
+      try { navigator.clipboard.writeText(pre.textContent); copy.textContent = '복사됨'; } catch(err){}
+      return;
+    }
+    var ap = e.target.closest('[data-apply]'), ig = e.target.closest('[data-ignore]');
+    if(!ap && !ig) return;
+    var idx = (ap || ig).dataset[ap ? 'apply' : 'ignore'].split(':');
+    var p = chatMsgs[+idx[0]].proposals[+idx[1]];
+    if(ig){ p.state = 'ignored'; chatSave(); chatRender(); return; }
+    ap.disabled = true;
+    chatApply(p).then(function(){
+      p.state = 'applied'; chatSave(); chatRender();
+      if(atCards !== null) loadStrategyCards(); // 내 전략 카드도 새 숫자로
+    }).catch(function(err){ ap.disabled = false; alert(err.message); });
+  });
+
   /* ---------------- 채점표 ---------------- */
   var scdData = null;
   var scdTrendChart = null;
@@ -3863,6 +4055,9 @@
     // 누가/무엇을 보고 바꿨는지: 과거 데이터 시험(전략연구실) / 내가 직접 / AI가 실제(가짜 계좌) 성적을 보고
     if(source === 'backtest'){
       return '<span style="background:#EAF2FF; color:var(--brand); font-size:10.5px; font-weight:700; padding:2px 8px; border-radius:999px;">과거 데이터로 찾은 결과</span>';
+    }
+    if(source === 'chat'){
+      return '<span style="background:#EEEDFE; color:#3C3489; font-size:10.5px; font-weight:700; padding:2px 8px; border-radius:999px;">AI 상담으로 바꿈</span>';
     }
     if(source === 'system'){
       return '<span style="background:#E1F5EE; color:#0F6E56; font-size:10.5px; font-weight:700; padding:2px 8px; border-radius:999px;">자동 채점·안전장치</span>';
