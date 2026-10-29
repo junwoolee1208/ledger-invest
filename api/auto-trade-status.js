@@ -30,11 +30,18 @@ import { STRATEGY_IDS, STRATEGY_NAMES, WEIGHT_BASED_IDS, OWN_SETTINGS_IDS, BASE_
 import { isSellSide, ensureBackfilled, DAILY_KEY_PREFIX, TRADES_KEY_PREFIX } from './_ledger.js';
 import { EXPERIMENTS_KEY, BEST_RISK_KEY, FLAGS_KEY, LEARN, lessonLine, VERDICT_TEXT } from './_learning.js';
 import {
+  SCORECARD_CACHE_KEY, SCORECARD_HISTORY_KEY, SCORECARD_WEIGHTS_KEY, CATEGORIES, normalizeWeights, scoreStrategy, totalOf, gradeOf
+} from './_scorecard.js';
+import { runDeepEval, DEEPEVAL_LATEST_KEY, DEEPEVAL_HISTORY_KEY } from './_deepeval.js';
+import { fetchSymbolHistory } from './_backtest-core.js';
+import { PICK_REPORT_KEY } from './_picks.js';
+import {
   AI_CONFIG_KEY, AI_MODELS, AI_FEATURES, AI_LAST_OK_KEY, AI_LAST_ERROR_KEY, AI_REASON_TEXT,
   normalizeAiConfig, loadAiUsage, modelFor
 } from './_ai.js';
 
-export const config = { maxDuration: 30 };
+// 주간 AI 심층 평가서·AI 상담처럼 AI가 길게 생각하는 기능이 있어서 60초까지 기다려요(Vercel 무료 플랜에서도 가능한 값).
+export const config = { maxDuration: 60 };
 
 const FIREBASE_API_KEY = 'AIzaSyCI9mlo-KCsDagXdP4h07sPufTIns2FfZc';
 const CONFIG_KEY = 'autotrade:config';
@@ -504,6 +511,168 @@ async function handleAiConfig(req, res) {
   res.status(200).json({ ok: true, config: next });
 }
 
+/* ==================== action=scorecard / scorecard-weights / deep-eval (채점표) ====================
+   채점표는 하루 한 번 계산해서 저장해 두고 다시 써요(시세를 수십 번 조회해야 해서). ?refresh=1이면 새로 계산.
+   매일 계산한 종합 점수를 기록해 두어, 1주 전보다 올랐는지(↑) 내렸는지(↓)와 점수 변화 그래프를 보여줘요. */
+
+function kstDateMinus(days) {
+  return new Date(Date.now() + 9 * 60 * 60 * 1000 - days * 86400000).toISOString().slice(0, 10);
+}
+
+// 날짜별 장부(_ledger.js)에서 최근 n일의 매매 하나하나를 모아요. (최근 400건만 남는 매매 기록과 달리 오래된 날도 남아 있어요)
+async function loadRecentTrades(days) {
+  const dates = Array.from({ length: days }, (_, i) => kstDateMinus(i));
+  const lists = await Promise.all(dates.map((d) => kvGetJson(TRADES_KEY_PREFIX + d, [])));
+  return lists.flat();
+}
+
+function accountPct(acct) {
+  let posValue = 0;
+  Object.values(acct.positions || {}).forEach((p) => {
+    posValue += (p.netEvalAmount !== undefined && p.netEvalAmount !== null) ? p.netEvalAmount : (p.costBasis || p.qty * p.avgPrice);
+  });
+  return acct.startingCash ? ((acct.cash + posValue - acct.startingCash) / acct.startingCash) * 100 : 0;
+}
+
+async function buildScorecard() {
+  const today = todayKST();
+  const [cfgRaw, overrides, customList, experiments, flags, weightsRaw, trades] = await Promise.all([
+    kvGetJson(CONFIG_KEY, null), kvGetJson(OVERRIDES_KEY, {}), kvGetJson(CUSTOM_KEY, []),
+    kvGetJson(EXPERIMENTS_KEY, []), kvGetJson(FLAGS_KEY, {}), kvGetJson(SCORECARD_WEIGHTS_KEY, null), loadRecentTrades(30)
+  ]);
+  const cfg = cfgRaw || DEFAULT_CONFIG;
+  const weights = normalizeWeights(weightsRaw);
+  const names = Object.assign({}, STRATEGY_NAMES);
+  customList.forEach((c) => { names[c.id] = c.name; });
+  const ids = STRATEGY_IDS.concat(customList.map((c) => c.id));
+
+  // 가짜 계좌 수익률(보유 주식은 지금 팔면 남는 금액으로) — 전략 성적 순위와 같은 계산
+  const accounts = {};
+  for (const id of ids) {
+    const [kr, us] = await Promise.all([loadAccount(id, 'KR'), loadAccount(id, 'US')]);
+    accounts[id] = { kr, us };
+  }
+  const costs = await loadCosts();
+  let token = null;
+  if (process.env.KIS_APP_KEY && process.env.KIS_APP_SECRET) {
+    try { token = await getKisToken(); await attachLivePrices(accounts, token, costs); } catch (e) { token = null; }
+  }
+  const pctOf = (id) => {
+    const a = accounts[id];
+    const krPct = accountPct(a.kr), usPct = accountPct(a.us);
+    return (krPct * a.kr.startingCash + usPct * a.us.startingCash) / (a.kr.startingCash + a.us.startingCash);
+  };
+
+  // 산 날·판 날 뒤의 가격을 보려고 국내 종목의 최근 일봉을 가져와요(종목당 한 번, 최대 40종목, 5개씩 동시에).
+  const histories = {};
+  if (token) {
+    const symbols = Array.from(new Set(trades.filter((t) => /^\d{6}$/.test(t.symbol)).map((t) => t.symbol))).slice(0, 40);
+    for (let i = 0; i < symbols.length; i += 5) {
+      await Promise.all(symbols.slice(i, i + 5).map(async (s) => {
+        try { histories[s] = await fetchSymbolHistory(token, s, 50); } catch (e) { histories[s] = []; }
+      }));
+    }
+  }
+
+  const history = await kvGetJson(SCORECARD_HISTORY_KEY, []);
+  const weekAgo = history.find((h) => h.date <= kstDateMinus(7));
+  const baselinePct = pctOf('baseline');
+  const enabledMap = cfg.strategies || {};
+  const strategies = ids.map((id) => {
+    const mine = experiments.filter((e) => e.strategyId === id);
+    const custom = customList.find((c) => c.id === id);
+    const res = scoreStrategy({
+      id, trades: trades.filter((t) => (t.strategy || 'momentum') === id), accountPct: pctOf(id), baselinePct,
+      experiments: mine, histories, startingCash: { KR: accounts[id].kr.startingCash, US: accounts[id].us.startingCash },
+      isBaseline: id === 'baseline', learnable: !WEIGHT_BASED_IDS.includes(id) && id !== 'baseline' && id !== 'daytrade' && !custom
+    });
+    const total = totalOf(res.cats, weights);
+    let risk = null;
+    if (BASE_RISK[id]) risk = Object.assign({}, id === 'momentum' ? Object.assign({}, BASE_RISK.momentum, cfg.risk || {}) : BASE_RISK[id], overrides[id] || {});
+    const prev = weekAgo && weekAgo.totals ? weekAgo.totals[id] : null;
+    return {
+      id, name: names[id], enabled: custom ? custom.enabled !== false : enabledMap[id] !== false,
+      total, grade: gradeOf(total), trend: (typeof prev === 'number' && typeof total === 'number') ? total - prev : null,
+      cats: res.cats, sells: res.sells, buys: res.buys, confidence: res.confidence, risk,
+      flag: flags[id] ? flags[id].note : null,
+      lessons: mine.filter((e) => e.status === 'judged').slice(0, 5).map(lessonLine)
+    };
+  });
+
+  // 시스템 전체 부문: 자동조정이 실제로 배우고 있는지
+  const judgedAll = experiments.filter((e) => e.status === 'judged' && e.result);
+  const system = {
+    judged: judgedAll.length,
+    improved: judgedAll.filter((e) => e.result.verdict === 'improved').length,
+    worse: judgedAll.filter((e) => e.result.verdict === 'worse').length,
+    rolledBack: judgedAll.filter((e) => e.result.rolledBackTo).length,
+    running: experiments.filter((e) => e.status === 'running').length
+  };
+
+  const data = { date: today, computedAt: Date.now(), weights, categories: CATEGORIES, strategies, system, tradesConsidered: trades.length, priced: !!token };
+
+  // 하루 한 번 종합 점수 기록(점수 변화 그래프·1주 추세용)
+  const totals = {};
+  strategies.forEach((s) => { totals[s.id] = s.total; });
+  const nextHistory = [{ date: today, totals }].concat(history.filter((h) => h.date !== today)).slice(0, 120);
+  await Promise.all([kvSetJson(SCORECARD_CACHE_KEY, data), kvSetJson(SCORECARD_HISTORY_KEY, nextHistory)]);
+  return data;
+}
+
+async function handleScorecard(req, res) {
+  try {
+    const cached = await kvGetJson(SCORECARD_CACHE_KEY, null);
+    const data = (cached && cached.date === todayKST() && req.query.refresh !== '1') ? cached : await buildScorecard();
+    const [history, deepEval, pickReport] = await Promise.all([
+      kvGetJson(SCORECARD_HISTORY_KEY, []), kvGetJson(DEEPEVAL_LATEST_KEY, null), kvGetJson(PICK_REPORT_KEY, null)
+    ]);
+    res.status(200).json(Object.assign({}, data, { history: history.slice(0, 60).reverse(), deepEval, pickReport }));
+  } catch (e) {
+    console.error('auto-trade-status.js(scorecard) error:', e);
+    res.status(500).json({ error: '서버 오류가 발생했습니다.' });
+  }
+}
+
+async function handleScorecardWeights(req, res) {
+  if (req.method !== 'POST') { res.status(405).json({ error: 'POST만 지원합니다.' }); return; }
+  const uid = await requireUid(req, res);
+  if (!uid) return;
+  const weights = normalizeWeights(readBody(req).weights);
+  await kvSetJson(SCORECARD_WEIGHTS_KEY, weights);
+  await kvCommand(['DEL', SCORECARD_CACHE_KEY]); // 가중치가 바뀌었으니 다음에 새로 계산
+  res.status(200).json({ ok: true, weights });
+}
+
+// 실행: 화면 버튼(로그인 필요, POST) 또는 외부 스케줄러(GET ?auto=1&key=자동매매_시크릿키, 주 1회 권장)
+// 자동 실행은 마지막 평가 후 6일이 안 지났으면 건너뛰어요(스케줄러를 더 자주 걸어도 비용이 안 늘게).
+async function handleDeepEval(req, res) {
+  const isAuto = req.query.auto === '1';
+  if (req.method === 'GET' && !isAuto) {
+    const [latest, history] = await Promise.all([kvGetJson(DEEPEVAL_LATEST_KEY, null), kvGetJson(DEEPEVAL_HISTORY_KEY, [])]);
+    res.status(200).json({ latest, history });
+    return;
+  }
+  if (isAuto) {
+    if (!process.env.AUTO_TRADE_SECRET || req.query.key !== process.env.AUTO_TRADE_SECRET) { res.status(401).json({ error: '인증 키가 올바르지 않습니다.' }); return; }
+    const latest = await kvGetJson(DEEPEVAL_LATEST_KEY, null);
+    if (latest && Date.now() - latest.at < 6 * 86400000) { res.status(200).json({ skipped: true, reason: 'recent', lastAt: latest.at }); return; }
+  } else {
+    const uid = await requireUid(req, res);
+    if (!uid) return;
+  }
+  try {
+    const cached = await kvGetJson(SCORECARD_CACHE_KEY, null);
+    const scorecard = (cached && cached.date === todayKST()) ? cached : await buildScorecard();
+    const [pickReport, regimeCache] = await Promise.all([kvGetJson(PICK_REPORT_KEY, null), kvGetJson('autotrade:regime:cache', null)]);
+    const result = await runDeepEval({ scorecard, pickReport, regimeLabel: regimeCache ? regimeCache.label : null, today: todayKST() });
+    if (!result.ok) { res.status(502).json({ error: 'AI 심층 평가를 만들지 못했어요. ' + result.message, reason: result.reason }); return; }
+    res.status(200).json({ ok: true, latest: result.report });
+  } catch (e) {
+    console.error('auto-trade-status.js(deep-eval) error:', e);
+    res.status(500).json({ error: '서버 오류가 발생했습니다.' });
+  }
+}
+
 /* ==================== action=daytrade-config (데이트레이딩 설정) ====================
    GET : 현재 설정(없으면 기본값) + 기본값(화면의 "기본값으로" 버튼용)
    POST: 로그인한 본인만 저장. body: { daytrade } 또는 { reset: true }
@@ -923,5 +1092,8 @@ export default async function handler(req, res) {
   if (action === 'ai-config') return handleAiConfig(req, res);
   if (action === 'experiments') return handleExperiments(req, res);
   if (action === 'reset-all-risk') return handleResetAllRisk(req, res);
+  if (action === 'scorecard') return handleScorecard(req, res);
+  if (action === 'scorecard-weights') return handleScorecardWeights(req, res);
+  if (action === 'deep-eval') return handleDeepEval(req, res);
   return handleConfig(req, res);
 }

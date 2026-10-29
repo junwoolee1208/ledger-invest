@@ -28,6 +28,7 @@ import {
   EXPERIMENTS_KEY, BEST_RISK_KEY, FLAGS_KEY, MAX_EXPERIMENTS, LEARN, RISK_FIELDS, RISK_LABELS,
   summarize, clampProposal, liftToFloors, judge, readyToJudge, forbiddenDirections, applyForbidden, lessonLine
 } from './_learning.js';
+import { DEEPEVAL_LATEST_KEY } from './_deepeval.js';
 
 export const config = { maxDuration: 30 };
 
@@ -328,7 +329,7 @@ function riskOnly(r) {
 
 // AI에게 다음 실험을 설계하게 합니다. 지금까지의 실험 결과(교훈)와 다시 하면 안 되는 방향을 함께 줘서,
 // 이미 실패한 쪽으로 또 바꾸지 않고 "무엇을 배웠고, 그래서 이번엔 무엇을 왜 시도하는지"를 쓰게 해요.
-async function askNextExperiment(def, current, stats, history, forbidden, regimeText) {
+async function askNextExperiment(def, current, stats, history, forbidden, regimeText, weeklyAdvice) {
   const lessons = history.length
     ? history.map((e, i) => `${i + 1}. ${lessonLine(e)}${e.hypothesis ? ` / 그때 가설: ${e.hypothesis}` : ''}`).join('\n')
     : '아직 없음(첫 실험)';
@@ -351,6 +352,8 @@ async function askNextExperiment(def, current, stats, history, forbidden, regime
 ${lessons}
 
 다시 시도하면 안 되는 방향(같은 방향으로 바꿔서 2번 이상 나빠짐): ${forbiddenText}
+
+주간 AI 심층 평가서의 제안(참고만, 위 규칙이 우선): ${weeklyAdvice || '없음'}
 
 규칙:
 - 한 번에 바꿀 수 있는 폭은 지금 값의 ±30%, 하루 횟수는 ±1회. 비중은 최소 3%, 하루 횟수는 최소 2회.
@@ -379,10 +382,16 @@ async function maybeRunLearningCycle(cfg, today, log) {
   await kvSetJson(ADJUST_LASTRUN_KEY, Date.now()); // 중간에 실패해도 같은 주기 안에서 무한 재시도하지 않게 먼저 기록
 
   try {
-    const [experiments, best, flags, changes, regimeCache] = await Promise.all([
+    const [experiments, best, flags, changes, regimeCache, deepEval] = await Promise.all([
       kvGetJson(EXPERIMENTS_KEY, []), kvGetJson(BEST_RISK_KEY, {}), kvGetJson(FLAGS_KEY, {}),
-      kvGetJson(CHANGES_KEY, []), kvGetJson(REGIME_CACHE_KEY, null)
+      kvGetJson(CHANGES_KEY, []), kvGetJson(REGIME_CACHE_KEY, null), kvGetJson(DEEPEVAL_LATEST_KEY, null)
     ]);
+    // 주간 심층 평가서가 전략별로 제안한 "다음 실험"을 자동조정 AI에게 참고자료로 넘겨요(평가 → 실험이 이어지도록).
+    const adviceFor = (id) => {
+      const s = deepEval && deepEval.report && Array.isArray(deepEval.report.strategies) ? deepEval.report.strategies.find((x) => x.id === id) : null;
+      if (!s || !Array.isArray(s.nextExperiments) || !s.nextExperiments.length) return null;
+      return `${deepEval.date} 평가: ` + s.nextExperiments.map((n) => `${n.what} (이유: ${n.why})`).join(' / ');
+    };
     const regimeLabel = regimeCache && regimeCache.label ? regimeLabelKo(regimeCache.label) : null;
     const now = Date.now();
 
@@ -467,7 +476,7 @@ async function maybeRunLearningCycle(cfg, today, log) {
       const stats = summarize(observing.samples.slice(-LEARN.beforeTrades));
       const history = mine.filter((e) => e.status === 'judged').slice(0, 10);
       const forbidden = forbiddenDirections(mine);
-      const proposal = await askNextExperiment(def, current, stats, history, forbidden, regimeLabel);
+      const proposal = await askNextExperiment(def, current, stats, history, forbidden, regimeLabel, adviceFor(def.id));
       if (!proposal) continue; // AI 실패 — 다음 주기에 다시 시도(관찰 기록은 그대로)
 
       if (proposal.action === 'buy-rule-problem') {

@@ -425,6 +425,7 @@
     <button data-view="rankings">랭킹</button>
     <button data-view="portfolio">포트폴리오</button>
     <button data-view="autotrade">자동매매</button>
+    <button data-view="scorecard">채점표</button>
     <button data-view="strategychanges">전략 변경 이력</button>
     <button data-view="strategylab">전략연구실</button>
     <button data-view="calendar">캘린더</button>
@@ -837,6 +838,65 @@
         <div class="glyph">§</div>
         <p>아직 매매 기록이 없습니다.</p>
       </div>
+    </div>
+  </section>
+
+  <!-- SCORECARD: 전략별 부문 점수 + 주간 AI 심층 평가서 -->
+  <section class="view" id="view-scorecard">
+    <div class="section-head">
+      <div>
+        <span class="eyebrow">채점표</span>
+        <h2>전략 채점표</h2>
+      </div>
+      <button class="btn ghost" id="scdRefresh">다시 계산</button>
+    </div>
+
+    <div class="banner">
+      <b>전략마다 7개 부문을 0~100점으로 채점해요</b><br>
+      성적표처럼 부문별 점수와 종합 등급(A~F)을 보여줘요. 점수는 계산식으로 매겨서 늘 같은 기준이고, 점수마다 "왜 이 점수인지" 근거가 붙어요.
+      <details class="more" style="margin:8px 0 0;"><summary>자세히 보기</summary><div class="more-body">
+        <p><b>계산 범위</b>: 최근 30일의 매매 기록과 지금 가짜 계좌로 계산해요. 하루 한 번 계산해서 저장해 두고, [다시 계산]을 누르면 새로 계산해요(시세를 여러 번 조회해서 10~20초 걸릴 수 있어요).</p>
+        <p><b>신뢰도</b>: 판 횟수가 10번 미만이면 "낮음", 30번 미만이면 "보통"이에요. 신뢰도가 낮은 점수는 우연일 수 있으니 참고만 하세요.</p>
+        <p><b>근거 부족</b>: 거래가 5번도 안 되는 부문은 점수를 매기지 않아요. 종합 점수는 점수가 있는 부문만으로 계산해요.</p>
+        <p><b>추세(↑↓)</b>: 1주 전 종합 점수와 비교한 변화예요.</p>
+        <p><b>가중치</b>: 어떤 부문을 더 중요하게 볼지 정할 수 있어요. 예를 들어 손해를 싫어하면 "안정성"을 2로 올리세요.</p>
+      </div></details>
+    </div>
+
+    <div class="panel pad" style="margin-bottom:20px;">
+      <div id="scdMeta" style="font-size:12.5px; color:var(--muted); margin-bottom:10px;"></div>
+      <div id="scdCards" class="st-cards"><div style="color:var(--muted-2); font-size:12.5px;">채점표 탭을 열면 계산해요.</div></div>
+      <details class="more" style="margin-top:14px;"><summary>가중치 바꾸기</summary><div class="more-body">
+        <p style="margin-bottom:8px;">0이면 그 부문을 빼고, 2면 두 배로 중요하게 봐요(0~5).</p>
+        <div id="scdWeights" class="row" style="display:grid; grid-template-columns:repeat(auto-fit,minmax(120px,1fr)); gap:8px;"></div>
+        <div style="margin-top:10px;"><button class="btn" id="scdWeightsSave" type="button">저장</button><span id="scdWeightsMsg" class="st-msg"></span></div>
+      </div></details>
+    </div>
+
+    <div class="panel pad" style="margin-bottom:20px;">
+      <h3 style="margin-top:0; font-size:15px;">시스템 전체</h3>
+      <p class="easy">전략 하나하나가 아니라, 종목을 고르는 방법과 자동조정이 잘 배우고 있는지 보는 곳이에요.</p>
+      <div id="scdSystem" style="font-size:13px; line-height:1.8;">—</div>
+    </div>
+
+    <div class="panel pad" style="margin-bottom:20px;">
+      <h3 style="margin-top:0; font-size:15px;">종합 점수 변화</h3>
+      <p class="easy">날마다 기록한 전략별 종합 점수예요. 선이 올라가면 나아지고 있다는 뜻이에요.</p>
+      <div class="chart-wrap small"><canvas id="scdTrendChart"></canvas></div>
+    </div>
+
+    <div class="panel pad" style="margin-bottom:20px;">
+      <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:10px; flex-wrap:wrap;">
+        <h3 style="margin:0; font-size:15px;">주간 AI 심층 평가서</h3>
+        <button class="btn" id="scdDeepEvalBtn" type="button">지금 평가 받기</button>
+      </div>
+      <p class="easy" style="margin-top:6px;">가장 똑똑한 AI(Opus 5.5)가 채점표·실험 기록·교훈을 전부 읽고, 전략마다 잘한 점·못한 점과 다음에 해볼 실험을 써줘요.</p>
+      <details class="more"><summary>자세히 보기</summary><div class="more-body">
+        <p>한 번에 약 0.5~1달러가 들어요(설정 탭 "AI 사용량"에 기록돼요). 월 AI 예산을 다 쓰면 멈춰요. 30~60초 걸려요.</p>
+        <p>평가서가 제안한 "다음 실험"은 자동조정 AI에게도 참고자료로 전달돼서, 평가 → 실험이 이어져요.</p>
+        <p>매주 자동으로 받으려면 cron-job.org에 <code style="background:var(--panel-2); padding:1px 5px; border-radius:4px;">/api/auto-trade-status?action=deep-eval&amp;auto=1&amp;key=자동매매_시크릿키</code>를 주 1회 호출하도록 등록하세요(6일 안에 이미 받았으면 알아서 건너뛰어요).</p>
+      </div></details>
+      <div id="scdDeepEval" style="font-size:13px; line-height:1.7;"></div>
     </div>
   </section>
 
@@ -1756,6 +1816,9 @@
     }
     if(btn.dataset.view === 'strategychanges'){
       loadStrategyChanges();
+    }
+    if(btn.dataset.view === 'scorecard'){
+      loadScorecard(false);
     }
     if(btn.dataset.view === 'dashboard'){
       loadTodaySummary();
@@ -3616,6 +3679,145 @@
   document.getElementById('atDtReset').addEventListener('click', function(){
     if(!confirm('데이트레이딩 설정을 기본값으로 되돌릴까요?')) return;
     saveDaytradeConfig({ reset: true }, '기본값으로 되돌렸어요.');
+  });
+
+  /* ---------------- 채점표 ---------------- */
+  var scdData = null;
+  var scdTrendChart = null;
+  var SCD_GRADE_COLOR = { A:'#1D9E75', B:'#378ADD', C:'#BA7517', D:'#D85A30', F:'#E24B4A' };
+  var SCD_REC_TEXT = { keep:'유지', tune:'실험 계속', pause:'잠시 끄기 권장', investigate:'사는 조건 점검' };
+
+  function loadScorecard(refresh){
+    var box = document.getElementById('scdCards');
+    if(!scdData || refresh) box.innerHTML = '<div style="color:var(--muted); font-size:13px;"><span class="spinner"></span>&nbsp; 채점하는 중… (처음엔 10~20초 걸릴 수 있어요)</div>';
+    fetch('/api/auto-trade-status?action=scorecard'+(refresh?'&refresh=1':'')).then(function(r){ return r.json(); }).then(function(d){
+      if(d.error) throw new Error(d.error);
+      scdData = d;
+      (d.strategies || []).forEach(function(s){ if(!AT_STRATEGY_NAMES[s.id]) AT_STRATEGY_NAMES[s.id] = s.name; });
+      renderScorecard();
+    }).catch(function(e){ box.innerHTML = '<div style="color:var(--muted-2); font-size:13px;">'+errMsg(e)+'</div>'; });
+  }
+
+  function scdBar(score){
+    if(score === null || score === undefined) return '<span style="color:var(--muted-2); font-size:11.5px;">근거 부족</span>';
+    var g = gradeLetter(score);
+    return '<span style="display:inline-flex; align-items:center; gap:6px; width:100%;"><span style="flex:1; height:6px; background:var(--panel-2); border-radius:999px; overflow:hidden;">' +
+      '<span style="display:block; height:100%; width:'+score+'%; background:'+SCD_GRADE_COLOR[g]+';"></span></span><b style="min-width:26px; text-align:right;">'+score+'</b></span>';
+  }
+  function gradeLetter(score){ return score >= 80 ? 'A' : score >= 65 ? 'B' : score >= 50 ? 'C' : score >= 35 ? 'D' : 'F'; }
+
+  function renderScorecard(){
+    var d = scdData;
+    document.getElementById('scdMeta').innerHTML = escapeHtml(d.date)+' 기준 · 최근 30일 매매 '+d.tradesConsidered+'건' +
+      (d.priced ? '' : ' · <span style="color:var(--up);">시세를 못 불러와서 매수 정확도·매도 타이밍은 빠졌어요</span>');
+
+    var list = (d.strategies || []).slice().sort(function(a,b){ return (b.total === null ? -1 : b.total) - (a.total === null ? -1 : a.total); });
+    document.getElementById('scdCards').innerHTML = list.map(function(s){
+      var color = s.grade ? SCD_GRADE_COLOR[s.grade] : 'var(--muted-2)';
+      var trend = (s.trend === null || s.trend === undefined) ? '' : (s.trend > 0 ? '<span class="up"> ↑'+s.trend+'</span>' : (s.trend < 0 ? '<span class="down"> ↓'+Math.abs(s.trend)+'</span>' : '<span style="color:var(--muted-2);"> →0</span>'));
+      var rows = d.categories.map(function(c){
+        var v = s.cats[c.id];
+        return '<details style="margin:0;"><summary style="list-style:none; cursor:pointer; display:grid; grid-template-columns:110px 1fr; gap:8px; align-items:center; font-size:12.5px; padding:3px 0;">' +
+          '<span>'+c.icon+' '+escapeHtml(c.label)+'</span>'+scdBar(v ? v.score : null)+'</summary>' +
+          '<div style="font-size:12px; color:var(--muted); padding:2px 0 6px 18px;">'+escapeHtml(c.easy)+'<br>'+(v ? '근거: '+escapeHtml(v.why) : '거래가 5번이 안 되거나 해당하지 않아서 점수를 안 매겼어요.')+'</div></details>';
+      }).join('');
+      return '<div class="st-card'+(s.enabled === false ? ' off' : '')+'">' +
+        '<div class="st-head"><div><div class="st-name">'+atStratLabel(s.id)+(s.enabled === false ? ' <span style="font-size:11px; color:var(--muted-2); font-weight:400;">꺼짐</span>' : '')+'</div>' +
+          '<div class="st-easy">신뢰도 '+escapeHtml(s.confidence)+' · 판 횟수 '+s.sells+'번</div></div>' +
+          '<div style="text-align:center; min-width:58px;"><div style="font-size:26px; font-weight:800; color:'+color+'; line-height:1;">'+(s.grade || '—')+'</div>' +
+          '<div style="font-size:12px;">'+(s.total === null ? '—' : s.total+'점')+trend+'</div></div></div>' +
+        (s.flag ? '<div style="font-size:12px; color:var(--up);">⚠️ '+escapeHtml(s.flag)+'</div>' : '') +
+        '<div>'+rows+'</div>' +
+        (s.lessons && s.lessons.length ? '<details class="more" style="margin:0;"><summary>실험에서 배운 것 '+s.lessons.length+'개</summary><div class="more-body"><ul style="margin:0; padding-left:18px;">'+s.lessons.map(function(l){ return '<li>'+escapeHtml(l)+'</li>'; }).join('')+'</ul></div></details>' : '') +
+      '</div>';
+    }).join('');
+
+    // 가중치 입력칸
+    document.getElementById('scdWeights').innerHTML = d.categories.map(function(c){
+      return '<div><label>'+c.icon+' '+escapeHtml(c.label)+'</label><input type="number" min="0" max="5" step="0.5" data-w="'+c.id+'" class="mono" style="width:100%;" value="'+d.weights[c.id]+'"></div>';
+    }).join('');
+
+    // 시스템 전체
+    var sys = d.system || {};
+    var pick = d.pickReport;
+    document.getElementById('scdSystem').innerHTML =
+      '<div>🔎 <b>종목 고르기</b>: '+(pick && pick.summary ? escapeHtml(pick.summary) : '아직 채점된 기록이 없어요(고른 지 3거래일이 지나야 채점돼요).')+'</div>' +
+      '<div>🧪 <b>자동조정 학습</b>: 채점된 실험 '+(sys.judged||0)+'개 — 좋아짐 <span class="up">'+(sys.improved||0)+'</span>, 나빠짐 <span class="down">'+(sys.worse||0)+'</span>, 되돌림 '+(sys.rolledBack||0)+'번, 지금 실험 중 '+(sys.running||0)+'개</div>';
+
+    renderScorecardTrend();
+    renderDeepEval(d.deepEval);
+  }
+
+  function renderScorecardTrend(){
+    var d = scdData;
+    var hist = d.history || [];
+    var canvas = document.getElementById('scdTrendChart');
+    if(scdTrendChart){ scdTrendChart.destroy(); scdTrendChart = null; }
+    if(hist.length < 2){
+      canvas.parentNode.style.display = 'none';
+      return;
+    }
+    canvas.parentNode.style.display = '';
+    var palette = ['#378ADD','#1D9E75','#D85A30','#7F77DD','#BA7517','#D4537E','#639922','#888780','#E24B4A','#5DCAA5','#185FA5'];
+    var ids = (d.strategies || []).map(function(s){ return s.id; });
+    scdTrendChart = new Chart(canvas.getContext('2d'), {
+      type: 'line',
+      data: {
+        labels: hist.map(function(h){ return h.date.slice(5); }),
+        datasets: ids.map(function(id, i){
+          return { label: AT_STRATEGY_NAMES[id] || id, data: hist.map(function(h){ return h.totals ? h.totals[id] : null; }), borderColor: palette[i % palette.length], backgroundColor: palette[i % palette.length], spanGaps: true, tension: 0.2, pointRadius: 2 };
+        })
+      },
+      options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom', labels: { boxWidth: 10, font: { size: 11 } } } }, scales: { y: { min: 0, max: 100 } } }
+    });
+  }
+
+  function renderDeepEval(latest){
+    var box = document.getElementById('scdDeepEval');
+    if(!latest){ box.innerHTML = '<p style="color:var(--muted-2); margin:8px 0 0;">아직 받은 평가서가 없어요. [지금 평가 받기]를 눌러보세요.</p>'; return; }
+    var r = latest.report;
+    var head = '<div style="color:var(--muted-2); font-size:12px; margin:8px 0;">'+escapeHtml(latest.date)+' · '+escapeHtml(latest.model||'')+(latest.costUsd ? ' · 비용 약 $'+Number(latest.costUsd).toFixed(2) : '')+'</div>';
+    if(!r){ box.innerHTML = head + '<div style="white-space:pre-wrap;">'+escapeHtml(latest.rawText || '')+'</div>'; return; }
+    var html = head + '<p style="margin:0 0 8px;">'+escapeHtml(r.summary || '')+'</p>';
+    if(r.priorities && r.priorities.length){
+      html += '<div style="font-weight:700; margin:10px 0 4px;">가장 시급한 개선</div><ol style="margin:0; padding-left:20px;">'+r.priorities.map(function(p){ return '<li>'+escapeHtml(p)+'</li>'; }).join('')+'</ol>';
+    }
+    (r.strategies || []).forEach(function(s){
+      html += '<details class="more" style="margin:10px 0 0;"><summary>'+escapeHtml(AT_STRATEGY_NAMES[s.id] || s.id)+' — '+escapeHtml(s.headline || '')+
+        (s.recommendation ? ' <span class="st-tag">'+escapeHtml(SCD_REC_TEXT[s.recommendation] || s.recommendation)+'</span>' : '')+'</summary><div class="more-body">' +
+        (s.good && s.good.length ? '<p><b>잘한 점</b><br>'+s.good.map(escapeHtml).join('<br>')+'</p>' : '') +
+        (s.bad && s.bad.length ? '<p><b>못한 점</b><br>'+s.bad.map(escapeHtml).join('<br>')+'</p>' : '') +
+        (s.why ? '<p><b>원인 추정</b><br>'+escapeHtml(s.why)+'</p>' : '') +
+        (s.nextExperiments && s.nextExperiments.length ? '<p><b>다음에 해볼 실험</b><br>'+s.nextExperiments.map(function(n, i){ return (i+1)+'. '+escapeHtml(n.what)+' — '+escapeHtml(n.why || '')+(n.expected ? ' (기대: '+escapeHtml(n.expected)+')' : ''); }).join('<br>')+'</p>' : '') +
+        '</div></details>';
+    });
+    if(r.system){
+      html += '<div style="font-weight:700; margin:12px 0 4px;">시스템 전체</div><p style="margin:0;">🔎 '+escapeHtml(r.system.picking || '')+'<br>🧪 '+escapeHtml(r.system.learning || '')+'</p>';
+    }
+    box.innerHTML = html;
+  }
+
+  document.getElementById('scdRefresh').addEventListener('click', function(){ loadScorecard(true); });
+  document.getElementById('scdWeightsSave').addEventListener('click', function(){
+    var msg = document.getElementById('scdWeightsMsg');
+    var w = {};
+    Array.prototype.forEach.call(document.querySelectorAll('[data-w]'), function(inp){ w[inp.dataset.w] = Number(inp.value); });
+    msg.textContent = '저장 중…'; msg.style.color = 'var(--muted-2)';
+    atPost('scorecard-weights', { weights: w }).then(function(){
+      msg.textContent = '저장했어요. 다시 계산할게요.'; msg.style.color = 'var(--up)';
+      loadScorecard(true);
+    }).catch(function(err){ msg.textContent = err.message; msg.style.color = 'var(--down)'; });
+  });
+  document.getElementById('scdDeepEvalBtn').addEventListener('click', function(){
+    var btn = this;
+    if(!confirm('AI 심층 평가서를 받을까요?\n가장 똑똑한 모델이 깊게 읽어서 약 0.5~1달러가 들고, 30~60초 걸려요.')) return;
+    btn.disabled = true;
+    document.getElementById('scdDeepEval').innerHTML = '<div style="color:var(--muted); margin-top:8px;"><span class="spinner"></span>&nbsp; AI가 채점표와 실험 기록을 읽고 있어요… (최대 1분)</div>';
+    atPost('deep-eval', {}).then(function(d){
+      renderDeepEval(d.latest);
+    }).catch(function(err){
+      document.getElementById('scdDeepEval').innerHTML = '<p style="color:var(--up); margin-top:8px;">'+escapeHtml(err.message)+'</p>';
+    }).then(function(){ btn.disabled = false; });
   });
 
   /* ---------------- 전략 변경 이력 ---------------- */

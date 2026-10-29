@@ -35,7 +35,10 @@ export const AI_FEATURES = {
   adjust: { label: '전략 자동조정(실험 설계)', defaultModel: 'claude-sonnet-5-5', effort: 'medium', heavy: false },
   explain: { label: '주가 움직임·실적 요약', defaultModel: 'claude-haiku-5-5', effort: 'low', heavy: false },
   opinion: { label: 'AI 투자의견', defaultModel: 'claude-haiku-5-5', effort: 'medium', heavy: false },
-  'backtest-feedback': { label: '전략연구실 AI 피드백', defaultModel: 'claude-haiku-5-5', effort: 'low', heavy: false }
+  'backtest-feedback': { label: '전략연구실 AI 피드백', defaultModel: 'claude-haiku-5-5', effort: 'low', heavy: false },
+  // 큰 작업: 많이 읽고 깊게 판단해요. 월 예산을 다 쓰면 멈춰요.
+  'deep-eval': { label: '주간 AI 심층 평가서', defaultModel: 'claude-opus-5-5', effort: 'medium', heavy: true },
+  chat: { label: 'AI 전략 상담', defaultModel: 'claude-sonnet-5-5', effort: 'medium', heavy: true }
 };
 
 export const DEFAULT_AI_CONFIG = { monthlyBudgetUsd: 20, models: {} };
