@@ -24,6 +24,10 @@
 - `api/_*.js` — 공용 코드 (Vercel 함수 개수에 안 잡힘)
   - `_kis.js` KIS 토큰 발급·KV 공유 캐시, `_kv.js` Vercel KV 헬퍼, `_costs.js` 수수료·세금,
     `_sentiment.js` 뉴스 긍정/부정 점수, `_backtest-core.js` / `_evolve-core.js` 백테스트·진화 탐색 로직
+  - `_ai.js` 모든 AI 호출(모델 선택·사용량·예산·실패 기록), `_chat.js` AI 상담 대화 엔진(도구 사용 반복)
+  - `_strategies.js` 전략 이름·기본 규칙·가상계좌 키, `_daytrade.js` 단타 설정, `_ledger.js` 날짜별 손익 장부
+  - `_learning.js` 학습하는 자동조정 규칙, `_scorecard.js` 채점표 계산, `_deepeval.js` 주간 AI 심층 평가서
+  - `_picks.js` 종목 고르기 규칙·기록·성적표
 - 데이터 저장: Vercel KV(Upstash Redis). 로그인: Firebase Authentication.
 
 ## 반드시 지킬 규칙
