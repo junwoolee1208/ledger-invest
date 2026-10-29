@@ -920,8 +920,27 @@
       </div></details>
     </div>
 
-    <div class="panel pad" id="scResult">
-      <div style="color:var(--muted); font-size:13px;"><span class="spinner"></span>&nbsp; 변경 이력을 불러오는 중…</div>
+    <div id="scSummary" class="cal-sum" style="margin-bottom:14px;"></div>
+
+    <div class="panel pad" style="margin-bottom:20px;">
+      <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:flex-end; margin-bottom:12px;">
+        <div><label>전략</label><select id="scFilterStrategy" style="min-width:180px;"><option value="">전체 전략</option></select></div>
+        <div class="at-log-tabs" id="scFilterSource" style="margin:0;">
+          <button type="button" data-src="" class="active">전체</button>
+          <button type="button" data-src="live">AI 실험</button>
+          <button type="button" data-src="system">채점·안전장치</button>
+          <button type="button" data-src="manual">직접 바꿈</button>
+          <button type="button" data-src="backtest">과거 데이터</button>
+        </div>
+      </div>
+      <div id="scStrategyPanel" style="display:none; margin-bottom:16px;">
+        <p class="easy">이 전략의 손절·익절·비중이 언제 어느 쪽으로 바뀌었는지(선)와, 그동안 쌓인 확정 손익(막대)이에요. 바꾼 뒤에 막대가 올라가면 효과가 있었다는 뜻이에요.</p>
+        <div class="chart-wrap small"><canvas id="scSeriesChart"></canvas></div>
+        <div id="scLessons" style="font-size:12.5px; margin-top:10px;"></div>
+      </div>
+      <div id="scResult">
+        <div style="color:var(--muted); font-size:13px;"><span class="spinner"></span>&nbsp; 변경 이력을 불러오는 중…</div>
+      </div>
     </div>
   </section>
 
@@ -3850,43 +3869,157 @@
     }
     return '<span style="background:#F2F4F6; color:var(--muted); font-size:10.5px; font-weight:700; padding:2px 8px; border-radius:999px;">AI가 성적 보고 바꿈</span>';
   }
+  // ---- 전략 변경 이력: 위쪽 요약 → (전략을 고르면) 설정 변화·손익 그래프와 배운 것 → 날짜별 타임라인 ----
+  var scFilter = { strategy: '', source: '' };
+  var scData = null;
+  var scSeriesChart = null;
+
+  function scVerdictBadge(c){
+    // 이 변경의 결과: 실험이면 채점 결과, 아니면 그 설정이 쓰인 기간의 평균 손익
+    var e = c.experiment;
+    if(e){
+      if(e.status === 'running') return '<span class="st-tag" style="background:#FAEEDA; color:#854F0B;">🧪 시험 중 '+e.sampleCount+'/'+e.needed+'건 — 아직 판단 일러요</span>';
+      if(e.verdictText){
+        var col = e.verdict === 'improved' ? 'var(--up)' : (e.verdict === 'worse' ? 'var(--down)' : 'var(--muted)');
+        return '<span class="st-tag" style="background:var(--panel-2); color:'+col+';">'+escapeHtml(e.verdictText)+(typeof e.effectPctPoint === 'number' ? ' ('+(e.effectPctPoint>=0?'+':'')+e.effectPctPoint+'%p)' : '')+(e.rolledBack ? ' · 되돌림' : '')+'</span>';
+      }
+    }
+    return '';
+  }
+
+  function scWhatLine(c){
+    if(c.afterDescription || c.source === 'backtest'){
+      return '<div style="color:var(--muted-2);">전 — '+escapeHtml(c.beforeDescription || '이전 기록 없음(처음 생성됨)')+'</div><div>후 — '+escapeHtml(c.afterDescription || '')+'</div>';
+    }
+    var words = atDescribeChange(c.before, c.after);
+    return words ? '<div><b>'+escapeHtml(words)+'</b></div><div style="color:var(--muted-2); font-size:11.5px;">후 — '+scRiskLine(c.after)+'</div>' : '<div>'+scRiskLine(c.after)+'</div>';
+  }
+
+  function renderStrategyChanges(){
+    var d = scData;
+    var s = d.summary || {};
+    document.getElementById('scSummary').innerHTML =
+      '<div>최근 30일 변경<b>'+(s.changes||0)+'번</b></div>' +
+      '<div>시작한 실험<b>'+(s.experimentsStarted||0)+'개</b></div>' +
+      '<div>좋아짐 / 나빠짐<b><span class="up">'+(s.improved||0)+'</span> / <span class="down">'+(s.worse||0)+'</span></b></div>' +
+      '<div>효과 없음 · 되돌림<b>'+(s.noEffect||0)+' · '+(s.rolledBack||0)+'</b></div>' +
+      '<div>지금 실험 중<b>'+(s.running||0)+'개</b></div>';
+
+    // 전략 고르기 목록(기록에 나온 전략들)
+    var sel = document.getElementById('scFilterStrategy');
+    var seen = {};
+    var opts = '<option value="">전체 전략</option>';
+    (d.changes || []).forEach(function(c){
+      if(seen[c.strategyId] || c.strategyId === 'all') return;
+      seen[c.strategyId] = true;
+      opts += '<option value="'+escapeHtml(c.strategyId)+'"'+(scFilter.strategy === c.strategyId ? ' selected' : '')+'>'+escapeHtml(c.strategyName || c.strategyId)+'</option>';
+    });
+    sel.innerHTML = opts;
+
+    var list = (d.changes || []).filter(function(c){
+      return (!scFilter.strategy || c.strategyId === scFilter.strategy) && (!scFilter.source || (c.source || 'live') === scFilter.source);
+    });
+    var box = document.getElementById('scResult');
+    if(!list.length){
+      box.innerHTML = '<div class="empty-state"><div class="glyph">§</div><p>조건에 맞는 변경 기록이 없어요.</p></div>';
+    } else {
+      // 날짜별로 묶어서 최신 날짜부터
+      var byDate = {};
+      list.forEach(function(c){ (byDate[c.date] = byDate[c.date] || []).push(c); });
+      box.innerHTML = Object.keys(byDate).sort().reverse().map(function(date, idx){
+        var items = byDate[date];
+        return '<details class="at-log-group"'+(idx < 3 ? ' open' : '')+'><summary>'+escapeHtml(date)+' <span class="at-log-count">'+items.length+'건</span></summary>' +
+          '<div style="padding:10px 14px; display:flex; flex-direction:column; gap:12px;">' + items.map(function(c){
+            var ps = c.periodStats;
+            var result = ps
+              ? '<span class="'+(ps.avgPnlPct>=0?'up':'down')+'">거래 '+ps.trades+'건 · 승률 '+fmt(ps.winRate,1)+'% · 평균 '+(ps.avgPnlPct>=0?'+':'')+fmt(ps.avgPnlPct,2)+'%</span>' + (c.periodOpen ? ' <span style="color:var(--muted-2);">(지금도 쓰는 중)</span>' : '')
+              : '<span style="color:var(--muted-2);">이 설정으로 끝난 거래가 아직 없어요</span>';
+            return '<div style="border:1px solid var(--line); border-radius:var(--radius-sm); padding:12px 14px; font-size:12.5px; line-height:1.6;">' +
+              '<div style="display:flex; justify-content:space-between; gap:8px; flex-wrap:wrap; margin-bottom:6px;">' +
+                '<div style="display:flex; gap:6px; align-items:center; flex-wrap:wrap;"><b style="font-size:14px;">'+escapeHtml(c.strategyName || c.strategyId)+'</b>'+scSourceBadge(c.source)+scVerdictBadge(c)+'</div>' +
+                '<span style="color:var(--muted-2); font-size:11.5px;">'+atFmtDate(c.ts)+'</span></div>' +
+              '<div><b>왜</b> — '+escapeHtml(c.diagnosis || '')+'</div>' +
+              '<div style="margin-top:4px;"><b>무엇을</b>'+scWhatLine(c)+'</div>' +
+              (c.statsAtChange ? '<div style="color:var(--muted-2); font-size:11.5px; margin-top:4px;">바꿀 때 근거: '+scStatLine(c.statsAtChange)+'</div>' : '') +
+              '<div style="border-top:1px dashed var(--line); margin-top:8px; padding-top:6px;"><b>이 설정이 쓰인 동안</b> — '+result+'</div>' +
+            '</div>';
+          }).join('') + '</div></details>';
+      }).join('');
+    }
+    renderStrategySeries();
+  }
+
+  function renderStrategySeries(){
+    var panel = document.getElementById('scStrategyPanel');
+    var sr = scData && scData.series;
+    if(!scFilter.strategy || !sr){ panel.style.display = 'none'; return; }
+    panel.style.display = '';
+    if(scSeriesChart){ scSeriesChart.destroy(); scSeriesChart = null; }
+    // 날짜 축: 손익이 있는 날 + 설정이 바뀐 날을 합쳐서, 각 날짜의 "그때 설정"을 이어 그려요
+    var dates = {};
+    sr.pnl.forEach(function(p){ dates[p.date] = true; });
+    sr.settings.forEach(function(s){ dates[s.date] = true; });
+    var labels = Object.keys(dates).sort();
+    var cur = null, si = 0, settings = sr.settings, cumByDate = {}, lastCum = 0;
+    sr.pnl.forEach(function(p){ cumByDate[p.date] = p.cumKrPnl; });
+    var stop = [], take = [], pos = [], cum = [];
+    labels.forEach(function(dt){
+      while(si < settings.length && settings[si].date <= dt){ cur = settings[si]; si++; }
+      stop.push(cur ? cur.stopLossPct : null); take.push(cur ? cur.takeProfitPct : null); pos.push(cur ? cur.positionPct : null);
+      if(cumByDate[dt] !== undefined) lastCum = cumByDate[dt];
+      cum.push(lastCum);
+    });
+    if(labels.length){
+      scSeriesChart = new Chart(document.getElementById('scSeriesChart').getContext('2d'), {
+        data: {
+          labels: labels.map(function(d){ return d.slice(5); }),
+          datasets: [
+            { type:'bar', label:'누적 확정 손익(원, 국내)', data: cum, yAxisID:'y1', backgroundColor: cum.map(function(v){ return v >= 0 ? 'rgba(240,68,82,0.35)' : 'rgba(49,130,246,0.35)'; }) },
+            { type:'line', label:'손절 %', data: stop, yAxisID:'y', borderColor:'#378ADD', stepped:true, pointRadius:2, spanGaps:true },
+            { type:'line', label:'익절 %', data: take, yAxisID:'y', borderColor:'#E24B4A', stepped:true, pointRadius:2, spanGaps:true },
+            { type:'line', label:'비중 %', data: pos, yAxisID:'y', borderColor:'#1D9E75', stepped:true, pointRadius:2, spanGaps:true }
+          ]
+        },
+        options: { responsive:true, maintainAspectRatio:false, plugins:{ legend:{ position:'bottom', labels:{ boxWidth:10, font:{ size:11 } } } },
+          scales: { y:{ position:'left', title:{ display:true, text:'%' } }, y1:{ position:'right', grid:{ drawOnChartArea:false }, title:{ display:true, text:'원' } } } }
+      });
+    }
+    var lessons = sr.lessons || [];
+    document.getElementById('scLessons').innerHTML = lessons.length
+      ? '<b>📚 이 전략이 실험에서 배운 것</b><ul style="margin:4px 0 0; padding-left:18px;">'+lessons.slice(0, 10).map(function(l){
+          var col = l.verdict === 'improved' ? 'var(--up)' : (l.verdict === 'worse' ? 'var(--down)' : 'var(--muted)');
+          return '<li style="color:'+col+';">'+escapeHtml(l.line)+'</li>';
+        }).join('')+'</ul>'
+      : '<span style="color:var(--muted-2);">아직 채점된 실험이 없어요.</span>';
+  }
+
   function loadStrategyChanges(){
     var box = document.getElementById('scResult');
-    box.innerHTML = '<div style="color:var(--muted); font-size:13px;"><span class="spinner"></span>&nbsp; 변경 이력을 불러오는 중…</div>';
-    fetch('/api/auto-trade-status?action=changes').then(function(r){ return r.json(); }).then(function(data){
-      var changes = data.changes || [];
-      if(changes.length === 0){
-        box.innerHTML = '<div class="empty-state"><div class="glyph">§</div><p>아직 자동으로 조정된 전략이 없어요. (성과가 충분히 쌓이면 여기 기록돼요)</p></div>';
+    if(!scData) box.innerHTML = '<div style="color:var(--muted); font-size:13px;"><span class="spinner"></span>&nbsp; 변경 이력을 불러오는 중…</div>';
+    fetch('/api/auto-trade-status?action=changes'+(scFilter.strategy ? '&strategy='+encodeURIComponent(scFilter.strategy) : '')).then(function(r){ return r.json(); }).then(function(data){
+      if(data.error) throw new Error(data.error);
+      scData = data;
+      if(!(data.changes || []).length){
+        document.getElementById('scSummary').innerHTML = '';
+        box.innerHTML = '<div class="empty-state"><div class="glyph">§</div><p>아직 바뀐 전략이 없어요. 거래가 쌓이면 실험과 채점 기록이 여기 남아요.</p></div>';
         return;
       }
-      var html = '<div style="display:flex; flex-direction:column; gap:14px;">';
-      changes.forEach(function(c){
-        var isBacktest = c.source === 'backtest';
-        html += '<div style="border:1px solid var(--line); border-radius:var(--radius-sm); padding:16px;">';
-        html += '<div style="display:flex; justify-content:space-between; align-items:baseline; gap:8px; flex-wrap:wrap; margin-bottom:8px;">' +
-          '<div style="display:flex; align-items:center; gap:8px;"><span style="font-weight:700; font-size:14px;">'+escapeHtml(c.strategyName)+'</span>'+scSourceBadge(c.source)+'</div>' +
-          '<div style="color:var(--muted-2); font-size:11.5px;">'+c.date+'</div></div>';
-        html += '<div style="font-size:12.5px; color:var(--ink); line-height:1.6; margin-bottom:10px;"><b>왜:</b> '+escapeHtml(c.diagnosis||'')+'</div>';
-        html += '<div style="font-size:12px; color:var(--muted); margin-bottom:4px;"><b>어떻게:</b></div>';
-        // 설명 문장으로 기록된 변경(백테스트, 데이트레이딩 설정)은 문장 그대로, 나머지는 손절/익절 숫자로 보여줘요.
-        if(isBacktest || c.afterDescription){
-          html += '<div style="font-size:12px; color:var(--muted-2); margin-bottom:2px;">변경 전 — '+escapeHtml(c.beforeDescription || '이전 기록 없음(처음 생성됨)')+'</div>';
-          html += '<div style="font-size:12px; color:var(--ink); margin-bottom:10px;">변경 후 — '+escapeHtml(c.afterDescription || '')+'</div>';
-        } else {
-          html += '<div style="font-size:12px; color:var(--muted-2); margin-bottom:2px;">변경 전 — '+scRiskLine(c.before)+'</div>';
-          html += '<div style="font-size:12px; color:var(--ink); margin-bottom:10px;">변경 후 — '+scRiskLine(c.after)+'</div>';
-        }
-        html += '<div style="font-size:11.5px; color:var(--muted-2); margin-bottom:8px;">변경 당시 근거: '+scStatLine(c.statsAtChange)+'</div>';
-        html += '<div style="border-top:1px solid var(--line); padding-top:10px; font-size:12.5px;"><b>변경 이후 성과:</b> '+
-          (c.afterStats ? '<span class="'+(c.afterStats.avgPnlPct>=0?'up':'down')+'">'+scStatLine(c.afterStats)+'</span>' : '<span style="color:var(--muted-2);">아직 평가할 거래가 부족해요</span>')+'</div>';
-        html += '</div>';
-      });
-      html += '</div>';
-      box.innerHTML = html;
+      renderStrategyChanges();
     }).catch(function(e){
       box.innerHTML = '<div style="color:var(--muted-2); font-size:13px;">'+errMsg(e)+'</div>';
     });
   }
+  document.getElementById('scFilterStrategy').addEventListener('change', function(){
+    scFilter.strategy = this.value;
+    loadStrategyChanges(); // 전략을 고르면 그래프 데이터까지 새로 받아요
+  });
+  document.getElementById('scFilterSource').addEventListener('click', function(e){
+    var b = e.target.closest('button[data-src]');
+    if(!b) return;
+    scFilter.source = b.dataset.src;
+    Array.prototype.forEach.call(this.querySelectorAll('button'), function(x){ x.classList.toggle('active', x === b); });
+    if(scData) renderStrategyChanges();
+  });
   document.getElementById('scRefreshBtn').addEventListener('click', loadStrategyChanges);
 
   /* ---------------- 캘린더 (실적 발표 + 손익 히트맵) ---------------- */

@@ -1042,27 +1042,89 @@ async function handleLog(req, res) {
 /* ==================== action=changes (전략 변경 이력) ==================== */
 
 // "전략 변경 이력" 탭에서 보여줄 데이터: 각 변경이 언제/왜/어떻게 일어났는지(auto-trade-check.js가 이미 기록해둔 것)에,
-// 그 변경 "이후"에 쌓인 거래들의 성과를 지금 시점에 계산해서 붙여줍니다 (변경 시점엔 아직 모르는 정보라 매번 새로 계산).
+// 그 설정이 "실제로 쓰인 기간"(이 변경 ~ 같은 전략의 다음 변경)의 성과를 붙여줍니다.
+// 예전엔 변경 뒤의 "모든" 거래를 그 변경의 결과로 쳐서, 그다음 변경들의 결과까지 섞여 있었어요.
+// 실험으로 바뀐 경우엔 실험 채점 결과(좋아짐/나빠짐…)를 그대로 붙여요.
+// ?strategy=ID 를 주면 그 전략의 설정 변화(손절·익절·비중)와 누적 확정 손익 그래프용 데이터도 같이 줘요.
 async function handleChanges(req, res) {
   try {
-    const changes = await kvGetJson(CHANGES_KEY, []);
-    const log = await kvGetJson(LOG_KEY, []);
+    const [changes, log, ledgerTrades, experiments] = await Promise.all([
+      kvGetJson(CHANGES_KEY, []), kvGetJson(LOG_KEY, []), loadRecentTrades(60), kvGetJson(EXPERIMENTS_KEY, [])
+    ]);
+    // 날짜별 장부(60일) + 최근 매매 기록을 합쳐 매도만 모아요(같은 거래가 두 번 세어지지 않게 시각·종목·전략으로 구분).
+    const seen = new Set();
+    const sells = ledgerTrades.concat(log).filter((e) => {
+      if (!isSellSide(e.side)) return false;
+      const k = e.ts + '|' + e.symbol + '|' + e.strategy;
+      if (seen.has(k)) return false;
+      seen.add(k);
+      return true;
+    });
+    const expById = {};
+    experiments.forEach((e) => { expById[e.id] = e; });
 
-    const enriched = changes.map((c) => {
-      const after = log.filter((e) => e.strategy === c.strategyId && isSellSide(e.side) && e.ts > c.ts);
-      let afterStats = null;
-      if (after.length > 0) {
-        const wins = after.filter((e) => e.pnlPct > 0);
-        afterStats = {
-          trades: after.length,
-          winRate: Math.round((wins.length / after.length) * 1000) / 10,
-          avgPnlPct: Math.round((after.reduce((a, e) => a + e.pnlPct, 0) / after.length) * 100) / 100
-        };
-      }
-      return Object.assign({}, c, { afterStats });
+    const stat = (list) => {
+      if (!list.length) return null;
+      const wins = list.filter((e) => e.pnlPct > 0);
+      return {
+        trades: list.length,
+        winRate: Math.round((wins.length / list.length) * 1000) / 10,
+        avgPnlPct: Math.round((list.reduce((a, e) => a + (e.pnlPct || 0), 0) / list.length) * 100) / 100
+      };
+    };
+
+    const enriched = changes.map((c, i) => {
+      // 같은 전략의 바로 다음(더 최신) 변경 시각 — changes는 최신순이라 앞쪽에서 찾아요
+      let nextTs = Infinity;
+      for (let j = i - 1; j >= 0; j--) { if (changes[j].strategyId === c.strategyId) { nextTs = changes[j].ts; break; } }
+      const period = sells.filter((e) => e.strategy === c.strategyId && e.ts > c.ts && e.ts <= nextTs);
+      const exp = c.experimentId ? expById[c.experimentId] : null;
+      return Object.assign({}, c, {
+        periodStats: stat(period),
+        periodOpen: nextTs === Infinity, // 아직 이 설정이 쓰이는 중
+        experiment: exp ? {
+          status: exp.status, verdict: exp.result ? exp.result.verdict : null, verdictText: exp.result ? (VERDICT_TEXT[exp.result.verdict] || exp.result.verdict) : null,
+          effectPctPoint: exp.result ? exp.result.effectPctPoint : null, sampleCount: (exp.samples || []).length, needed: LEARN.minTrades,
+          rolledBack: !!(exp.result && exp.result.rolledBackTo)
+        } : null
+      });
     });
 
-    res.status(200).json({ changes: enriched });
+    // 위쪽 요약: 최근 30일
+    const since = Date.now() - 30 * 86400000;
+    const recent = changes.filter((c) => c.ts >= since);
+    const judged = experiments.filter((e) => e.status === 'judged' && e.result && e.result.judgedAt >= since);
+    const summary = {
+      changes: recent.length,
+      experimentsStarted: recent.filter((c) => c.source === 'live' && c.experimentId).length,
+      improved: judged.filter((e) => e.result.verdict === 'improved').length,
+      worse: judged.filter((e) => e.result.verdict === 'worse').length,
+      noEffect: judged.filter((e) => e.result.verdict === 'no-effect').length,
+      rolledBack: judged.filter((e) => e.result.rolledBackTo).length,
+      running: experiments.filter((e) => e.status === 'running').length
+    };
+
+    // 전략 하나를 골랐으면 그래프용 데이터
+    let series = null;
+    const sid = req.query.strategy ? String(req.query.strategy) : null;
+    if (sid) {
+      const settings = changes.filter((c) => c.strategyId === sid && c.after && typeof c.after.stopLossPct === 'number')
+        .slice().reverse().map((c) => ({ ts: c.ts, date: c.date, stopLossPct: c.after.stopLossPct, takeProfitPct: c.after.takeProfitPct, positionPct: c.after.positionPct }));
+      const months = [0, 1, 2].map((k) => { const d = new Date(Date.now() + 9 * 3600000); d.setUTCDate(1); d.setUTCMonth(d.getUTCMonth() - k); return d.toISOString().slice(0, 7); });
+      const monthData = await Promise.all(months.map((m) => kvGetJson(DAILY_KEY_PREFIX + m, {})));
+      const days = [];
+      monthData.forEach((md) => Object.keys(md).forEach((date) => {
+        const row = md[date].byStrategy && md[date].byStrategy[sid];
+        if (row) days.push({ date, krPnl: row.krPnl || 0, usPnl: row.usPnl || 0 });
+      }));
+      days.sort((a, b) => a.date.localeCompare(b.date));
+      let cum = 0;
+      const pnl = days.map((d) => { cum += d.krPnl; return { date: d.date, cumKrPnl: Math.round(cum) }; });
+      const lessons = experiments.filter((e) => e.strategyId === sid && e.status === 'judged').map((e) => ({ line: lessonLine(e), verdict: e.result.verdict, date: e.result.judgedAt }));
+      series = { strategyId: sid, settings, pnl, lessons };
+    }
+
+    res.status(200).json({ changes: enriched, summary, series });
   } catch (e) {
     console.error('auto-trade-status.js(changes) error:', e);
     res.status(500).json({ error: '서버 오류가 발생했습니다.' });
