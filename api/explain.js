@@ -4,6 +4,9 @@
 // 2) mode: 'earnings': 실적 발표 수치를 받아 "실적 어땠는지" 요약 (AI 어닝콜 대체)
 // 이 파일은 서버에서만 실행되므로, ANTHROPIC_API_KEY는 브라우저에 노출되지 않습니다.
 // Vercel 프로젝트 설정 > Environment Variables 에 ANTHROPIC_API_KEY를 추가해야 동작합니다.
+// 실제 호출은 공용 창구(_ai.js)를 거쳐서, 실패하면 이유(크레딧 부족 등)를 화면에 그대로 알려줘요.
+
+import { askClaude } from './_ai.js';
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
@@ -67,35 +70,12 @@ ${newsList}
 - 문장은 자연스러운 존댓말로 써줘.`;
     }
 
-    const response = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': apiKey,
-        'anthropic-version': '2023-06-01'
-      },
-      body: JSON.stringify({
-        model: 'claude-haiku-4-5-20251001',
-        max_tokens: 500,
-        messages: [{ role: 'user', content: prompt }]
-      })
-    });
-
-    if (!response.ok) {
-      const errText = await response.text();
-      console.error('Anthropic API error:', response.status, errText);
-      res.status(502).json({ error: 'AI 요약 생성 중 오류가 발생했습니다.' });
+    const ai = await askClaude({ feature: 'explain', prompt, maxTokens: 3000 });
+    if (!ai.ok) {
+      res.status(502).json({ error: 'AI 요약을 만들지 못했어요. ' + ai.message, reason: ai.reason });
       return;
     }
-
-    const data = await response.json();
-    const summary = (data.content || [])
-      .filter((block) => block.type === 'text')
-      .map((block) => block.text)
-      .join('\n')
-      .trim();
-
-    res.status(200).json({ summary: summary || '요약을 생성하지 못했습니다.' });
+    res.status(200).json({ summary: ai.text });
   } catch (e) {
     console.error('explain.js error:', e);
     res.status(500).json({ error: '서버 오류가 발생했습니다.' });

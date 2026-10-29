@@ -4,7 +4,7 @@
 // (원래 market-data.js 안에만 있던 로직을 분리 — 종목분석 뉴스에도 같은 방식으로 긍정/부정
 //  뱃지를 붙이기 위해 공통 함수로 뺐습니다. _로 시작하는 파일이라 Vercel 함수 개수에 안 잡힙니다.)
 
-const ANTHROPIC_URL = 'https://api.anthropic.com/v1/messages';
+import { askClaude, extractJson } from './_ai.js';
 
 // articles: [{ headline, summary }]
 // opts.tickers: true면 관련 티커도 같이 추출(시장 전체 이슈용), false면 점수만(종목별 뉴스는 이미 종목이 정해져 있어 불필요)
@@ -26,27 +26,10 @@ export async function scoreNewsSentiment(articles, opts = {}) {
     `다른 설명 없이 JSON 배열만 출력하세요.\n\n${list}`;
 
   try {
-    const r = await fetch(ANTHROPIC_URL, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': apiKey,
-        'anthropic-version': '2023-06-01'
-      },
-      body: JSON.stringify({
-        model: 'claude-haiku-4-5-20251001',
-        max_tokens: 1024,
-        messages: [{ role: 'user', content: prompt }]
-      })
-    });
-    if (!r.ok) {
-      console.error('_sentiment.js scoreNewsSentiment error:', r.status, await r.text());
-      return articles.map(() => ({ score: 0, tickers: [] }));
-    }
-    const data = await r.json();
-    const text = data.content?.[0]?.text || '[]';
-    const jsonMatch = text.match(/\[[\s\S]*\]/);
-    const parsed = jsonMatch ? JSON.parse(jsonMatch[0]) : [];
+    // AI 호출은 공용 창구(_ai.js)를 거쳐요 — 사용량 기록·예산·실패 이유 기록을 거기서 해요.
+    const ai = await askClaude({ feature: 'sentiment', prompt, maxTokens: 4000 });
+    if (!ai.ok) return articles.map(() => ({ score: 0, tickers: [] }));
+    const parsed = extractJson(ai.text, 'array') || [];
     const byIndex = new Map(parsed.map((p) => [p.i, p]));
     return articles.map((_, i) => {
       const p = byIndex.get(i);

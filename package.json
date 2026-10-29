@@ -2,5 +2,8 @@
   "name": "ledger-invest",
   "version": "1.0.0",
   "private": true,
-  "type": "module"
+  "type": "module",
+  "dependencies": {
+    "@anthropic-ai/sdk": "^1.3.0"
+  }
 }

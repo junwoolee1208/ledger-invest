@@ -14,6 +14,8 @@
 //   action=reset-account,   POST : 한 전략의 가상계좌만 처음 상태(현금 원금, 보유종목 없음)로 되돌림
 //   action=calendar,        GET  : month=YYYY-MM 의 날짜별 손익 요약(손익 캘린더)
 //   action=calendar-day,    GET  : date=YYYY-MM-DD 의 매매 하나하나(캘린더 "자세히 보기")
+//   action=ai-usage,        GET  : 이번 달 AI 사용액(기능별)·예산·기능별 모델·AI 연결 상태(마지막 실패 이유)
+//   action=ai-config,       POST : 월 AI 예산과 기능별 모델 저장(로그인한 본인만)
 
 import { getKisToken, kisHeaders, num, KIS_BASE } from './_kis.js';
 import { kvGetJson, kvSetJson, kvCommand, kvReady } from './_kv.js';
@@ -24,6 +26,10 @@ import {
 import { DEFAULT_DAYTRADE, normalizeDaytrade, describeDaytrade } from './_daytrade.js';
 import { STRATEGY_IDS, STRATEGY_NAMES, WEIGHT_BASED_IDS, OWN_SETTINGS_IDS, BASE_RISK, keysFor } from './_strategies.js';
 import { isSellSide, ensureBackfilled, DAILY_KEY_PREFIX, TRADES_KEY_PREFIX } from './_ledger.js';
+import {
+  AI_CONFIG_KEY, AI_MODELS, AI_FEATURES, AI_LAST_OK_KEY, AI_LAST_ERROR_KEY, AI_REASON_TEXT,
+  normalizeAiConfig, loadAiUsage, modelFor
+} from './_ai.js';
 
 export const config = { maxDuration: 30 };
 
@@ -355,6 +361,50 @@ async function handleCalendarDay(req, res) {
     console.error('auto-trade-status.js(calendar-day) error:', e);
     res.status(500).json({ error: '서버 오류가 발생했습니다.' });
   }
+}
+
+/* ==================== action=ai-usage / ai-config (AI 사용량과 예산) ====================
+   _ai.js가 AI를 부를 때마다 쌓아둔 사용량(토큰 × 가격)을 읽어서 설정 탭의 계기판에 보여줍니다.
+   status: 마지막 실패가 마지막 성공보다 나중이면 "지금 AI가 끊긴 상태"로 보고, 이유를 쉬운 말로 알려줘요. */
+async function handleAiUsage(req, res) {
+  try {
+    const [cfgRaw, usage, lastOk, lastError] = await Promise.all([
+      kvGetJson(AI_CONFIG_KEY, null), loadAiUsage(), kvGetJson(AI_LAST_OK_KEY, null), kvGetJson(AI_LAST_ERROR_KEY, null)
+    ]);
+    const cfg = normalizeAiConfig(cfgRaw);
+    const failing = !!(lastError && (!lastOk || lastError.at > lastOk.at));
+    const features = Object.keys(AI_FEATURES).map((id) => Object.assign(
+      { id, label: AI_FEATURES[id].label, heavy: AI_FEATURES[id].heavy, model: modelFor(cfg, id) },
+      usage.byFeature[id] || { usd: 0, calls: 0, inTok: 0, outTok: 0, fails: 0 }
+    ));
+    res.status(200).json({
+      month: new Date(Date.now() + 9 * 60 * 60 * 1000).toISOString().slice(0, 7),
+      budgetUsd: cfg.monthlyBudgetUsd,
+      totalUsd: usage.totalUsd, totalCalls: usage.totalCalls,
+      features,
+      models: Object.keys(AI_MODELS).map((id) => ({ id, label: AI_MODELS[id].label, inUsd: AI_MODELS[id].inUsd, outUsd: AI_MODELS[id].outUsd })),
+      status: {
+        failing,
+        lastOkAt: lastOk ? lastOk.at : null,
+        lastError: lastError ? Object.assign({}, lastError, { text: AI_REASON_TEXT[lastError.reason] || lastError.message }) : null,
+        hasKey: !!process.env.ANTHROPIC_API_KEY
+      }
+    });
+  } catch (e) {
+    console.error('auto-trade-status.js(ai-usage) error:', e);
+    res.status(500).json({ error: '서버 오류가 발생했습니다.' });
+  }
+}
+
+async function handleAiConfig(req, res) {
+  if (req.method !== 'POST') { res.status(405).json({ error: 'POST만 지원합니다.' }); return; }
+  const uid = await requireUid(req, res);
+  if (!uid) return;
+  const body = readBody(req);
+  const next = normalizeAiConfig({ monthlyBudgetUsd: body.monthlyBudgetUsd, models: body.models });
+  next.updatedAt = Date.now();
+  await kvSetJson(AI_CONFIG_KEY, next);
+  res.status(200).json({ ok: true, config: next });
 }
 
 /* ==================== action=daytrade-config (데이트레이딩 설정) ====================
@@ -764,5 +814,7 @@ export default async function handler(req, res) {
   if (action === 'reset-account') return handleResetAccount(req, res);
   if (action === 'calendar') return handleCalendar(req, res);
   if (action === 'calendar-day') return handleCalendarDay(req, res);
+  if (action === 'ai-usage') return handleAiUsage(req, res);
+  if (action === 'ai-config') return handleAiConfig(req, res);
   return handleConfig(req, res);
 }

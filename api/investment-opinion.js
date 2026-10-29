@@ -5,6 +5,7 @@
 // 일부 데이터(특히 국내 종목투자의견)는 API 스펙이 확실치 않아 실패해도 나머지 데이터로 계속 진행합니다.
 
 import { getKisToken, kisHeaders, num, KIS_BASE, fetchKisJson } from './_kis.js';
+import { askClaude, extractJson } from './_ai.js'; // AI 호출 공용 창구(사용량·예산·실패 이유 기록)
 
 export const config = { maxDuration: 30 };
 
@@ -183,22 +184,9 @@ ${lines.join('\n')}
 - 절대 확정적으로 말하지 말고, 어디까지나 참고 의견이라는 톤을 유지해줘.
 - summary는 근거 설명에만 집중하고, 책임 관련 문구는 넣지 마 (화면에 별도로 안내돼요).`;
 
-  const response = await fetch('https://api.anthropic.com/v1/messages', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
-    body: JSON.stringify({ model: 'claude-haiku-4-5-20251001', max_tokens: 500, messages: [{ role: 'user', content: prompt }] })
-  });
-  if (!response.ok) return null;
-  const data = await response.json();
-  const text = (data.content || []).filter((b) => b.type === 'text').map((b) => b.text).join('\n').trim();
-  try {
-    const jsonStart = text.indexOf('{');
-    const jsonEnd = text.lastIndexOf('}');
-    if (jsonStart === -1 || jsonEnd === -1) return null;
-    return JSON.parse(text.slice(jsonStart, jsonEnd + 1));
-  } catch (e) {
-    return null;
-  }
+  const ai = await askClaude({ feature: 'opinion', prompt, maxTokens: 4000 });
+  if (!ai.ok) return null;
+  return extractJson(ai.text, 'object');
 }
 
 export default async function handler(req, res) {

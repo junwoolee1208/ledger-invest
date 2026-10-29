@@ -24,6 +24,7 @@ import {
 import { DEFAULT_LINEAGES, describeStrategy, advanceGeneration, MAX_HISTORY } from './_evolve-core.js';
 import { kvGetJson, kvSetJson, kvReady } from './_kv.js';
 import { loadCosts, buyCostPct, sellCostPct } from './_costs.js';
+import { askClaude } from './_ai.js'; // AI 호출 공용 창구(사용량·예산·실패 이유 기록)
 
 export const config = { maxDuration: 30 };
 
@@ -88,15 +89,8 @@ ${lines}
 
 한국어로 5~7문장 이내, 너무 원론적인 말 말고 위 숫자들을 직접 인용하면서 설명해줘.`;
 
-  const response = await fetch('https://api.anthropic.com/v1/messages', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
-    body: JSON.stringify({ model: 'claude-haiku-4-5-20251001', max_tokens: 600, messages: [{ role: 'user', content: prompt }] })
-  });
-  if (!response.ok) return null;
-  const data = await response.json();
-  const text = (data.content || []).filter((b) => b.type === 'text').map((b) => b.text).join('\n').trim();
-  return text || null;
+  const ai = await askClaude({ feature: 'backtest-feedback', prompt, maxTokens: 4000 });
+  return ai.ok ? ai.text : null;
 }
 
 async function handlePresets(req, res) {
@@ -183,15 +177,8 @@ async function askEvolveFeedback(before, after, apiKey) {
 
 확정적으로 말하지 말고 추정 톤으로 써줘.`;
 
-  const response = await fetch('https://api.anthropic.com/v1/messages', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
-    body: JSON.stringify({ model: 'claude-haiku-4-5-20251001', max_tokens: 400, messages: [{ role: 'user', content: prompt }] })
-  });
-  if (!response.ok) return null;
-  const data = await response.json();
-  const text = (data.content || []).filter((b) => b.type === 'text').map((b) => b.text).join('\n').trim();
-  return text || null;
+  const ai = await askClaude({ feature: 'backtest-feedback', prompt, maxTokens: 4000 });
+  return ai.ok ? ai.text : null;
 }
 
 function freshLineages() {

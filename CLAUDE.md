@@ -37,7 +37,9 @@
 ### 외부 API와 키
 - 시세·차트: 한국투자증권(KIS) Open API (토큰은 반드시 `_kis.js`를 통해 받는다 — 1분 1회 발급 제한)
 - 뉴스·실적: Finnhub
-- AI: Claude API (Anthropic)
+- AI: Claude API (Anthropic) — **모든 AI 호출은 `api/_ai.js`의 `askClaude()`를 거친다.** 파일에서 직접 fetch로
+  Claude를 부르지 말 것(사용량 기록·월 예산·실패 이유 기록이 빠짐). 공식 SDK `@anthropic-ai/sdk`(package.json)를 쓰고,
+  기능별 모델은 설정 탭에서 고른다(기본 `claude-haiku-5-5`). 새 AI 기능은 `AI_FEATURES`에 등록한다.
 - **API 키는 전부 Vercel 환경변수에만 둔다.** 코드나 `index.html`에 키를 직접 쓰지 말 것.
   사용하는 환경변수: `KIS_APP_KEY`, `KIS_APP_SECRET`, `FINNHUB_API_KEY`, `ANTHROPIC_API_KEY`,
   `AUTO_TRADE_SECRET`, `KV_REST_API_URL`/`KV_REST_API_TOKEN`(또는 `UPSTASH_REDIS_REST_*`)

@@ -23,6 +23,7 @@ import { loadCosts, planBuy, planSell, positionCostBasis, fetchUsdKrw, REALIZED_
 import { normalizeDaytrade, hhmmToMin } from './_daytrade.js';
 import { BASE_RISK, keysFor, STARTING_CASH_US } from './_strategies.js';
 import { isSellSide, recordEntries, ensureBackfilled } from './_ledger.js';
+import { askClaude, extractJson } from './_ai.js'; // AI 호출 공용 창구(사용량·예산·실패 이유 기록)
 
 export const config = { maxDuration: 30 };
 
@@ -286,19 +287,8 @@ async function explainStopLoss(ctx, apiKey) {
 매수가: ${ctx.avgPrice} → 손절가: ${ctx.price} (${ctx.pnlPct}%)
 보유 기간: ${ctx.holdingDays}일 (매수일 ${ctx.entryDate} → 매도일 ${ctx.today})`;
 
-  try {
-    const response = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
-      body: JSON.stringify({ model: 'claude-haiku-4-5-20251001', max_tokens: 200, messages: [{ role: 'user', content: prompt }] })
-    });
-    if (!response.ok) return null;
-    const data = await response.json();
-    const text = (data.content || []).filter((b) => b.type === 'text').map((b) => b.text).join('\n').trim();
-    return text || null;
-  } catch (e) {
-    return null;
-  }
+  const ai = await askClaude({ feature: 'stoploss-reason', prompt, maxTokens: 2000, timeoutMs: 15_000 });
+  return ai.ok ? ai.text : null;
 }
 
 function clipRisk(r, fallback) {
@@ -355,21 +345,8 @@ async function askAdjustSuggestion(strategyName, currentRisk, stats, apiKey) {
 조정이 필요 없다고 판단되면 changed를 false로 하고 숫자는 현재값 그대로 돌려줘.
 조정한다면 현재값 대비 너무 급격하지 않게(대략 20~30% 이내) 바꿔줘.`;
 
-  try {
-    const response = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
-      body: JSON.stringify({ model: 'claude-haiku-4-5-20251001', max_tokens: 400, messages: [{ role: 'user', content: prompt }] })
-    });
-    if (!response.ok) return null;
-    const data = await response.json();
-    const text = (data.content || []).filter((b) => b.type === 'text').map((b) => b.text).join('\n').trim();
-    const match = text.match(/\{[\s\S]*\}/);
-    if (!match) return null;
-    return JSON.parse(match[0]);
-  } catch (e) {
-    return null;
-  }
+  const ai = await askClaude({ feature: 'adjust', prompt, maxTokens: 4000, timeoutMs: 15_000 });
+  return ai.ok ? extractJson(ai.text, 'object') : null;
 }
 
 // 설정에서 정한 주기(cfg.adjustIntervalHours, 기본 24시간)가 지나야 실행됩니다 — 외부 스케줄러가 그보다 자주
