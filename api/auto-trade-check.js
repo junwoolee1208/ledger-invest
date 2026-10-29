@@ -24,6 +24,10 @@ import { normalizeDaytrade, hhmmToMin } from './_daytrade.js';
 import { BASE_RISK, keysFor, STARTING_CASH_US } from './_strategies.js';
 import { isSellSide, recordEntries, ensureBackfilled } from './_ledger.js';
 import { askClaude, extractJson } from './_ai.js'; // AI 호출 공용 창구(사용량·예산·실패 이유 기록)
+import {
+  EXPERIMENTS_KEY, BEST_RISK_KEY, FLAGS_KEY, MAX_EXPERIMENTS, LEARN, RISK_FIELDS, RISK_LABELS,
+  summarize, clampProposal, liftToFloors, judge, readyToJudge, forbiddenDirections, applyForbidden, lessonLine
+} from './_learning.js';
 
 export const config = { maxDuration: 30 };
 
@@ -36,8 +40,6 @@ const OVERRIDES_KEY = 'autotrade:strategy-overrides'; // 전략별로 자동 조
 const CHANGES_KEY = 'autotrade:strategy-changes'; // 왜/어떻게/언제 바꿨는지 기록 (auto-trade-status.js / backtest.js도 같은 키를 씀)
 const ADJUST_LASTRUN_KEY = 'autotrade:strategy-adjust:lastrun';
 const MAX_CHANGES = 200;
-const ADJUST_LOOKBACK_DAYS = 14; // 최근 이 기간의 마감거래만 보고 판단
-const ADJUST_MIN_TRADES = 5; // 이 개수 미만이면 판단 근거가 부족하다고 보고 건너뜀
 
 // ---- 진화형(자동탐색) 전략 — 전략연구실의 "진화형 탐색"이 찾아낸 최신 조합을 실시간으로 그대로 따라감 ----
 const EVOLVE_KEY = 'backtest:evolution:v2'; // backtest.js와 같은 키 — 거기서 갱신한 globalBest를 여기서 읽기만 함
@@ -301,106 +303,243 @@ function clipRisk(r, fallback) {
   };
 }
 
-// 최근 lookbackDays 동안 마감된(손절/익절) 거래만 모아서 성과를 요약합니다. (시장은 구분 안 하고 전략 단위로 합쳐서 봄 —
-// 손절/익절 파라미터가 전략당 하나라 국내/해외를 나눠 볼 이유가 없음)
-function computeRecentStats(log, strategyId, lookbackDays, today) {
-  const cutoff = Date.parse(today + 'T00:00:00Z') - lookbackDays * 86400000;
-  const closed = log
-    .filter((e) => e.strategy === strategyId && isSellSide(e.side) && e.ts >= cutoff)
-    .sort((a, b) => b.ts - a.ts);
-  if (closed.length === 0) return null;
-  const wins = closed.filter((e) => e.pnlPct > 0);
-  const losses = closed.filter((e) => e.pnlPct <= 0);
-  let consecutiveLosses = 0;
-  for (const e of closed) { if (e.pnlPct <= 0) consecutiveLosses++; else break; }
-  const reasons = closed.filter((e) => e.side === 'STOP_LOSS' && e.aiReason).slice(0, 5).map((e) => e.aiReason);
-  return {
-    trades: closed.length,
-    winRate: Math.round((wins.length / closed.length) * 1000) / 10,
-    avgWinPct: wins.length ? Math.round((wins.reduce((a, e) => a + e.pnlPct, 0) / wins.length) * 100) / 100 : null,
-    avgLossPct: losses.length ? Math.round((losses.reduce((a, e) => a + e.pnlPct, 0) / losses.length) * 100) / 100 : null,
-    consecutiveLosses, reasons, lookbackDays
-  };
+// ---- 학습하는 자동조정 (규칙은 _learning.js) ----
+// 전략마다 기록이 "관찰 중(observing) → 실험 중(running) → 채점 완료(judged)" 순서로 돌아요.
+//   관찰 중: 지금 설정으로 거래 10건을 모아요(이게 다음 실험의 "바꾸기 전" 비교 기준이 돼요).
+//   실험 중: AI가 가설을 세워 숫자를 바꾸고, 새 설정으로 거래 10건이 쌓일 때까지 기다려요.
+//   채점: 바꾸기 전 10건 + 같은 기간의 대조군(기준선)과 비교해 좋아짐/효과 없음/나빠짐을 매기고,
+//         나빠졌으면 지금까지 가장 좋았던 설정으로 되돌려요. 결과는 교훈으로 남아 다음 실험 때 AI에게 전달돼요.
+// 기준선(대조군)은 비교 기준이라 절대 바꾸지 않고, 단타는 사용자가 직접 정하는 설정이라 대상이 아니에요.
+function isAdjustable(def) {
+  return !def.intraday && def.id !== 'baseline';
 }
 
-// AI에게 "조정이 필요한지 + 구체적으로 얼마로" 판단을 맡깁니다. JSON만 받기로 하고, 실패하면 그냥 조정을 건너뜁니다
-// (조정은 "시도"일 뿐, 실패해도 기존 설정 그대로 안전하게 매매가 계속돼야 함).
-async function askAdjustSuggestion(strategyName, currentRisk, stats, apiKey) {
-  if (!apiKey) return null;
+function sellSamplesFromLog(log, strategyId, sinceTs, limit) {
+  return log
+    .filter((e) => e.strategy === strategyId && isSellSide(e.side) && e.ts >= (sinceTs || 0))
+    .sort((a, b) => a.ts - b.ts)
+    .slice(-(limit || 50))
+    .map((e) => ({ ts: e.ts, pnlPct: e.pnlPct, side: e.side, entryChangePct: e.entryChangePct }));
+}
+
+function riskOnly(r) {
+  return { stopLossPct: r.stopLossPct, takeProfitPct: r.takeProfitPct, positionPct: r.positionPct, maxTradesPerDay: r.maxTradesPerDay };
+}
+
+// AI에게 다음 실험을 설계하게 합니다. 지금까지의 실험 결과(교훈)와 다시 하면 안 되는 방향을 함께 줘서,
+// 이미 실패한 쪽으로 또 바꾸지 않고 "무엇을 배웠고, 그래서 이번엔 무엇을 왜 시도하는지"를 쓰게 해요.
+async function askNextExperiment(def, current, stats, history, forbidden, regimeText) {
+  const lessons = history.length
+    ? history.map((e, i) => `${i + 1}. ${lessonLine(e)}${e.hypothesis ? ` / 그때 가설: ${e.hypothesis}` : ''}`).join('\n')
+    : '아직 없음(첫 실험)';
+  const forbiddenText = forbidden.length
+    ? forbidden.map((k) => { const [f, d] = k.split(':'); return `${RISK_LABELS[f]} ${d === 'up' ? '올리기' : '내리기'}`; }).join(', ')
+    : '없음';
   const prompt =
-`자동매매 전략 하나의 최근 성과를 보고, 위험 파라미터를 조정할지 판단해줘.
+`너는 자동매매 전략의 숫자 설정을 "실험"으로 개선하는 연구원이야. 아래 자료를 보고 다음에 할 일을 하나 골라.
 
-전략: ${strategyName}
-현재 설정: 손절 ${currentRisk.stopLossPct}%, 익절 ${currentRisk.takeProfitPct}%, 1회 매수 비중 ${currentRisk.positionPct}%, 일일 매매한도 ${currentRisk.maxTradesPerDay}회
+전략: ${def.name}
+오늘 시장 상황: ${regimeText || '알 수 없음'}
+지금 설정: 손절 ${current.stopLossPct}%, 익절 ${current.takeProfitPct}%, 1회 매수 비중 ${current.positionPct}%, 하루 최대 매수 ${current.maxTradesPerDay}회
 
-최근 ${stats.lookbackDays}일 성과 (마감거래 ${stats.trades}건):
-- 승률: ${stats.winRate}%
-- 평균 익절: ${stats.avgWinPct ?? '—'}%, 평균 손절: ${stats.avgLossPct ?? '—'}%
-- 최근 연속 손실: ${stats.consecutiveLosses}회
-- 최근 손절 사유들: ${stats.reasons.length ? stats.reasons.join(' / ') : '없음'}
+지금 설정으로 한 최근 거래 ${stats.trades}건(수수료·세금 뺀 손익 기준):
+- 승률 ${stats.winRate}%, 평균 손익 ${stats.avgPnlPct}%
+- 손절로 끝난 비율 ${stats.stopLossShare}%
+- 고점 매수 비율(산 날 이미 어제보다 10% 넘게 오른 상태) ${stats.chaseShare === null ? '기록 없음' : stats.chaseShare + '%'}
 
-아래 JSON 형식으로만 답해. 다른 설명 없이 JSON 객체 하나만 출력해:
-{"changed": true 또는 false, "diagnosis": "한국어 2~3문장, 숫자를 근거로 왜 이런 성과인지", "stopLossPct": 숫자, "takeProfitPct": 숫자, "positionPct": 숫자, "maxTradesPerDay": 숫자}
+지금까지의 실험과 결과(교훈):
+${lessons}
 
-조정이 필요 없다고 판단되면 changed를 false로 하고 숫자는 현재값 그대로 돌려줘.
-조정한다면 현재값 대비 너무 급격하지 않게(대략 20~30% 이내) 바꿔줘.`;
+다시 시도하면 안 되는 방향(같은 방향으로 바꿔서 2번 이상 나빠짐): ${forbiddenText}
 
-  const ai = await askClaude({ feature: 'adjust', prompt, maxTokens: 4000, timeoutMs: 15_000 });
+규칙:
+- 한 번에 바꿀 수 있는 폭은 지금 값의 ±30%, 하루 횟수는 ±1회. 비중은 최소 3%, 하루 횟수는 최소 2회.
+- 결과를 해석할 수 있게, 가능하면 한두 개 값만 바꿔.
+- 승률이 매우 낮고(20% 미만) 손절 비율이 높거나 고점 매수가 많으면, 손절·익절 숫자보다 "사는 조건"이 문제일 가능성이 커. 그럴 땐 숫자를 바꾸지 말고 buy-rule-problem을 골라.
+- 지금 설정이 괜찮아 보이면 hold를 골라도 돼.
+
+아래 JSON 형식으로만 답해(다른 설명 없이):
+{"action":"experiment 또는 hold 또는 buy-rule-problem","lessonUsed":"지금까지 실험에서 배운 점을 1문장으로","hypothesis":"이번에 바꾸면 왜 나아질지 1~2문장","expected":"어떤 숫자가 어떻게 변할지(예: 손절 비율 70%→50% 이하)","diagnosis":"지금 성적의 원인 2문장, 숫자 근거","stopLossPct":숫자,"takeProfitPct":숫자,"positionPct":숫자,"maxTradesPerDay":숫자}`;
+
+  const ai = await askClaude({ feature: 'adjust', prompt, maxTokens: 8000, timeoutMs: 20_000 });
   return ai.ok ? extractJson(ai.text, 'object') : null;
 }
 
-// 설정에서 정한 주기(cfg.adjustIntervalHours, 기본 24시간)가 지나야 실행됩니다 — 외부 스케줄러가 그보다 자주
-// 불러도 그냥 건너뛰어요. 주기는 설정 화면에서 바로 바꿀 수 있고, 스케줄러 쪽 호출 간격은 안 바꿔도 돼요.
-// 전략별로 최근 성과를 보고 AI가 조정이 필요하다고 판단하면 오버라이드를 저장하고, "전략 변경 이력"에 기록을 남깁니다.
-async function maybeRunDailyAdjust(cfg, apiKey, today, log) {
+function pushChange(changes, entry) {
+  changes.unshift(Object.assign({ id: Date.now() + '-' + entry.strategyId + '-' + Math.random().toString(36).slice(2, 6), ts: Date.now() }, entry));
+}
+
+// 설정에서 정한 주기(cfg.adjustIntervalHours, 기본 24시간)마다 한 번 돌아요(스케줄러가 더 자주 불러도 건너뜀).
+// 돌려받는 overrides(전략별 지금 적용 중인 숫자)는 이번 매매에 바로 쓰여요.
+async function maybeRunLearningCycle(cfg, today, log) {
   const overrides = await kvGetJson(OVERRIDES_KEY, {});
   const intervalHours = Math.max(1, Math.min(168, Number(cfg.adjustIntervalHours) || 24));
   const lastRunTs = await kvGetJson(ADJUST_LASTRUN_KEY, 0);
-  const dueAt = (typeof lastRunTs === 'number' ? lastRunTs : 0) + intervalHours * 3600 * 1000;
-  if (!apiKey || Date.now() < dueAt) {
-    return overrides;
-  }
+  if (Date.now() < (typeof lastRunTs === 'number' ? lastRunTs : 0) + intervalHours * 3600 * 1000) return overrides;
+  await kvSetJson(ADJUST_LASTRUN_KEY, Date.now()); // 중간에 실패해도 같은 주기 안에서 무한 재시도하지 않게 먼저 기록
 
   try {
-    const changes = await kvGetJson(CHANGES_KEY, []);
-    let changesDirty = false;
+    const [experiments, best, flags, changes, regimeCache] = await Promise.all([
+      kvGetJson(EXPERIMENTS_KEY, []), kvGetJson(BEST_RISK_KEY, {}), kvGetJson(FLAGS_KEY, {}),
+      kvGetJson(CHANGES_KEY, []), kvGetJson(REGIME_CACHE_KEY, null)
+    ]);
+    const regimeLabel = regimeCache && regimeCache.label ? regimeLabelKo(regimeCache.label) : null;
+    const now = Date.now();
 
-    for (const def of STRATEGY_DEFS) {
-      if (def.intraday) continue; // 단타 설정은 사용자가 "데이트레이딩 설정"에서만 바꿈
-      const stats = computeRecentStats(log, def.id, ADJUST_LOOKBACK_DAYS, today);
-      if (!stats || stats.trades < ADJUST_MIN_TRADES) continue;
-
-      const currentRisk = clipRisk(Object.assign({}, def.getRisk(cfg), overrides[def.id] || {}));
-      const suggestion = await askAdjustSuggestion(def.name, currentRisk, stats, apiKey);
-      if (!suggestion || !suggestion.changed) continue;
-
-      const after = clipRisk(suggestion, currentRisk);
-      const same = after.positionPct === currentRisk.positionPct && after.stopLossPct === currentRisk.stopLossPct &&
-        after.takeProfitPct === currentRisk.takeProfitPct && after.maxTradesPerDay === currentRisk.maxTradesPerDay;
-      if (same) continue;
-
-      overrides[def.id] = Object.assign({}, after, { updatedAt: Date.now() });
-      changes.unshift({
-        id: Date.now() + '-' + def.id,
-        ts: Date.now(), date: today,
-        strategyId: def.id, strategyName: def.name,
-        source: 'live', // 실제(가상) 거래 성과를 보고 조정됨 — 백테스트 기반(backtest.js)과 구분
-        diagnosis: String(suggestion.diagnosis || '').slice(0, 500),
-        statsAtChange: stats,
-        before: currentRisk, after
+    // (1회) 대조군 복구 — 예전 자동조정이 기준선까지 바꿔놔서 비교가 안 되던 것을 원래 값으로 돌려요.
+    if (overrides.baseline) {
+      pushChange(changes, {
+        date: today, strategyId: 'baseline', strategyName: '기준선(대조군)', source: 'system',
+        diagnosis: '기준선은 다른 전략과 비교하는 "대조군"이라 바뀌면 안 돼요. 예전 자동조정이 바꿔둔 값을 원래 값으로 되돌렸어요.',
+        before: riskOnly(overrides.baseline), after: riskOnly(BASE_RISK.baseline)
       });
-      changesDirty = true;
+      delete overrides.baseline;
     }
 
+    for (const def of STRATEGY_DEFS.filter(isAdjustable)) {
+      let current = riskOnly(Object.assign({}, def.getRisk(cfg), overrides[def.id] || {}));
+
+      // (1회) 바닥 아래로 내려가 있던 설정(비중 1%, 하루 1번 등)을 최소값으로 올려요 — 그대로면 거의 매매를 안 해서 배울 수가 없어요.
+      const lifted = liftToFloors(current);
+      if (RISK_FIELDS.some((f) => lifted[f] !== current[f])) {
+        pushChange(changes, {
+          date: today, strategyId: def.id, strategyName: def.name, source: 'system',
+          diagnosis: '비중·하루 횟수가 너무 작아져서 거의 매매를 하지 않는 상태였어요. 배울 데이터가 쌓이도록 최소값(비중 3%, 하루 2번)까지 올렸어요.',
+          before: current, after: lifted
+        });
+        overrides[def.id] = Object.assign({}, lifted, { updatedAt: now });
+        current = lifted;
+      }
+
+      const mine = experiments.filter((e) => e.strategyId === def.id);
+      const running = mine.find((e) => e.status === 'running');
+      let observing = mine.find((e) => e.status === 'observing');
+
+      // ① 실험 중이고 거래가 충분히 쌓였으면 → 채점
+      if (running && readyToJudge(running, now)) {
+        const res = judge(running);
+        running.status = 'judged';
+        running.result = Object.assign({}, res, { judgedAt: now });
+        let rolledBack = null;
+        if (res.verdict === 'worse') {
+          rolledBack = (best[def.id] && best[def.id].risk) || running.before;
+          overrides[def.id] = Object.assign({}, rolledBack, { updatedAt: now });
+          running.result.rolledBackTo = rolledBack;
+        }
+        if (res.verdict === 'improved' && (!best[def.id] || res.after.avgPnlPct > best[def.id].avgPnlPct)) {
+          best[def.id] = { risk: running.after, avgPnlPct: res.after.avgPnlPct, at: now, experimentId: running.id };
+        }
+        pushChange(changes, {
+          date: today, strategyId: def.id, strategyName: def.name, source: 'system', experimentId: running.id,
+          diagnosis: `실험 채점: ${lessonLine(running)}` + (rolledBack ? ` → 나빠져서 ${best[def.id] ? '지금까지 가장 좋았던' : '바꾸기 전'} 설정으로 되돌렸어요.` : ''),
+          statsAtChange: res.after, before: running.after, after: rolledBack || running.after
+        });
+        // 되돌리지 않았으면 이번 실험의 거래가 곧 "지금 설정"의 기록이라, 다음 실험의 비교 기준으로 바로 써요.
+        if (!observing) {
+          observing = { id: 'obs-' + now + '-' + def.id, strategyId: def.id, strategyName: def.name, status: 'observing',
+            startedAt: now, risk: rolledBack || running.after, samples: rolledBack ? [] : (running.samples || []).slice(-LEARN.beforeTrades) };
+          experiments.unshift(observing);
+        }
+        continue; // 같은 날 바로 또 바꾸지 않아요
+      }
+      if (running) continue; // 아직 거래가 덜 쌓였어요
+
+      // ② 관찰 기록이 없으면 만들어요. 처음엔 남아 있는 매매 기록에서 "지금 설정으로 한 거래"를 가져와 바로 시작해요.
+      if (!observing) {
+        const since = overrides[def.id] && overrides[def.id].updatedAt ? overrides[def.id].updatedAt : 0;
+        observing = { id: 'obs-' + now + '-' + def.id, strategyId: def.id, strategyName: def.name, status: 'observing',
+          startedAt: now, risk: current, samples: sellSamplesFromLog(log, def.id, since, LEARN.beforeTrades) };
+        experiments.unshift(observing);
+      }
+
+      // 사는 조건 문제 자동 감지: 최근 20건 승률이 20% 미만이면 숫자를 더 바꾸지 않고 표시만 해요(30% 이상 회복하면 해제).
+      const recent = summarize(sellSamplesFromLog(log, def.id, 0, LEARN.buyRuleWindow));
+      if (recent.trades >= LEARN.buyRuleWindow && recent.winRate < LEARN.buyRuleWinRate) {
+        if (!flags[def.id]) flags[def.id] = { type: 'buy-rule', at: now, winRate: recent.winRate,
+          note: `최근 ${recent.trades}건 승률 ${recent.winRate}% — 손절·익절 숫자보다 "사는 조건"이 안 맞을 가능성이 커요. 끄거나 전략연구실에서 검증해 보세요.` };
+        continue;
+      }
+      if (flags[def.id] && flags[def.id].type === 'buy-rule' && recent.winRate !== null && recent.winRate >= 30) delete flags[def.id];
+      if (flags[def.id]) continue;
+
+      // ③ 관찰한 거래가 10건 모이면 → AI에게 다음 실험을 설계하게 해요
+      if ((observing.samples || []).length < LEARN.beforeTrades) continue;
+      const stats = summarize(observing.samples.slice(-LEARN.beforeTrades));
+      const history = mine.filter((e) => e.status === 'judged').slice(0, 10);
+      const forbidden = forbiddenDirections(mine);
+      const proposal = await askNextExperiment(def, current, stats, history, forbidden, regimeLabel);
+      if (!proposal) continue; // AI 실패 — 다음 주기에 다시 시도(관찰 기록은 그대로)
+
+      if (proposal.action === 'buy-rule-problem') {
+        flags[def.id] = { type: 'buy-rule', at: now, winRate: stats.winRate, note: String(proposal.diagnosis || '').slice(0, 300) };
+        observing.samples = [];
+        continue;
+      }
+      if (proposal.action !== 'experiment') { // hold: 지금 설정 유지, 다음 10건을 더 보고 다시 판단
+        observing.samples = [];
+        observing.holds = (observing.holds || 0) + 1;
+        continue;
+      }
+
+      const after = applyForbidden(current, clampProposal(current, proposal), forbidden);
+      if (RISK_FIELDS.every((f) => after[f] === current[f])) { observing.samples = []; continue; }
+
+      const exp = {
+        id: 'exp-' + now + '-' + def.id, strategyId: def.id, strategyName: def.name, status: 'running',
+        startedAt: now, startDate: today, regimeLabel,
+        before: current, after,
+        hypothesis: String(proposal.hypothesis || '').slice(0, 300),
+        expected: String(proposal.expected || '').slice(0, 200),
+        lessonUsed: String(proposal.lessonUsed || '').slice(0, 300),
+        diagnosis: String(proposal.diagnosis || '').slice(0, 400),
+        beforeStats: stats,
+        controlBeforeStats: summarize(sellSamplesFromLog(log, 'baseline', 0, LEARN.beforeTrades)),
+        samples: [], controlSamples: []
+      };
+      experiments.splice(experiments.indexOf(observing), 1); // 관찰 기록은 이 실험의 "바꾸기 전" 기준이 됐으니 정리
+      experiments.unshift(exp);
+      overrides[def.id] = Object.assign({}, after, { updatedAt: now });
+      pushChange(changes, {
+        date: today, strategyId: def.id, strategyName: def.name, source: 'live', experimentId: exp.id,
+        diagnosis: `${exp.diagnosis} 가설: ${exp.hypothesis}${exp.expected ? ' (기대: ' + exp.expected + ')' : ''}`,
+        statsAtChange: stats, before: current, after
+      });
+    }
+
+    if (experiments.length > MAX_EXPERIMENTS) experiments.length = MAX_EXPERIMENTS;
     if (changes.length > MAX_CHANGES) changes.length = MAX_CHANGES;
-    await kvSetJson(OVERRIDES_KEY, overrides);
-    if (changesDirty) await kvSetJson(CHANGES_KEY, changes);
+    await Promise.all([
+      kvSetJson(OVERRIDES_KEY, overrides), kvSetJson(EXPERIMENTS_KEY, experiments),
+      kvSetJson(BEST_RISK_KEY, best), kvSetJson(FLAGS_KEY, flags), kvSetJson(CHANGES_KEY, changes)
+    ]);
   } catch (e) {
-    console.error('auto-trade-check.js(daily adjust) error:', e);
-    // 조정 중 에러가 나도 이번 체크 시각은 기록해서, 같은 주기 안에서 무한 재시도하지 않게 합니다.
+    console.error('auto-trade-check.js(learning cycle) error:', e);
   }
-  await kvSetJson(ADJUST_LASTRUN_KEY, Date.now());
   return overrides;
+}
+
+// 이번 실행에서 생긴 매도들을 진행 중인 실험·관찰 기록에 표본으로 더합니다(매 실행마다, AI 호출 없이 계산만).
+// 기준선(대조군)의 매도는 진행 중인 모든 실험의 "같은 기간 대조군" 표본이 돼요.
+async function recordLearningSamples(actions) {
+  const sells = actions.filter((a) => isSellSide(a.side));
+  if (!sells.length) return;
+  const experiments = await kvGetJson(EXPERIMENTS_KEY, []);
+  let dirty = false;
+  for (const a of sells) {
+    const sample = { ts: a.ts, pnlPct: a.pnlPct, side: a.side, entryChangePct: a.entryChangePct };
+    for (const e of experiments) {
+      if (e.status !== 'running' && e.status !== 'observing') continue;
+      if (e.strategyId === a.strategy) {
+        e.samples = (e.samples || []).concat(sample).slice(-50);
+        dirty = true;
+      }
+      if (a.strategy === 'baseline' && e.status === 'running') {
+        e.controlSamples = (e.controlSamples || []).concat(sample).slice(-50);
+        dirty = true;
+      }
+    }
+  }
+  if (dirty) await kvSetJson(EXPERIMENTS_KEY, experiments);
 }
 
 // 여러 전략이 같은 후보군을 동시에 평가하므로, 이번 실행 동안은 종목별 시세를 한 번만 조회해서
@@ -474,7 +613,8 @@ async function processStrategyMarket(strategyDef, marketKey, fetchQuote, cfg, ca
         pnlAmount: Math.round(netPnlAmount * digits) / digits,
         fee: Math.round(sell.fee * digits) / digits,
         mode: 'dryrun',
-        reason: pos.reason || null
+        reason: pos.reason || null,
+        entryChangePct: typeof pos.entryChangePct === 'number' ? pos.entryChangePct : null // 산 날의 전일 대비 등락률(고점 매수 분석용)
       };
       // 단타는 손절이 자주 나서, 매번 AI에게 원인을 묻지 않습니다(API 비용 절약).
       if (side === 'STOP_LOSS' && !intraday) {
@@ -528,13 +668,14 @@ async function processStrategyMarket(strategyDef, marketKey, fetchQuote, cfg, ca
       const displayName = cand.name || q.name || cand.symbol;
       positions[cand.symbol] = {
         qty, avgPrice: q.price, costBasis: Math.round(buy.total * digits) / digits,
-        entryDate: today, name: displayName, excd: q.excd || null, reason: cand.reason || null
+        entryDate: today, name: displayName, excd: q.excd || null, reason: cand.reason || null,
+        entryChangePct: q.changePct // 산 순간 이미 어제보다 몇 % 올라 있었는지 — 팔 때 기록에 옮겨 "고점 매수" 여부를 따져요
       };
       const entry = {
         ts: Date.now(), date: today, market: marketKey, strategy: strategyDef.id,
         symbol: cand.symbol, name: displayName, side: 'BUY',
         qty, price: q.price, amount: Math.round(buy.total * digits) / digits,
-        fee: Math.round(buy.fee * digits) / digits, reason: cand.reason, mode: 'dryrun'
+        fee: Math.round(buy.fee * digits) / digits, reason: cand.reason, mode: 'dryrun', entryChangePct: q.changePct
       };
       actions.push(entry);
     }
@@ -636,7 +777,7 @@ export default async function handler(req, res) {
     const log = await kvGetJson(LOG_KEY, []);
 
     const apiKey = process.env.ANTHROPIC_API_KEY;
-    const overrides = await maybeRunDailyAdjust(cfg, apiKey, today, log);
+    const overrides = await maybeRunLearningCycle(cfg, today, log);
     const costs = await loadCosts(); // 매매 비용 설정(기본: 토스증권) — 자동매매 탭에서 바꿀 수 있음
 
     // 전략끼리는 서로 다른 KV 키(현금/보유종목)를 쓰기 때문에 서로 영향을 주지 않아, 동시에(병렬로)
@@ -736,6 +877,13 @@ export default async function handler(req, res) {
       for (const entry of allActions) log.unshift(entry);
       if (log.length > MAX_LOG) log.length = MAX_LOG;
       await kvSetJson(LOG_KEY, log);
+    }
+
+    // 학습하는 자동조정: 이번 매도들을 진행 중인 실험의 표본으로 더해요(계산만, AI 호출 없음).
+    try {
+      await recordLearningSamples(allActions);
+    } catch (e) {
+      console.error('auto-trade-check.js(learning samples) error:', e);
     }
 
     // 손익 캘린더용 날짜별 장부(_ledger.js) — 위 매매 기록은 400건만 남지만, 이 장부는 지워지지 않아요.

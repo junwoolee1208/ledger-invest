@@ -643,7 +643,7 @@
         <div style="font-size:13px; font-weight:600; margin-bottom:4px;">자동 점검 주기</div>
         <p class="easy" style="font-size:12px;">AI가 전략을 스스로 고치거나, 더 좋은 전략을 찾아보는 일을 몇 시간마다 할지 정해요.</p>
         <details class="more"><summary>자세히 보기</summary><div class="more-body">
-          <p><b>전략 자동조정</b>: 최근 2주 동안 마무리된 거래가 5번 이상인 전략을 AI가 살펴보고, 성적이 나쁘면 <span class="term" data-term="손절">손절</span>·<span class="term" data-term="익절">익절</span> 기준 같은 숫자를 조금씩 고쳐요. 고친 내용은 "전략 변경 이력" 탭에 남아요.</p>
+          <p><b>전략 자동조정(실험)</b>: 전략마다 "지켜보기 → 실험 → 채점"을 반복해요. 지금 설정으로 거래 10건을 지켜본 뒤, AI가 지난 실험 결과를 참고해 가설을 세우고 <span class="term" data-term="손절">손절</span>·<span class="term" data-term="익절">익절</span> 같은 숫자를 조금 바꿔요. 새 설정으로 거래 10건이 쌓이면 바꾸기 전과 비교해 채점하고, 나빠졌으면 되돌려요. 이 주기는 "얼마나 자주 확인할지"예요. 확인할 때 거래가 덜 쌓였으면 그냥 넘어가요.</p>
           <p><b>진화형 탐색</b>: 전략연구실에서 과거 데이터로 여러 조합을 시험해 보고 더 나은 조합을 찾아요.</p>
           <p>알람 서비스가 더 자주 깨워도 괜찮아요. 여기 정한 시간이 지나지 않았으면 그냥 넘어가요.</p>
         </div></details>
@@ -665,7 +665,10 @@
     <div class="panel pad" style="margin-bottom:20px;">
       <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:10px; flex-wrap:wrap;">
         <h3 style="margin:0; font-size:15px;">내 전략</h3>
-        <button class="btn ghost" id="atShowHidden" type="button" style="font-size:12px; padding:6px 12px;">숨긴 전략 보기</button>
+        <div style="display:flex; gap:6px; flex-wrap:wrap;">
+          <button class="btn ghost" id="atResetAll" type="button" style="font-size:12px; padding:6px 12px;">모든 전략 처음부터 다시</button>
+          <button class="btn ghost" id="atShowHidden" type="button" style="font-size:12px; padding:6px 12px;">숨긴 전략 보기</button>
+        </div>
       </div>
       <p class="easy" style="margin-top:6px;">전략마다 가짜 돈을 따로 갖고 겨뤄요. 스위치로 켜고 끄고, 버튼으로 바로 고칠 수 있어요.</p>
       <details class="more"><summary>자세히 보기</summary><div class="more-body">
@@ -850,8 +853,10 @@
       <b>전략의 규칙이 언제, 왜, 어떻게 바뀌었는지 모아둔 곳이에요</b><br>
       AI가 성적을 보고 스스로 고친 것, 내가 직접 고친 것, 가짜 계좌를 초기화한 것이 모두 여기 남아요.
       <details class="more" style="margin:8px 0 0;"><summary>자세히 보기</summary><div class="more-body">
-        <p><b>AI 자동조정</b>: 최근 2주 동안 마무리된 거래가 5번 이상 쌓인 전략을 AI가 하루 한 번 살펴봐요. 왜 그런 성적이 나왔는지 따져 보고, 필요하면 <span class="term" data-term="손절">손절</span>·<span class="term" data-term="익절">익절</span> 기준, 한 번에 사는 양(<span class="term" data-term="비중">비중</span>), 하루 최대 횟수를 조금씩 바꿔요. 안 바꿔도 된다고 판단하면 기록하지 않아요.</p>
-        <p><b>변경 이후 성과</b>: 바꾼 뒤에 실제로 성적이 좋아졌는지 보여줘요. 이걸 보고 "그 변경이 잘한 건지" 판단할 수 있어요.</p>
+        <p><b>AI 실험(AI가 성적 보고 바꿈)</b>: 전략마다 지금 설정으로 거래 10건을 지켜본 뒤, AI가 지난 실험에서 배운 것을 참고해 "이렇게 바꾸면 나아질 것"이라는 가설을 세우고 숫자(<span class="term" data-term="손절">손절</span>·<span class="term" data-term="익절">익절</span>·<span class="term" data-term="비중">비중</span>·하루 횟수)를 조금 바꿔요. 한 번에 ±30%까지만 바꿀 수 있고, 비중 3%·하루 2번 밑으로는 안 내려가요.</p>
+        <p><b>자동 채점·안전장치</b>: 새 설정으로 거래 10건이 쌓이면 바꾸기 전 10건과 비교해 <b>좋아짐 / 효과 없음 / 나빠짐</b>을 매겨요. 같은 기간 기준선(대조군)의 성적 변화는 "시장 탓"으로 보고 빼서, 설정을 바꾼 효과만 따져요. 나빠졌으면 지금까지 가장 좋았던 설정으로 되돌려요. 같은 방향으로 바꿨다가 두 번 나빠진 방향은 다시 시도하지 않아요.</p>
+        <p><b>사는 조건 문제</b>: 최근 20건 승률이 20%도 안 되면, 숫자를 계속 바꾸지 않고 "사는 조건이 안 맞는 것 같다"고 표시해요. 이럴 땐 그 전략을 끄거나, 전략연구실에서 검증해 보는 게 좋아요.</p>
+        <p><b>변경 이후 성과</b>: 바꾼 뒤에 실제로 성적이 좋아졌는지 보여줘요.</p>
       </div></details>
     </div>
 
@@ -2875,6 +2880,7 @@
       meta.push('수익률 '+atPctBadge(p.pct));
       if(p.holding) meta.push('보유 <b>'+p.holding+'</b>종목');
     }
+    var learnLine = atLearningLine(s);
     function btn(act, label, extra){
       var on = atOpen.id === s.id && atOpen.panel === act;
       return '<button type="button" data-act="'+act+'" class="'+(extra||'')+(on?' on':'')+'">'+label+'</button>';
@@ -2890,9 +2896,63 @@
         (s.enabled || s.hidden ? '' : ' <span style="font-size:11px; color:var(--muted-2); font-weight:400;">꺼짐</span>')+'</div>' +
         '<div class="st-easy">'+escapeHtml(easy)+'</div></div>'+sw+'</div>' +
       '<div class="st-meta">'+meta.map(function(m){ return '<span>'+m+'</span>'; }).join('')+'</div>' +
+      (learnLine ? '<div style="font-size:12px; line-height:1.5;">'+learnLine+'</div>' : '') +
       '<div class="st-actions">'+actions.join('')+'</div>' +
       '<div class="st-panel"></div>' +
     '</div>';
+  }
+
+  // ---- 학습하는 자동조정 상태 (서버 _learning.js와 같은 말로 보여줘요) ----
+  var AT_RISK_LABELS = { stopLossPct:'손절', takeProfitPct:'익절', positionPct:'비중', maxTradesPerDay:'하루 횟수' };
+  var AT_RISK_WORDS = { stopLossPct:['넓힘','좁힘'], takeProfitPct:['높임','낮춤'], positionPct:['늘림','줄임'], maxTradesPerDay:['늘림','줄임'] };
+  function atDescribeChange(before, after){
+    if(!before || !after) return '';
+    return Object.keys(AT_RISK_LABELS).filter(function(f){ return before[f] !== after[f]; }).map(function(f){
+      var unit = f === 'maxTradesPerDay' ? '번' : '%';
+      return AT_RISK_LABELS[f]+' '+before[f]+unit+'→'+after[f]+unit+'('+(after[f] > before[f] ? AT_RISK_WORDS[f][0] : AT_RISK_WORDS[f][1])+')';
+    }).join(', ');
+  }
+  var AT_VERDICT_COLOR = { '좋아짐':'var(--up)', '나빠짐':'var(--down)', '효과 없음':'var(--muted)', '근거 부족':'var(--muted-2)', '중단됨':'var(--muted-2)' };
+  // 카드에 한 줄: 경고 > 실험 중 > 지켜보는 중 > 지난 결과
+  function atLearningLine(s){
+    if(s.id === 'baseline') return '<span style="color:var(--muted-2);">📏 대조군 — 다른 전략과 비교하는 기준이라 숫자가 바뀌지 않아요</span>';
+    var L = s.learning;
+    if(!L) return '';
+    if(L.flag) return '<span style="color:var(--up);">⚠️ 사는 조건 문제 의심</span> <span style="color:var(--muted);">— 숫자 조정을 멈췄어요. [자세히 보기]</span>';
+    var a = L.active;
+    if(a && a.status === 'running') return '🧪 <b>실험 중</b> '+a.sampleCount+'/'+a.needed+'건 · '+escapeHtml(atDescribeChange(a.before, a.after));
+    var last = L.lastJudged ? ' · 지난 실험 <b style="color:'+(AT_VERDICT_COLOR[L.lastJudged.verdictText]||'inherit')+';">'+escapeHtml(L.lastJudged.verdictText)+'</b>' : '';
+    if(a && a.status === 'observing') return '👀 지켜보는 중 '+a.sampleCount+'/'+a.needed+'건'+last;
+    return last ? last.slice(3) : '';
+  }
+
+  // "자세히 보기" 안의 학습 기록: 지금 실험의 가설, 지금까지 배운 것(채점된 실험 목록)
+  function atLoadLessons(id, holder){
+    fetch('/api/auto-trade-status?action=experiments&strategy='+encodeURIComponent(id)).then(function(r){ return r.json(); }).then(function(d){
+      var list = d.experiments || [];
+      var flag = d.flags && d.flags[id];
+      var running = list.filter(function(e){ return e.status === 'running'; })[0];
+      var judged = list.filter(function(e){ return e.status === 'judged' || e.status === 'cancelled'; });
+      var html = '<div style="border-top:1px dashed var(--line); margin-top:8px; padding-top:8px;"><b style="color:var(--ink);">학습 기록</b>';
+      if(flag) html += '<p style="margin:6px 0; color:var(--up);">⚠️ '+escapeHtml(flag.note || '사는 조건 문제가 의심돼요.')+'</p>';
+      if(running){
+        html += '<p style="margin:6px 0;">🧪 <b>지금 실험</b>('+escapeHtml(running.startDate||'')+' 시작, '+running.sampleCount+'/'+running.needed+'건): '+escapeHtml(atDescribeChange(running.before, running.after))+'<br>' +
+          '<span style="color:var(--muted);">가설: '+escapeHtml(running.hypothesis||'—')+(running.expected ? ' · 기대: '+escapeHtml(running.expected) : '')+'</span>' +
+          (running.lessonUsed ? '<br><span style="color:var(--muted-2);">참고한 교훈: '+escapeHtml(running.lessonUsed)+'</span>' : '') + '</p>';
+      }
+      if(judged.length){
+        html += '<p style="margin:6px 0 2px;">📚 지금까지 배운 것 (최근 '+Math.min(judged.length, 8)+'개)</p><ul style="margin:0; padding-left:18px;">' +
+          judged.slice(0, 8).map(function(e){
+            var v = e.verdictText || '';
+            var txt = e.lesson || (atDescribeChange(e.before, e.after) + ' → ' + v);
+            return '<li style="margin-bottom:2px;"><span style="color:'+(AT_VERDICT_COLOR[v]||'inherit')+';">'+escapeHtml(txt)+'</span>' +
+              (e.result && e.result.rolledBackTo ? ' <span style="color:var(--muted-2);">(되돌림)</span>' : '') + '</li>';
+          }).join('') + '</ul>';
+      } else if(!running && !flag){
+        html += '<p style="margin:6px 0; color:var(--muted-2);">아직 채점된 실험이 없어요. 지금 설정으로 거래 10건이 쌓이면 첫 실험을 시작해요.</p>';
+      }
+      holder.innerHTML = html + '</div>';
+    }).catch(function(){ holder.innerHTML = ''; });
   }
 
   function renderStrategyCards(){
@@ -2925,7 +2985,9 @@
       var text = s.kind === 'custom'
         ? '전략연구실의 "진화형 탐색" 결과를 이름 붙여 저장한 전략이에요. 여러 지표에 점수를 매겨서 점수가 기준을 넘으면 사요. 저장한 순간의 규칙을 그대로 써서, 탐색 결과가 바뀌어도 이 전략은 안 바뀌어요. 국내 주식만 해요.'
         : (def ? def.detail : '');
-      el.innerHTML = '<p style="margin:0 0 6px;">'+escapeHtml(text)+'</p>' + (s.risk ? '<p style="margin:0;">지금 규칙: '+atRiskWords(s.risk)+'</p>' : '');
+      el.innerHTML = '<p style="margin:0 0 6px;">'+escapeHtml(text)+'</p>' + (s.risk ? '<p style="margin:0;">지금 규칙: '+atRiskWords(s.risk)+'</p>' : '') +
+        '<div class="st-lessons"></div>';
+      if(s.kind === 'builtin' && s.id !== 'baseline') atLoadLessons(id, el.querySelector('.st-lessons'));
       return;
     }
     if(panel === 'edit'){
@@ -2933,9 +2995,11 @@
         el.innerHTML = '';
         el.appendChild(document.getElementById('atDtForm'));
         loadDaytradeConfig();
+      } else if(s.id === 'baseline'){
+        el.innerHTML = '<p style="margin:0;">기준선은 "아무 조건 없이 사면 어떻게 되나"를 보여주는 대조군이에요. 다른 전략의 성적을 공정하게 비교하려고 숫자를 바꾸지 않아요.</p>';
       } else if(s.kind === 'builtin'){
         var r = s.risk || {};
-        el.innerHTML = '<p style="margin:0 0 8px;">사는 조건(언제 살지)은 전략마다 정해져 있고, 아래 숫자는 바꿀 수 있어요. 저장하면 다음 매매부터 적용되고 "전략 변경 이력"에 남아요.</p>' +
+        el.innerHTML = '<p style="margin:0 0 8px;">사는 조건(언제 살지)은 전략마다 정해져 있고, 아래 숫자는 바꿀 수 있어요. 저장하면 다음 매매부터 적용되고 "전략 변경 이력"에 남아요. 직접 바꾸면 진행 중이던 AI 실험은 "중단됨"으로 닫히고, 새 설정으로 다시 지켜보기 시작해요.</p>' +
           '<div class="row">' +
             '<div><label>몇 % 떨어지면 팔기(손절)</label><input type="number" step="0.5" data-f="stopLossPct" class="mono" style="width:100%;" value="'+r.stopLossPct+'"></div>' +
             '<div><label>몇 % 오르면 팔기(익절)</label><input type="number" step="0.5" data-f="takeProfitPct" class="mono" style="width:100%;" value="'+r.takeProfitPct+'"></div>' +
@@ -2948,6 +3012,17 @@
       }
     }
   }
+
+  // 모든 전략의 숫자를 처음 값으로 되돌리고 실험을 새로 시작해요. 가짜 계좌까지 초기화할지는 한 번 더 물어봐요.
+  document.getElementById('atResetAll').addEventListener('click', function(){
+    if(!confirm('모든 전략의 손절·익절·비중·하루 횟수를 처음 값으로 되돌릴까요?\n\n· 진행 중인 AI 실험은 "중단됨"으로 닫혀요(지금까지 배운 기록은 남아요).\n· 그다음부터 새로 지켜보고 실험해요.\n· 데이트레이딩 설정은 그대로예요.')) return;
+    var withAccounts = confirm('가짜 계좌도 모두 처음 돈(국내 1,000만원 / 해외 7,000달러)으로 초기화할까요?\n\n[확인] 계좌도 초기화 — 깨끗하게 다시 비교해요\n[취소] 숫자만 되돌리고 계좌는 그대로');
+    atPost('reset-all-risk', { resetAccounts: withAccounts }).then(function(d){
+      alert('되돌렸어요. ' + (withAccounts ? '가짜 계좌도 초기화했어요.' : '계좌는 그대로예요.'));
+      loadStrategyCards();
+      loadAutoTradeStatus();
+    }).catch(function(err){ alert(err.message); });
+  });
 
   document.getElementById('atShowHidden').addEventListener('click', function(){
     atShowHidden = !atShowHidden;
@@ -3564,6 +3639,9 @@
     // 누가/무엇을 보고 바꿨는지: 과거 데이터 시험(전략연구실) / 내가 직접 / AI가 실제(가짜 계좌) 성적을 보고
     if(source === 'backtest'){
       return '<span style="background:#EAF2FF; color:var(--brand); font-size:10.5px; font-weight:700; padding:2px 8px; border-radius:999px;">과거 데이터로 찾은 결과</span>';
+    }
+    if(source === 'system'){
+      return '<span style="background:#E1F5EE; color:#0F6E56; font-size:10.5px; font-weight:700; padding:2px 8px; border-radius:999px;">자동 채점·안전장치</span>';
     }
     if(source === 'manual'){
       return '<span style="background:#FFF4E5; color:#B25E00; font-size:10.5px; font-weight:700; padding:2px 8px; border-radius:999px;">내가 직접 바꿈</span>';

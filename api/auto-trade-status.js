@@ -16,6 +16,8 @@
 //   action=calendar-day,    GET  : date=YYYY-MM-DD 의 매매 하나하나(캘린더 "자세히 보기")
 //   action=ai-usage,        GET  : 이번 달 AI 사용액(기능별)·예산·기능별 모델·AI 연결 상태(마지막 실패 이유)
 //   action=ai-config,       POST : 월 AI 예산과 기능별 모델 저장(로그인한 본인만)
+//   action=experiments,     GET  : 학습하는 자동조정의 실험 기록·가장 좋았던 설정·경고(사는 조건 문제 등)
+//   action=reset-all-risk,  POST : 모든 전략의 숫자를 처음 값으로 되돌리고 실험을 새로 시작(선택: 가상계좌도 초기화)
 
 import { getKisToken, kisHeaders, num, KIS_BASE } from './_kis.js';
 import { kvGetJson, kvSetJson, kvCommand, kvReady } from './_kv.js';
@@ -26,6 +28,7 @@ import {
 import { DEFAULT_DAYTRADE, normalizeDaytrade, describeDaytrade } from './_daytrade.js';
 import { STRATEGY_IDS, STRATEGY_NAMES, WEIGHT_BASED_IDS, OWN_SETTINGS_IDS, BASE_RISK, keysFor } from './_strategies.js';
 import { isSellSide, ensureBackfilled, DAILY_KEY_PREFIX, TRADES_KEY_PREFIX } from './_ledger.js';
+import { EXPERIMENTS_KEY, BEST_RISK_KEY, FLAGS_KEY, LEARN, lessonLine, VERDICT_TEXT } from './_learning.js';
 import {
   AI_CONFIG_KEY, AI_MODELS, AI_FEATURES, AI_LAST_OK_KEY, AI_LAST_ERROR_KEY, AI_REASON_TEXT,
   normalizeAiConfig, loadAiUsage, modelFor
@@ -224,9 +227,22 @@ function readBody(req) {
    "지금 적용 중인 값" = 기본값(_strategies.js) 위에 수동 수정/AI 자동조정 값(오버라이드)을 덮어쓴 것 — 매매 엔진과 같은 계산이에요. */
 async function handleStrategies(req, res) {
   try {
-    const [cfgRaw, overrides, customList] = await Promise.all([
-      kvGetJson(CONFIG_KEY, null), kvGetJson(OVERRIDES_KEY, {}), kvGetJson(CUSTOM_KEY, [])
+    const [cfgRaw, overrides, customList, experiments, flags] = await Promise.all([
+      kvGetJson(CONFIG_KEY, null), kvGetJson(OVERRIDES_KEY, {}), kvGetJson(CUSTOM_KEY, []),
+      kvGetJson(EXPERIMENTS_KEY, []), kvGetJson(FLAGS_KEY, {})
     ]);
+    // 카드에 보여줄 학습 상태: 지금 실험/관찰 중인지, 몇 건 쌓였는지, 최근 채점 결과
+    function learningOf(id) {
+      const mine = experiments.filter((e) => e.strategyId === id);
+      const active = mine.find((e) => e.status === 'running') || mine.find((e) => e.status === 'observing');
+      const lastJudged = mine.find((e) => e.status === 'judged');
+      return {
+        active: active ? slimExperiment(active) : null,
+        lastJudged: lastJudged ? slimExperiment(lastJudged) : null,
+        judgedCount: mine.filter((e) => e.status === 'judged').length,
+        flag: flags[id] || null
+      };
+    }
     const cfg = cfgRaw || DEFAULT_CONFIG;
     const enabledMap = cfg.strategies || {};
     const hidden = Array.isArray(cfg.hidden) ? cfg.hidden : [];
@@ -241,7 +257,7 @@ async function handleStrategies(req, res) {
         const base = id === 'momentum' ? Object.assign({}, BASE_RISK.momentum, cfg.risk || {}) : BASE_RISK[id];
         risk = clipRisk(Object.assign({}, base, overrides[id] || {}), base);
       }
-      return { id, name: STRATEGY_NAMES[id], kind, enabled: enabledMap[id] !== false, hidden: hidden.includes(id), risk, daytrade };
+      return { id, name: STRATEGY_NAMES[id], kind, enabled: enabledMap[id] !== false, hidden: hidden.includes(id), risk, daytrade, learning: learningOf(id) };
     });
     customList.forEach((c) => list.push({
       id: c.id, name: c.name, kind: 'custom', enabled: c.enabled !== false, hidden: false, risk: null, createdAt: c.createdAt || null
@@ -359,6 +375,87 @@ async function handleCalendarDay(req, res) {
     res.status(200).json({ date, summary: month[date] || null, trades, names });
   } catch (e) {
     console.error('auto-trade-status.js(calendar-day) error:', e);
+    res.status(500).json({ error: '서버 오류가 발생했습니다.' });
+  }
+}
+
+/* ==================== action=experiments / reset-all-risk (학습하는 자동조정) ==================== */
+
+// 화면에 보낼 때는 거래 표본(손익 목록)을 개수로만 줄여서 보내요(용량 절약).
+function slimExperiment(e) {
+  const out = Object.assign({}, e, {
+    sampleCount: (e.samples || []).length,
+    controlSampleCount: (e.controlSamples || []).length,
+    needed: e.status === 'running' ? LEARN.minTrades : (e.status === 'observing' ? LEARN.beforeTrades : null),
+    lesson: e.status === 'judged' ? lessonLine(e) : null,
+    verdictText: e.result ? (VERDICT_TEXT[e.result.verdict] || e.result.verdict) : (VERDICT_TEXT[e.status] || null)
+  });
+  delete out.samples;
+  delete out.controlSamples;
+  return out;
+}
+
+async function handleExperiments(req, res) {
+  try {
+    const [experiments, best, flags] = await Promise.all([
+      kvGetJson(EXPERIMENTS_KEY, []), kvGetJson(BEST_RISK_KEY, {}), kvGetJson(FLAGS_KEY, {})
+    ]);
+    const strategyId = req.query.strategy ? String(req.query.strategy) : null;
+    const list = experiments.filter((e) => !strategyId || e.strategyId === strategyId).map(slimExperiment);
+    res.status(200).json({ experiments: list, best, flags, rules: LEARN });
+  } catch (e) {
+    console.error('auto-trade-status.js(experiments) error:', e);
+    res.status(500).json({ error: '서버 오류가 발생했습니다.' });
+  }
+}
+
+// 진행 중인 실험을 "중단됨"으로 닫고, 관찰 기록은 비워요(설정이 사람 손으로 바뀌어서, 그 전 거래로는 공정하게 비교할 수 없으니까).
+function cancelExperimentsFor(experiments, strategyId, reason) {
+  experiments.forEach((e) => {
+    if (strategyId && e.strategyId !== strategyId) return;
+    if (e.status === 'running') {
+      e.status = 'cancelled';
+      e.result = { verdict: 'cancelled', judgedAt: Date.now(), note: reason };
+    }
+    if (e.status === 'observing') { e.samples = []; e.startedAt = Date.now(); }
+  });
+}
+
+async function handleResetAllRisk(req, res) {
+  if (req.method !== 'POST') { res.status(405).json({ error: 'POST만 지원합니다.' }); return; }
+  const uid = await requireUid(req, res);
+  if (!uid) return;
+  const body = readBody(req);
+  try {
+    const [overrides, experiments, changes] = await Promise.all([
+      kvGetJson(OVERRIDES_KEY, {}), kvGetJson(EXPERIMENTS_KEY, []), kvGetJson(CHANGES_KEY, [])
+    ]);
+    cancelExperimentsFor(experiments, null, '사용자가 "모든 전략 처음부터 다시"를 눌렀어요.');
+    const resetIds = Object.keys(overrides);
+    await Promise.all([
+      kvSetJson(OVERRIDES_KEY, {}), kvSetJson(EXPERIMENTS_KEY, experiments),
+      kvSetJson(BEST_RISK_KEY, {}), kvSetJson(FLAGS_KEY, {})
+    ]);
+    if (body.resetAccounts) {
+      const ids = STRATEGY_IDS.concat((await kvGetJson(CUSTOM_KEY, [])).map((c) => c.id));
+      const keys = [];
+      ids.forEach((id) => { const kr = keysFor(id, 'KR'), us = keysFor(id, 'US'); keys.push(kr.positionsKey, kr.cashKey, us.positionsKey, us.cashKey); });
+      await Promise.all(keys.map((k) => kvCommand(['DEL', k])));
+    }
+    changes.unshift({
+      id: Date.now() + '-reset-all', ts: Date.now(), date: todayKST(),
+      strategyId: 'all', strategyName: '모든 전략', source: 'manual',
+      diagnosis: '사용자가 모든 전략의 숫자(손절·익절·비중·하루 횟수)를 처음 값으로 되돌리고 실험을 새로 시작했어요.' +
+        (body.resetAccounts ? ' 가짜 계좌도 모두 처음 돈으로 초기화했어요.' : ''),
+      statsAtChange: null,
+      beforeDescription: resetIds.length ? `바뀌어 있던 전략 ${resetIds.length}개: ${resetIds.map((id) => STRATEGY_NAMES[id] || id).join(', ')}` : '바뀐 전략 없음',
+      afterDescription: '모든 전략 처음 값, 실험 기록은 남기고 새 실험부터 다시'
+    });
+    if (changes.length > MAX_CHANGES) changes.length = MAX_CHANGES;
+    await kvSetJson(CHANGES_KEY, changes);
+    res.status(200).json({ ok: true, resetCount: resetIds.length });
+  } catch (e) {
+    console.error('auto-trade-status.js(reset-all-risk) error:', e);
     res.status(500).json({ error: '서버 오류가 발생했습니다.' });
   }
 }
@@ -575,6 +672,10 @@ async function handleManualEdit(req, res) {
     res.status(400).json({ error: '수동 편집은 내장 전략(진화형/시장적응형/데이트레이딩 제외)에만 적용할 수 있습니다. 데이트레이딩은 "데이트레이딩 설정"에서 바꿔주세요.' });
     return;
   }
+  if (strategyId === 'baseline') {
+    res.status(400).json({ error: '기준선은 다른 전략과 비교하는 "대조군"이라 숫자를 바꿀 수 없어요.' });
+    return;
+  }
   if (!body.risk || typeof body.risk !== 'object') {
     res.status(400).json({ error: 'risk 값이 필요합니다.' });
     return;
@@ -587,6 +688,10 @@ async function handleManualEdit(req, res) {
 
     overrides[strategyId] = Object.assign({}, after, { updatedAt: Date.now() });
     await kvSetJson(OVERRIDES_KEY, overrides);
+    // 사람이 직접 숫자를 바꾸면 진행 중인 실험은 공정하게 채점할 수 없어서 "중단됨"으로 닫고, 새 설정으로 다시 관찰을 시작해요.
+    const experiments = await kvGetJson(EXPERIMENTS_KEY, []);
+    cancelExperimentsFor(experiments, strategyId, '사용자가 숫자를 직접 바꿨어요.');
+    await kvSetJson(EXPERIMENTS_KEY, experiments);
 
     const changes = await kvGetJson(CHANGES_KEY, []);
     changes.unshift({
@@ -816,5 +921,7 @@ export default async function handler(req, res) {
   if (action === 'calendar-day') return handleCalendarDay(req, res);
   if (action === 'ai-usage') return handleAiUsage(req, res);
   if (action === 'ai-config') return handleAiConfig(req, res);
+  if (action === 'experiments') return handleExperiments(req, res);
+  if (action === 'reset-all-risk') return handleResetAllRisk(req, res);
   return handleConfig(req, res);
 }

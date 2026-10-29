@@ -31,7 +31,8 @@ export const AI_FEATURES = {
   screen: { label: 'AI 추천 종목 거르기', defaultModel: 'claude-haiku-5-5', effort: 'low', heavy: false },
   sentiment: { label: '뉴스 호재·악재 점수', defaultModel: 'claude-haiku-5-5', effort: 'low', heavy: false },
   'stoploss-reason': { label: '손절 이유 설명', defaultModel: 'claude-haiku-5-5', effort: 'low', heavy: false },
-  adjust: { label: '전략 자동조정', defaultModel: 'claude-haiku-5-5', effort: 'medium', heavy: false },
+  // 자동조정은 지난 실험 기록을 읽고 다음 실험을 설계하는 "판단" 일이라 Sonnet이 기본(하루 몇 번뿐이라 비용 부담 작음)
+  adjust: { label: '전략 자동조정(실험 설계)', defaultModel: 'claude-sonnet-5-5', effort: 'medium', heavy: false },
   explain: { label: '주가 움직임·실적 요약', defaultModel: 'claude-haiku-5-5', effort: 'low', heavy: false },
   opinion: { label: 'AI 투자의견', defaultModel: 'claude-haiku-5-5', effort: 'medium', heavy: false },
   'backtest-feedback': { label: '전략연구실 AI 피드백', defaultModel: 'claude-haiku-5-5', effort: 'low', heavy: false }
