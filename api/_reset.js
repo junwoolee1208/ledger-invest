@@ -9,6 +9,7 @@ import { kvGetJson, kvSetJson, kvCommand } from './_kv.js';
 import { STRATEGY_IDS, keysFor } from './_strategies.js';
 import { EXPERIMENTS_KEY, BEST_RISK_KEY, FLAGS_KEY } from './_learning.js';
 import { SCORECARD_CACHE_KEY, SCORECARD_HISTORY_KEY } from './_scorecard.js';
+import { LONGTERM_STATE_KEY } from './_longterm.js';
 
 export const RESET_INFO_KEY = 'autotrade:reset-info'; // { learnSince, scoreSince }
 const OVERRIDES_KEY = 'autotrade:strategy-overrides';
@@ -46,6 +47,7 @@ export async function resetAllStrategies({ resetAccounts, reason, today, resetId
     const ids = STRATEGY_IDS.concat((await kvGetJson(CUSTOM_KEY, [])).map((c) => c.id));
     const keys = [];
     ids.forEach((id) => { const kr = keysFor(id, 'KR'), us = keysFor(id, 'US'); keys.push(kr.positionsKey, kr.cashKey, us.positionsKey, us.cashKey); });
+    keys.push(LONGTERM_STATE_KEY); // 계좌를 비웠으니 장기 전략은 다음 실행에서 다시 담아야 해요
     await Promise.all(keys.map((k) => kvCommand(['DEL', k])));
     nextInfo.scoreSince = now;
     // 채점표는 초기화 뒤 거래로만 다시 계산해요(1주 추세도 새로 시작)

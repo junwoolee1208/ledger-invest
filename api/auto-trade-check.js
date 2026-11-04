@@ -21,7 +21,13 @@ import { kvGetJson, kvSetJson, kvMGetJson, kvMSetJson, kvReady } from './_kv.js'
 import { fetchSymbolHistory, annotateWithFactors, scoreForStrategy, classifyRegimeByDate } from './_backtest-core.js';
 import { normalizeCosts, COST_CONFIG_KEY, planBuy, planSell, positionCostBasis, fetchUsdKrw, REALIZED_KEY_PREFIX } from './_costs.js';
 import { normalizeDaytrade, hhmmToMin } from './_daytrade.js';
-import { BASE_RISK, keysFor, STARTING_CASH_US } from './_strategies.js';
+import { BASE_RISK, keysFor, STARTING_CASH_US, SWING_MAX_HOLD_DAYS, weekdaysBetween, normalizeHorizon } from './_strategies.js';
+import {
+  INTRADAY_STATE_KEY, INTRADAY_RULES, DAY_CLOSE_RULES, sizeByVolatility, updateIntradayState, breakoutSignal, pullbackSignal
+} from './_intraday.js';
+import {
+  LONGTERM_STATE_KEY, MIN_TARGETS, rebalanceDue, indexUpdateDue, planRebalance, fetchLongTermTargets, fetchKospi200
+} from './_longterm.js';
 import { isSellSide, recordEntries, ensureBackfilled } from './_ledger.js';
 import { askClaude, extractJson } from './_ai.js'; // AI 호출 공용 창구(사용량·예산·실패 이유 기록)
 import { RESET_INFO_KEY } from './_reset.js';
@@ -105,16 +111,20 @@ function isRankCand(cand) {
 // 나머지는 "경쟁 비교"가 목적이라 비교 기준이 흔들리지 않도록 고정값(_strategies.js의 BASE_RISK)을 씁니다.
 // baseline(기준선)은 조건 없이 후보를 그대로 사는 전략으로, 다른 전략들이 "그냥 아무거나 사는 것"보다
 // 실제로 나은지를 판단하는 비교 기준(대조군) 역할을 합니다.
+// horizon: 보유 기간 갈래(day=당일 청산, swing=최대 20거래일, base=비교용).
+// ownRules: 규칙을 사용자 설정이나 코드가 정해서 AI 자동조정·수동 수정 값을 덮어쓰지 않는 전략.
 const STRATEGY_DEFS = [
   {
     id: 'momentum',
     name: '모멘텀(추세 추종)',
+    horizon: 'swing',
     getRisk: (cfg) => Object.assign({}, BASE_RISK.momentum, cfg.risk || {}),
     shouldBuy: (cand, q) => q.changePct !== null && q.changePct >= (isRankCand(cand) ? 1 : 3)
   },
   {
     id: 'pullback',
     name: '눌림목(과열 회피)',
+    horizon: 'swing',
     getRisk: () => BASE_RISK.pullback,
     // 이미 많이 오른 급등주보다, 완만하게 움직이기 시작한(0~2%) 종목을 선호합니다.
     shouldBuy: (cand, q) => q.changePct !== null && q.changePct > 0 && q.changePct <= 2
@@ -122,6 +132,7 @@ const STRATEGY_DEFS = [
   {
     id: 'breakout',
     name: '강한 돌파',
+    horizon: 'swing',
     getRisk: () => BASE_RISK.breakout,
     // 더 강한 상승 모멘텀만 선택하고, 손절/익절 폭도 더 크게 잡아 추세를 오래 태웁니다.
     shouldBuy: (cand, q) => q.changePct !== null && q.changePct >= (isRankCand(cand) ? 4 : 6)
@@ -129,6 +140,7 @@ const STRATEGY_DEFS = [
   {
     id: 'reversal',
     name: '역추세(저가 반등)',
+    horizon: 'swing',
     getRisk: () => BASE_RISK.reversal,
     // 최근 하락폭이 있는(-2%~-6%) 종목의 단기 반등을 노립니다. 실패 시 빨리 손절하도록 폭을 좁게 잡습니다.
     shouldBuy: (cand, q) => q.changePct !== null && q.changePct <= -2 && q.changePct >= -6
@@ -136,6 +148,12 @@ const STRATEGY_DEFS = [
   {
     id: 'scalp',
     name: '초단타(잦은 매매)',
+    horizon: 'day',
+    // 잦게 사고파는 전략이라 단타로 옮겼어요. 사는 조건은 그대로이고 장 마감 전에 모두 팔아요.
+    // 미국장은 한국 날짜가 자정에 바뀌어서 "오늘 산 종목" 판단이 어긋나므로, 다른 단타처럼 국내만 해요.
+    intraday: true,
+    krOnly: true,
+    dayRules: () => DAY_CLOSE_RULES,
     getRisk: () => BASE_RISK.scalp,
     // 문턱을 낮춰 자주 매매하고, 손절/익절 폭도 아주 좁게 잡아 빠르게 치고 빠집니다.
     shouldBuy: (cand, q) => q.changePct !== null && q.changePct >= (isRankCand(cand) ? 0.5 : 1.5)
@@ -143,6 +161,7 @@ const STRATEGY_DEFS = [
   {
     id: 'selective',
     name: '신중한 선별(엄격)',
+    horizon: 'swing',
     getRisk: () => BASE_RISK.selective,
     // 아주 강한 조건에서만 매매하되, 한 번 살 때 비중을 크게 실어(8%) 소수 정예로 갑니다.
     shouldBuy: (cand, q) => q.changePct !== null && q.changePct >= (isRankCand(cand) ? 2.5 : 4)
@@ -150,6 +169,7 @@ const STRATEGY_DEFS = [
   {
     id: 'wideswing',
     name: '광폭 스윙(길게 보유)',
+    horizon: 'swing',
     getRisk: () => BASE_RISK.wideswing,
     // 모멘텀과 매수 조건은 비슷하지만, 손절/익절 폭을 훨씬 넓게 잡아 추세를 오래 들고 갑니다.
     shouldBuy: (cand, q) => q.changePct !== null && q.changePct >= (isRankCand(cand) ? 1.5 : 3)
@@ -157,6 +177,7 @@ const STRATEGY_DEFS = [
   {
     id: 'baseline',
     name: '기준선(대조군, 조건 없음)',
+    horizon: 'base',
     getRisk: () => BASE_RISK.baseline,
     // 등락률 조건 없이 후보에 오르면 그냥 삽니다 — 다른 전략들이 "무조건 사는 것"보다 실제로 나은지 비교하는 대조군.
     shouldBuy: () => true
@@ -168,8 +189,11 @@ const STRATEGY_DEFS = [
     // 국내 종목만 지원(미국장은 한국 시간 밤이라 우선 국내로 검증).
     // 모든 숫자(사는 조건·시간·손절/익절·손실한도·매수 횟수)는 사용자가 "데이트레이딩 설정"에서 정한 값(cfg.daytrade)을 따르고,
     // 기본값은 _daytrade.js에 있어요. 그래서 AI 자동조정·수동 수정 대상에서는 빠집니다(설정이 한 곳에서만 바뀌도록).
+    horizon: 'day',
+    ownRules: true,
     intraday: true,
     krOnly: true,
+    dayRules: (cfg) => normalizeDaytrade(cfg.daytrade),
     getRisk: (cfg) => {
       const s = normalizeDaytrade(cfg.daytrade);
       return { positionPct: s.positionPct, stopLossPct: s.stopLossPct, takeProfitPct: s.takeProfitPct, maxTradesPerDay: s.maxBuysPerDay };
@@ -184,7 +208,25 @@ const STRATEGY_DEFS = [
       return fromOpenPct >= s.minFromOpenPct && fromOpenPct <= s.maxFromOpenPct &&
         offHighPct <= s.maxOffHighPct && q.changePct <= s.maxChangePct;
     }
-  }
+  },
+  ...[
+    { id: 'opening-breakout', name: '장 초반 돌파', signal: (q, cfg) => breakoutSignal(q, cfg._intraday) },
+    { id: 'vwap-pullback', name: '강한 종목 눌림', signal: (q, cfg) => pullbackSignal(q, cfg._intraday, Date.now()) }
+  ].map((d) => ({
+    id: d.id,
+    name: d.name,
+    horizon: 'day',
+    ownRules: true,
+    intraday: true,
+    krOnly: true,
+    usesIntradayState: true,
+    maxPositions: INTRADAY_RULES.maxPositions,
+    dayRules: () => INTRADAY_RULES,
+    // 손절·익절·금액은 살 때 종목마다 정해요(sizeFor). 아래 값은 그 값이 없는 예외 상황의 안전한 기본값이에요.
+    getRisk: () => ({ positionPct: 10, stopLossPct: 2, takeProfitPct: 4, maxTradesPerDay: INTRADAY_RULES.maxBuysPerDay }),
+    sizeFor: sizeByVolatility,
+    shouldBuy: (cand, q, cfg) => d.signal(q, cfg)
+  }))
 ];
 
 
@@ -230,7 +272,8 @@ async function fetchDomesticQuote(token, symbol) {
   return {
     symbol, name: o.hts_kor_isnm || symbol,
     price: num(o.stck_prpr), changePct: num(o.prdy_ctrt),
-    open: num(o.stck_oprc), high: num(o.stck_hgpr) // 오늘 시가·고가 — 데이트레이딩 전략이 장중 흐름을 볼 때 씀(추가 API 호출 없음)
+    // 오늘 시가·고가·저가와 평균 체결가(거래량을 반영한 평균 가격) — 단타 전략이 장중 흐름을 볼 때 써요(추가 API 호출 없음)
+    open: num(o.stck_oprc), high: num(o.stck_hgpr), low: num(o.stck_lwpr), vwap: num(o.wghn_avrg_stck_prc)
   };
 }
 
@@ -273,13 +316,13 @@ async function loadCandidateSymbols(cfg, req, cachedScreen) {
       }
       ((data && data.candidates) || []).forEach((c) => {
         // (거래대금 상위 고르기는 국내 종목만 지원합니다.)
-        if (!symbols.has(c.symbol)) symbols.set(c.symbol, { symbol: c.symbol, name: c.name || null, reason: c.reason });
+        if (!symbols.has(c.symbol)) symbols.set(c.symbol, { symbol: c.symbol, name: c.name || null, reason: c.reason, dayOnly: !!c.dayOnly });
       });
     } catch (e) {
       console.error('auto-trade-check: 거래대금 후보 조회 실패', e);
     }
   }
-  return Array.from(symbols.values()).slice(0, 20); // 과호출 방지로 상한
+  return Array.from(symbols.values()).slice(0, 35); // 과호출 방지로 상한(순위에서 고른 후보 최대 30개 + 관심종목)
 }
 
 // 손절매가 발생했을 때 "왜 손해를 봤는지"를 AI가 짧게 추정해서 설명해줍니다.
@@ -316,9 +359,9 @@ function clipRisk(r, fallback) {
 //   실험 중: AI가 가설을 세워 숫자를 바꾸고, 새 설정으로 거래 10건이 쌓일 때까지 기다려요.
 //   채점: 바꾸기 전 10건 + 같은 기간의 대조군(기준선)과 비교해 좋아짐/효과 없음/나빠짐을 매기고,
 //         나빠졌으면 지금까지 가장 좋았던 설정으로 되돌려요. 결과는 교훈으로 남아 다음 실험 때 AI에게 전달돼요.
-// 기준선(대조군)은 비교 기준이라 절대 바꾸지 않고, 단타는 사용자가 직접 정하는 설정이라 대상이 아니에요.
+// 기준선(대조군)은 비교 기준이라 절대 바꾸지 않고, 규칙이 따로 정해진 전략(ownRules)도 대상이 아니에요.
 function isAdjustable(def) {
-  return !def.intraday && def.id !== 'baseline';
+  return !def.ownRules && def.id !== 'baseline';
 }
 
 function sellSamplesFromLog(log, strategyId, sinceTs, limit) {
@@ -588,12 +631,12 @@ async function processStrategyMarket(strategyDef, marketKey, fetchQuote, cfg, ca
   let cash = accounts[keys.cashKey];
   if (typeof cash !== 'number') cash = keys.startingCash;
   const intraday = !!strategyDef.intraday;
-  const dt = intraday ? normalizeDaytrade(cfg.daytrade) : null; // 단타 설정(시간·손실한도·재매수 대기)
+  const dt = intraday ? strategyDef.dayRules(cfg) : null; // 단타 규칙(시간·손실한도·재매수 대기)
 
   // 오늘 매매 횟수: 스윙 전략은 기존처럼 "매수+익절"을 세고, 단타는 "매수"만 셉니다
   // (단타는 파는 건 언제든 할 수 있어야 하니까 — 익절/청산이 한도에 막혀 못 팔면 안 돼요).
   const tradesToday = log.filter((e) => e.date === today && e.market === marketKey && e.strategy === strategyDef.id &&
-    (intraday ? e.side === 'BUY' : e.side !== 'STOP_LOSS')).length;
+    (intraday ? e.side === 'BUY' : e.side !== 'STOP_LOSS' && e.side !== 'MAX_HOLD')).length;
   const positionPct = risk.positionPct || 5;
   const stopLossPct = risk.stopLossPct || 5;
   const takeProfitPct = risk.takeProfitPct || 10;
@@ -611,8 +654,10 @@ async function processStrategyMarket(strategyDef, marketKey, fetchQuote, cfg, ca
     let side = null;
     // 단타: 청산 시각이 넘었거나, (스케줄러가 멈췄던 등의 이유로) 어제 산 게 남아 있으면 손익과 상관없이 정리합니다.
     if (intraday && (clock.minutes >= hhmmToMin(dt.closeAt) || pos.entryDate !== today)) side = 'DAY_CLOSE';
-    else if (pnlPct <= -stopLossPct) side = 'STOP_LOSS';
-    else if (pnlPct >= takeProfitPct && (intraday || tradesToday < maxTradesPerDay)) side = 'TAKE_PROFIT';
+    // 살 때 종목별로 정한 손절·익절이 있으면 그 값을 먼저 써요(등락이 큰 종목일수록 손절이 넓어요).
+    else if (pnlPct <= -(pos.stopPct || stopLossPct)) side = 'STOP_LOSS';
+    else if (pnlPct >= (pos.takePct || takeProfitPct) && (intraday || tradesToday < maxTradesPerDay)) side = 'TAKE_PROFIT';
+    else if (strategyDef.horizon === 'swing' && pos.entryDate && weekdaysBetween(pos.entryDate, today) >= SWING_MAX_HOLD_DAYS) side = 'MAX_HOLD';
 
     if (side) {
       const sell = planSell(costs, marketKey, pos.qty, q.price);
@@ -659,7 +704,8 @@ async function processStrategyMarket(strategyDef, marketKey, fetchQuote, cfg, ca
     const todaysSells = log.filter((e) => mine(e) && e.date === today && isSellSide(e.side)).concat(actions);
     const realizedToday = todaysSells.reduce((sum, e) => sum + (e.pnlAmount || 0), 0);
     const lossLimit = keys.startingCash * (dt.dailyLossLimitPct / 100);
-    intradayBuyAllowed = clock.minutes >= hhmmToMin(dt.buyStart) && clock.minutes < hhmmToMin(dt.buyEnd) && realizedToday > -lossLimit;
+    const underLossLimit = dt.dailyLossLimitPct === null || realizedToday > -lossLimit;
+    intradayBuyAllowed = clock.minutes >= hhmmToMin(dt.buyStart) && clock.minutes < hhmmToMin(dt.buyEnd) && underLossLimit;
     const cooldownFrom = Date.now() - dt.cooldownMin * 60 * 1000;
     log.filter((e) => mine(e) && isSellSide(e.side) && e.ts >= cooldownFrom).concat(actions)
       .forEach((e) => recentlySold.add(e.symbol));
@@ -671,6 +717,8 @@ async function processStrategyMarket(strategyDef, marketKey, fetchQuote, cfg, ca
     for (const cand of candidates) {
       if (positions[cand.symbol]) continue; // 이미 보유 중이면 스킵
       if (recentlySold.has(cand.symbol)) continue; // 단타: 방금 판 종목은 잠시 쉬었다가
+      if (cand.dayOnly && strategyDef.horizon !== 'day') continue; // 등락이 큰 후보는 단타 전략만 사요
+      if (strategyDef.maxPositions && Object.keys(positions).length >= strategyDef.maxPositions) break;
       const remainingSlots = maxTradesPerDay - (tradesToday + actions.filter((a) => a.side === 'BUY').length);
       if (remainingSlots <= 0) break;
 
@@ -678,7 +726,10 @@ async function processStrategyMarket(strategyDef, marketKey, fetchQuote, cfg, ca
       if (!q || q.price === null || q.changePct === null) continue;
       if (!strategyDef.shouldBuy(cand, q, cfg)) continue;
 
-      const budget = cash * (positionPct / 100);
+      const accountValue = cash + Object.values(positions).reduce((sum, p) => sum + positionCostBasis(costs, marketKey, p), 0);
+      const sized = strategyDef.sizeFor ? strategyDef.sizeFor(q, accountValue, cash) : null;
+      if (strategyDef.sizeFor && !sized) continue;
+      const budget = sized ? sized.budget : cash * (positionPct / 100);
       // 매수비용(수수료, 해외는 환전비용까지)을 포함해도 예산을 넘지 않는 최대 수량
       const buy = planBuy(costs, marketKey, budget, q.price);
       if (buy.qty < 1) continue;
@@ -691,7 +742,8 @@ async function processStrategyMarket(strategyDef, marketKey, fetchQuote, cfg, ca
         qty, avgPrice: q.price, costBasis: Math.round(buy.total * digits) / digits,
         entryDate: today, name: displayName, excd: q.excd || null, reason: cand.reason || null,
         entryChangePct: q.changePct, // 산 순간 이미 어제보다 몇 % 올라 있었는지 — 팔 때 기록에 옮겨 "고점 매수" 여부를 따져요
-        entryRegime: cfg._regime || null // 산 날의 시장 상황(상승장·하락장…) — 시장 상황별 성적용
+        entryRegime: cfg._regime || null, // 산 날의 시장 상황(상승장·하락장…) — 시장 상황별 성적용
+        ...(sized ? { stopPct: sized.stopPct, takePct: sized.takePct } : {})
       };
       const entry = {
         ts: Date.now(), date: today, market: marketKey, strategy: strategyDef.id,
@@ -736,19 +788,96 @@ function evolvedRiskFrom(strategy) {
 
 // 진화형 전략의 매수 판단에 필요한 "오늘까지의" 팩터 점수를 후보 종목마다 계산해둡니다.
 // (국내 종목만 지원 — 진화형 탐색 자체가 국내 일봉 데이터로만 돌아가기 때문)
+// 후보가 늘어도 하루 첫 실행이 30초 제한에 걸리지 않게, 한 종목씩이 아니라 5개씩 나눠서 받아요.
 async function buildFactorMap(token, krCandidates) {
   const map = new Map();
-  for (const cand of krCandidates) {
-    try {
-      const hist = await fetchSymbolHistory(token, cand.symbol, EVOLVED_FACTOR_LOOKBACK_DAYS);
-      if (hist.length < 20) continue;
-      const annotated = annotateWithFactors(hist);
-      map.set(cand.symbol, annotated[annotated.length - 1].factors);
-    } catch (e) {
-      // 한 종목 실패해도 나머지는 계속 진행
-    }
+  for (let i = 0; i < krCandidates.length; i += 5) {
+    await Promise.all(krCandidates.slice(i, i + 5).map(async (cand) => {
+      try {
+        const hist = await fetchSymbolHistory(token, cand.symbol, EVOLVED_FACTOR_LOOKBACK_DAYS);
+        if (hist.length < 20) return;
+        const annotated = annotateWithFactors(hist);
+        map.set(cand.symbol, annotated[annotated.length - 1].factors);
+      } catch (e) {
+        // 한 종목 실패해도 나머지는 계속 진행
+      }
+    }));
   }
   return map;
+}
+
+// 장기 분산 전략: 한 달에 한 번 시가총액 상위 10개로 비중을 맞춰요(규칙은 _longterm.js).
+// 매달 첫 조정 때만 계좌를 읽어서, 평소 실행에는 저장소 호출이 늘지 않아요.
+async function runLongTermRebalance(token, today, savedState, fetchQuote, costs, cfg) {
+  const keys = keysFor('longterm', 'KR');
+  const state = Object.assign({}, savedState || {}, { lastTryAt: Date.now() });
+  const accounts = await kvMGetJson([keys.positionsKey, keys.cashKey]);
+  if (!accounts) return []; // 읽기 실패: 시도 시각도 남기지 않아 다음 실행에서 다시 해요
+
+  const positions = accounts[keys.positionsKey] || {};
+  let cash = typeof accounts[keys.cashKey] === 'number' ? accounts[keys.cashKey] : keys.startingCash;
+  const targets = await fetchLongTermTargets(token);
+  const prices = {};
+  targets.forEach((t) => { prices[t.symbol] = t.price; });
+  await Promise.all(Object.keys(positions).filter((s) => !prices[s]).map(async (s) => {
+    const q = await fetchQuote(s);
+    if (q && q.price) prices[s] = q.price;
+  }));
+  const plan = targets.length >= MIN_TARGETS ? planRebalance(positions, cash, targets, prices) : null;
+  if (!plan) {
+    console.error('auto-trade-check.js(longterm): 조정을 미뤘어요. 받은 후보', targets.length);
+    await kvSetJson(LONGTERM_STATE_KEY, state);
+    return [];
+  }
+
+  const base = { date: today, market: 'KR', strategy: 'longterm', mode: 'dryrun', regime: cfg._regime || null };
+  const actions = [];
+  for (const o of plan.sells) {
+    const pos = positions[o.symbol];
+    const sell = planSell(costs, 'KR', o.qty, prices[o.symbol]);
+    const basis = positionCostBasis(costs, 'KR', pos) * (o.qty / pos.qty); // 일부만 팔면 원가도 그 비율만큼만 빼요
+    cash += sell.proceeds;
+    actions.push(Object.assign({}, base, {
+      ts: Date.now(), symbol: o.symbol, name: pos.name || o.symbol, side: 'REBALANCE', qty: o.qty, price: prices[o.symbol],
+      pnlPct: Math.round(((sell.proceeds - basis) / basis) * 10000) / 100,
+      grossPnlPct: Math.round(((prices[o.symbol] - pos.avgPrice) / pos.avgPrice) * 10000) / 100,
+      amount: Math.round(sell.proceeds), pnlAmount: Math.round(sell.proceeds - basis), fee: Math.round(sell.fee),
+      reason: '월간 비중 조정', entryDate: pos.entryDate || null, entryRegime: pos.entryRegime || null
+    }));
+    if (o.qty >= pos.qty) delete positions[o.symbol];
+    else positions[o.symbol] = Object.assign({}, pos, { qty: pos.qty - o.qty, costBasis: Math.round(positionCostBasis(costs, 'KR', pos) - basis) });
+  }
+  for (const o of plan.buys) {
+    const buy = planBuy(costs, 'KR', Math.min(o.budget, cash), o.price);
+    if (buy.qty < 1) continue;
+    cash -= buy.total;
+    const held = positions[o.symbol];
+    positions[o.symbol] = held
+      ? Object.assign({}, held, {
+        qty: held.qty + buy.qty,
+        avgPrice: Math.round((held.qty * held.avgPrice + buy.qty * o.price) / (held.qty + buy.qty)),
+        costBasis: Math.round(positionCostBasis(costs, 'KR', held) + buy.total)
+      })
+      : { qty: buy.qty, avgPrice: o.price, costBasis: Math.round(buy.total), entryDate: today, name: o.name, excd: null,
+        reason: '시가총액 상위', entryChangePct: null, entryRegime: cfg._regime || null };
+    actions.push(Object.assign({}, base, {
+      ts: Date.now(), symbol: o.symbol, name: o.name, side: 'BUY', qty: buy.qty, price: o.price,
+      amount: Math.round(buy.total), fee: Math.round(buy.fee), reason: '시가총액 상위', entryChangePct: null
+    }));
+  }
+
+  const index = await fetchKospi200(token);
+  state.lastMonth = today.slice(0, 7);
+  state.startDate = state.startDate || today;
+  state.rebalances = (state.rebalances || 0) + 1;
+  if (index) { state.startIndex = state.startIndex || index; state.lastIndex = index; state.indexDate = today; }
+  // 계좌와 조정 기록을 함께 저장해요. 실패하면 이번 매매를 기록하지 않고, 다음 실행에서 다시 판단해요.
+  const saved = await kvMSetJson({ [keys.positionsKey]: positions, [keys.cashKey]: cash, [LONGTERM_STATE_KEY]: state });
+  if (!saved) {
+    console.error('auto-trade-check.js(longterm): 계좌 저장 실패');
+    return [];
+  }
+  return actions;
 }
 
 export default async function handler(req, res) {
@@ -782,7 +911,7 @@ export default async function handler(req, res) {
   // 진화형·커스텀·시장적응형은 국내 전용이라, 국내장이 닫혀 있으면 읽지 않아요.
   const snap = await kvMGetJson([
     CONFIG_KEY, LOG_KEY, OVERRIDES_KEY, ADJUST_LASTRUN_KEY, COST_CONFIG_KEY, REGIME_CACHE_KEY, SCREEN_CACHE_KEY,
-    ...(krOpen ? [CUSTOM_STRATEGIES_KEY, EVOLVE_KEY, REGIME_LASTUSED_KEY, EVOLVED_FACTORS_KEY] : [])
+    ...(krOpen ? [CUSTOM_STRATEGIES_KEY, EVOLVE_KEY, REGIME_LASTUSED_KEY, EVOLVED_FACTORS_KEY, INTRADAY_STATE_KEY, LONGTERM_STATE_KEY] : [])
   ]);
   if (!snap) {
     res.status(503).json({ error: '저장소를 읽지 못해 이번 실행을 건너뛰었어요.' });
@@ -856,12 +985,27 @@ export default async function handler(req, res) {
       return;
     }
 
+    // 새 단타 전략은 장 초반 범위와 "평균 체결가에 닿은 시각"을 봐요. 바뀐 게 있을 때만 저장해서 평소엔 쓰기가 늘지 않아요.
+    // 시세는 8개씩 나눠 먼저 받아 둬요. 뒤에 도는 전략들은 받아 둔 값을 다시 써서 한꺼번에 몰리지 않아요.
+    const krMinutes = marketClock('KR').minutes;
+    if (krOpen && activeDefs.some((d) => d.usesIntradayState) &&
+      krMinutes >= hhmmToMin(INTRADAY_RULES.buyStart) - 1 && krMinutes < hhmmToMin(INTRADAY_RULES.buyEnd)) {
+      const quotes = [];
+      for (let i = 0; i < krCandidates.length; i += 8) {
+        const batch = await Promise.all(krCandidates.slice(i, i + 8).map((c) => fetchKrQuote(c.symbol)));
+        batch.forEach((q) => { if (q && q.price !== null) quotes.push(q); });
+      }
+      const { state, dirty } = updateIntradayState(snap[INTRADAY_STATE_KEY], quotes, krMinutes, today, Date.now());
+      cfg._intraday = state; // 이번 실행 동안만 쓰는 값(cfg._regime과 같은 방식, 설정에 저장되지 않음)
+      if (dirty) await kvSetJson(INTRADAY_STATE_KEY, state);
+    }
+
     // 전략끼리는 서로 다른 KV 키(현금/보유종목)를 쓰기 때문에 서로 영향을 주지 않아, 동시에(병렬로)
     // 처리해도 안전합니다 — 순서대로 하나씩 기다리던 것보다 전체 실행 시간이 훨씬 짧아집니다.
     await Promise.all(activeDefs.map(async (def) => {
       // 전략별로 AI가 자동 조정한 값(오버라이드)이 있으면 하드코딩된 기본값/사용자 설정 위에 덮어씁니다.
-      // (단타는 사용자 설정만 따르므로 오버라이드를 적용하지 않음)
-      const risk = def.intraday ? def.getRisk(cfg) : Object.assign({}, def.getRisk(cfg), overrides[def.id] || {});
+      // (규칙이 따로 정해진 전략은 오버라이드를 적용하지 않음)
+      const risk = def.ownRules ? def.getRisk(cfg) : Object.assign({}, def.getRisk(cfg), overrides[def.id] || {});
       const [krResult, usResult] = await Promise.all([
         processStrategyMarket(def, 'KR', fetchKrQuote, cfg, krCandidates, today, risk, apiKey, log, costs, accounts),
         def.krOnly
@@ -924,13 +1068,14 @@ export default async function handler(req, res) {
 
       // 가중치 기반 전략(진화형 1개 + 커스텀 여러 개)을 돌릴 목록으로 모읍니다 — 서로 다른 KV 키를 쓰니 병렬 처리 가능.
       const weightDefs = [];
-      if (evolvedStrategy) weightDefs.push({ id: 'evolved', name: '진화형(자동탐색)', strategy: evolvedStrategy });
-      customList.forEach((c) => weightDefs.push({ id: c.id, name: c.name, strategy: c }));
-      if (regimeStrategy) weightDefs.push({ id: 'regime-adaptive', name: '시장적응형(' + regimeLabelKo(regimeLabel) + ')', strategy: regimeStrategy });
+      if (evolvedStrategy) weightDefs.push({ id: 'evolved', name: '진화형(자동탐색)', strategy: evolvedStrategy, horizon: 'swing' });
+      customList.forEach((c) => weightDefs.push({ id: c.id, name: c.name, strategy: c, horizon: normalizeHorizon(c.horizon) }));
+      if (regimeStrategy) weightDefs.push({ id: 'regime-adaptive', name: '시장적응형(' + regimeLabelKo(regimeLabel) + ')', strategy: regimeStrategy, horizon: 'swing' });
 
       await Promise.all(weightDefs.map(async (wd) => {
         const def = {
-          id: wd.id, name: wd.name,
+          id: wd.id, name: wd.name, horizon: wd.horizon,
+          ...(wd.horizon === 'day' ? { intraday: true, dayRules: () => DAY_CLOSE_RULES } : {}),
           shouldBuy: (cand) => {
             const factors = factorMap.get(cand.symbol);
             if (!factors) return false;
@@ -942,6 +1087,21 @@ export default async function handler(req, res) {
         results[wd.id] = { kr: { cash: result.cash, positions: result.positions }, us: { cash: STARTING_CASH_US, positions: {} } };
         allActions.push(...result.actions);
       }));
+    }
+
+    // 장기 분산: 조정할 달이면 조정하고, 아니면 하루 한 번 코스피200만 적어요. 실패해도 다른 전략의 매매에는 영향이 없어요.
+    if (krOpen && strategiesEnabled.longterm !== false) {
+      try {
+        const ltState = snap[LONGTERM_STATE_KEY];
+        if (rebalanceDue(ltState, today, krMinutes, Date.now())) {
+          allActions.push(...await runLongTermRebalance(token, today, ltState, fetchKrQuote, costs, cfg));
+        } else if (indexUpdateDue(ltState, today, krMinutes)) {
+          const index = await fetchKospi200(token);
+          if (index) await kvSetJson(LONGTERM_STATE_KEY, Object.assign({}, ltState, { startIndex: ltState.startIndex || index, lastIndex: index, indexDate: today }));
+        }
+      } catch (e) {
+        console.error('auto-trade-check.js(longterm) error:', e);
+      }
     }
 
     // 이번 실행에서 생긴 모든 매매 기록을 한 번에 합쳐서 딱 한 번만 저장합니다.

@@ -28,6 +28,7 @@
   - `_strategies.js` 전략 이름·기본 규칙·가상계좌 키, `_daytrade.js` 단타 설정, `_ledger.js` 날짜별 손익 장부
   - `_learning.js` 학습하는 자동조정 규칙, `_scorecard.js` 채점표 계산, `_deepeval.js` 주간 AI 심층 평가서
   - `_picks.js` 종목 고르기 규칙·기록·성적표, `_reset.js` 모든 전략 초기화
+  - `_intraday.js` 새 단타 전략 판단·금액 규칙, `_longterm.js` 장기 분산 전략 규칙
 - 데이터 저장: Vercel KV(Upstash Redis). 로그인: Firebase Authentication.
 
 ## 반드시 지킬 규칙
@@ -59,6 +60,8 @@
   자동매매·현황·백테스트 모두 같은 비용 모델을 써야 한다. 수수료를 코드에 따로 하드코딩하지 말 것.
 - 전략 숫자 자동조정은 "지켜보기 → 실험 → 채점 → 교훈" 순환이다(규칙: `api/_learning.js`, 실행: `auto-trade-check.js`의
   `maybeRunLearningCycle`). 기준선(baseline)은 대조군이라 절대 자동/수동으로 바꾸지 않는다.
+- 전략은 보유 기간으로 단타·스윙·장기로 나눈다(`api/_strategies.js`의 `horizonOf`). 단타는 당일 청산, 스윙은 최대 20거래일,
+  장기는 월 1회 조정이다. 채점표는 같은 갈래끼리 묶고, 규칙이 고정된 전략(`FIXED_RULE_IDS`)은 자동조정 대상이 아니다.
 
 ## 작업 방식
 

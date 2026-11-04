@@ -94,7 +94,7 @@ export default async function handler(req, res) {
       failReason: ok ? null : (rows.length ? '종목 시세를 받지 못했어요.' : '거래대금 순위를 받지 못했어요.'),
       screen, ranked: rows.length,
       candidates: ok ? picks.map((c) => ({
-        symbol: c.symbol, name: c.name, price: c.price, changePct: c.changePct, pool: c.pool, capEok: c.capEok, tradeValue: c.tradeValue,
+        symbol: c.symbol, name: c.name, price: c.price, changePct: c.changePct, pool: c.pool, capEok: c.capEok, tradeValue: c.tradeValue, dayOnly: !!c.dayOnly,
         reason: `거래대금 ${c.rank}위(${eok(c.tradeValue)}), 시가총액 ${eok(c.capEok * 1e8)}`
       })) : [],
       excluded: rejected.map((r) => ({ symbol: r.symbol, name: r.name, why: r.why }))

@@ -32,7 +32,8 @@ import {
   planSell, positionCostBasis, estimateOverseasTax
 } from './_costs.js';
 import { DEFAULT_DAYTRADE, normalizeDaytrade, describeDaytrade } from './_daytrade.js';
-import { STRATEGY_IDS, STRATEGY_NAMES, WEIGHT_BASED_IDS, OWN_SETTINGS_IDS, BASE_RISK, keysFor } from './_strategies.js';
+import { STRATEGY_IDS, STRATEGY_NAMES, WEIGHT_BASED_IDS, OWN_SETTINGS_IDS, FIXED_RULE_IDS, BASE_RISK, keysFor, horizonOf, normalizeHorizon } from './_strategies.js';
+import { LONGTERM_STATE_KEY } from './_longterm.js';
 import { isSellSide, ensureBackfilled, DAILY_KEY_PREFIX, TRADES_KEY_PREFIX } from './_ledger.js';
 import { EXPERIMENTS_KEY, BEST_RISK_KEY, FLAGS_KEY, LEARN, lessonLine, VERDICT_TEXT } from './_learning.js';
 import {
@@ -95,7 +96,7 @@ const DEFAULT_CONFIG = {
   strategies: {
     momentum: true, pullback: true, breakout: true, reversal: true,
     scalp: true, selective: true, wideswing: true, baseline: true, daytrade: true, evolved: true,
-    'regime-adaptive': true
+    'regime-adaptive': true, 'opening-breakout': true, 'vwap-pullback': true, longterm: true
   },
   updatedAt: null
 };
@@ -254,9 +255,9 @@ async function handleStrategies(req, res) {
 // 카드 목록과 AI 상담(get_overview)이 같이 쓰는 "전략 목록 만들기"
 async function buildStrategyList() {
   {
-    const [cfgRaw, overrides, customList, experiments, flags] = await Promise.all([
+    const [cfgRaw, overrides, customList, experiments, flags, longterm] = await Promise.all([
       kvGetJson(CONFIG_KEY, null), kvGetJson(OVERRIDES_KEY, {}), kvGetJson(CUSTOM_KEY, []),
-      kvGetJson(EXPERIMENTS_KEY, []), kvGetJson(FLAGS_KEY, {})
+      kvGetJson(EXPERIMENTS_KEY, []), kvGetJson(FLAGS_KEY, {}), kvGetJson(LONGTERM_STATE_KEY, null)
     ]);
     // 카드에 보여줄 학습 상태: 지금 실험/관찰 중인지, 몇 건 쌓였는지, 최근 채점 결과
     function learningOf(id) {
@@ -276,6 +277,7 @@ async function buildStrategyList() {
     const list = STRATEGY_IDS.map((id) => {
       let kind = 'builtin', risk = null, daytrade = null;
       if (WEIGHT_BASED_IDS.includes(id)) kind = 'weight';
+      else if (FIXED_RULE_IDS.includes(id)) kind = 'fixed';
       else if (id === 'daytrade') {
         kind = 'daytrade';
         daytrade = normalizeDaytrade(cfg.daytrade);
@@ -284,10 +286,11 @@ async function buildStrategyList() {
         const base = id === 'momentum' ? Object.assign({}, BASE_RISK.momentum, cfg.risk || {}) : BASE_RISK[id];
         risk = clipRisk(Object.assign({}, base, overrides[id] || {}), base);
       }
-      return { id, name: STRATEGY_NAMES[id], kind, enabled: enabledMap[id] !== false, hidden: hidden.includes(id), risk, daytrade, learning: learningOf(id) };
+      return { id, name: STRATEGY_NAMES[id], kind, horizon: horizonOf(id), enabled: enabledMap[id] !== false, hidden: hidden.includes(id), risk, daytrade, learning: learningOf(id),
+        ...(id === 'longterm' ? { longterm } : {}) };
     });
     customList.forEach((c) => list.push({
-      id: c.id, name: c.name, kind: 'custom', enabled: c.enabled !== false, hidden: false, risk: null, createdAt: c.createdAt || null
+      id: c.id, name: c.name, kind: 'custom', horizon: normalizeHorizon(c.horizon), enabled: c.enabled !== false, hidden: false, risk: null, createdAt: c.createdAt || null
     }));
     return list;
   }
@@ -345,7 +348,8 @@ async function handleResetAccount(req, res) {
     const custom = customList.find((c) => c.id === id);
     if (!STRATEGY_IDS.includes(id) && !custom) { res.status(400).json({ error: '알 수 없는 전략입니다.' }); return; }
     const kr = keysFor(id, 'KR'), us = keysFor(id, 'US');
-    await Promise.all([kr.positionsKey, kr.cashKey, us.positionsKey, us.cashKey].map((k) => kvCommand(['DEL', k])));
+    // 장기 전략은 계좌를 비우면 다음 달까지 기다리지 말고 바로 다시 담아야 해서 조정 기록도 지워요.
+    await Promise.all([kr.positionsKey, kr.cashKey, us.positionsKey, us.cashKey].concat(id === 'longterm' ? [LONGTERM_STATE_KEY] : []).map((k) => kvCommand(['DEL', k])));
 
     const name = custom ? custom.name : STRATEGY_NAMES[id];
     const changes = await kvGetJson(CHANGES_KEY, []);
@@ -578,7 +582,7 @@ async function buildScorecard() {
     id, trades: trades.filter((t) => (t.strategy || 'momentum') === id), accountPct: pctOf(id),
     experiments: experiments.filter((e) => e.strategyId === id), histories,
     startingCash: { KR: accounts[id].kr.startingCash, US: accounts[id].us.startingCash },
-    learnable: isLearnable(id, customList), isDaytrade: id === 'daytrade'
+    learnable: isLearnable(id, customList), isDaytrade: horizonOf(id, customList) === 'day'
   });
   // 수익성은 같은 기간 기준선(대조군)의 확정 손익과 비교해요
   const baselineRes = analyze('baseline');
@@ -588,14 +592,17 @@ async function buildScorecard() {
     const res = id === 'baseline' ? baselineRes : analyze(id);
     const profit = scoreProfit(res.analysis, baselineRes.realizedPct, id === 'baseline');
     if (profit) res.cats.profit = profit;
-    const total = totalOf(res.cats, weights);
+    // 장기 전략은 한 달에 한 번만 움직여서 며칠 단위 채점 항목이 맞지 않아요. 점수를 매기지 않고 수익률로만 봐요.
+    const horizon = horizonOf(id, customList);
+    if (horizon === 'long') res.cats = {};
+    const total = horizon === 'long' ? null : totalOf(res.cats, weights);
     let risk = null;
     if (BASE_RISK[id]) risk = Object.assign({}, id === 'momentum' ? Object.assign({}, BASE_RISK.momentum, cfg.risk || {}) : BASE_RISK[id], overrides[id] || {});
     const prev = weekAgo && weekAgo.totals ? weekAgo.totals[id] : null;
     return {
-      id, name: names[id], enabled: custom ? custom.enabled !== false : enabledMap[id] !== false,
+      id, name: names[id], horizon, enabled: custom ? custom.enabled !== false : enabledMap[id] !== false,
       total, grade: gradeOf(total), trend: (typeof prev === 'number' && typeof total === 'number') ? total - prev : null,
-      cats: res.cats, sells: res.sells, buys: res.buys, confidence: res.confidence, risk,
+      cats: res.cats, sells: res.sells, buys: res.buys, confidence: horizon === 'long' ? '판단 전(최소 1년)' : res.confidence, risk,
       flag: flags[id] ? flags[id].note : null,
       lessons: mine.filter((e) => e.status === 'judged').slice(0, 5).map(lessonLine)
     };
@@ -622,7 +629,7 @@ async function buildScorecard() {
 }
 
 function isLearnable(id, customList) {
-  return !WEIGHT_BASED_IDS.includes(id) && id !== 'baseline' && id !== 'daytrade' && !customList.find((c) => c.id === id);
+  return !WEIGHT_BASED_IDS.includes(id) && !OWN_SETTINGS_IDS.includes(id) && id !== 'baseline' && !customList.find((c) => c.id === id);
 }
 
 // ---- 전략 상세 성적표: 기간(7·30·90일·전체) 선택, 부문별 세부 지표 + 기준선 같은 지표, 개선 가이드, 나눠 보기 ----
@@ -672,7 +679,7 @@ async function buildScorecardDetail(id, period) {
   const run = (sid, list) => scoreStrategy({
     id: sid, trades: list, accountPct: pctOf(sid), experiments: experiments.filter((e) => e.strategyId === sid), histories,
     startingCash: { KR: accounts[sid].kr.startingCash, US: accounts[sid].us.startingCash },
-    learnable: isLearnable(sid, customList), isDaytrade: sid === 'daytrade'
+    learnable: isLearnable(sid, customList), isDaytrade: horizonOf(sid, customList) === 'day'
   });
   const base = run('baseline', baseTrades);
   const mine = id === 'baseline' ? base : run(id, mineTrades);
@@ -1102,6 +1109,7 @@ async function handleCustom(req, res) {
         buyThreshold: body.buyThreshold,
         exit: body.exit || {},
         sizing: body.sizing || {},
+        horizon: normalizeHorizon(body.horizon),
         enabled: true,
         createdAt: Date.now()
       };
@@ -1342,7 +1350,7 @@ async function handleLog(req, res) {
 
     // "오늘 단타 성적" — 화면에 보내는 log는 최근 80건뿐이라, 하루 매매가 많아도 정확하도록 전체 log에서 여기서 계산합니다.
     const today = todayKST();
-    const dtToday = log.filter((e) => e.strategy === 'daytrade' && e.date === today);
+    const dtToday = log.filter((e) => horizonOf(e.strategy, customList) === 'day' && e.date === today);
     const dtSells = dtToday.filter((e) => isSellSide(e.side));
     const daytradeToday = {
       date: today,

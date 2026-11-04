@@ -6,6 +6,7 @@
 //   1) 거래대금 상위 N개를 받아요(거래가 많아야 원하는 가격에 사고팔기 쉬워요).
 //   2) 시가총액, 위험 표시(관리·경고·단기과열 등), 오늘 등락폭으로 걸러요.
 //   3) 남은 종목을 거래대금 순으로 최대 M개까지 후보로 써요.
+//      등락이 큰 종목(스윙 기준 초과 ~ 단타 기준 이내)은 "단타 전용" 후보로 따로 최대 10개까지 더해요. 스윙 전략은 사지 않아요.
 //   4) 고른 종목과 뺀 종목을 기록해 두고, 3거래일 뒤 실제로 어떻게 됐는지 채점해 성적표를 만들어요.
 // 거래대금 상위에는 급등 테마주도 많이 올라오므로, 거래대금만으로는 안전하지 않아서 2)가 꼭 필요해요.
 // 시가총액·위험 표시를 확인하지 못한 종목은 안전한지 알 수 없으니 뺍니다.
@@ -40,7 +41,9 @@ export function screenIsFresh(cached, nowMs) {
 export const POOL_LABEL = { value: '거래대금 상위', rise: '오르는 중', calm: '조금 오른 활발한 종목', fall: '떨어진 탄탄한 종목' };
 
 // 화면에서 바꿀 수 있는 기준 (자동매매 설정 cfg.screen에 저장)
-export const DEFAULT_SCREEN = { topN: 30, minCapEok: 10000, maxAbsChangePct: 10, maxPicks: 15 };
+// maxAbsChangePct는 스윙 후보 기준, dayMaxAbsChangePct는 단타 후보 기준이에요.
+export const DEFAULT_SCREEN = { topN: 30, minCapEok: 10000, maxAbsChangePct: 10, dayMaxAbsChangePct: 25, maxPicks: 20 };
+const MAX_DAY_ONLY_PICKS = 10; // 전체 후보가 너무 늘면 1분마다 조회할 종목도 늘어나서 상한을 둬요
 
 function clipNum(v, lo, hi, fallback) {
   const n = Number(v);
@@ -50,11 +53,15 @@ function clipNum(v, lo, hi, fallback) {
 
 export function normalizeScreen(raw) {
   const r = raw || {}, d = DEFAULT_SCREEN;
+  const maxAbsChangePct = clipNum(r.maxAbsChangePct, 1, 30, d.maxAbsChangePct);
+  // 단타 기준이 생기기 전에 저장된 옛 기본값(15개)은 새 기본값(20개)으로 올려요. 사용자가 새 화면에서 저장한 값은 그대로 따라요.
+  const oldDefault = r.dayMaxAbsChangePct === undefined && Number(r.maxPicks) === 15;
   return {
     topN: Math.round(clipNum(r.topN, 5, 30, d.topN)), // KIS 순위 API가 한 번에 최대 30개를 줘요
     minCapEok: Math.round(clipNum(r.minCapEok, 0, 1000000, d.minCapEok)), // 억 원 단위 (10000 = 1조)
-    maxAbsChangePct: clipNum(r.maxAbsChangePct, 1, 30, d.maxAbsChangePct),
-    maxPicks: Math.round(clipNum(r.maxPicks, 1, 30, d.maxPicks))
+    maxAbsChangePct,
+    dayMaxAbsChangePct: Math.max(maxAbsChangePct, clipNum(r.dayMaxAbsChangePct, 1, 30, d.dayMaxAbsChangePct)),
+    maxPicks: oldDefault ? d.maxPicks : Math.round(clipNum(r.maxPicks, 1, 30, d.maxPicks))
   };
 }
 
@@ -73,7 +80,7 @@ export function safetyReason(row, q, cfg) {
   // 시장경고코드: 00 없음, 01 투자주의, 02 투자경고, 03 투자위험
   if (q.mrkt_warn_cls_code && q.mrkt_warn_cls_code !== '00') return '시장경고(투자주의·경고·위험)';
   if (row.changePct === null || row.changePct === undefined) return '등락률을 확인하지 못함';
-  if (Math.abs(row.changePct) > cfg.maxAbsChangePct) return `오늘 등락폭이 큼(${row.changePct}%)`;
+  if (Math.abs(row.changePct) > (cfg.dayMaxAbsChangePct === undefined ? cfg.maxAbsChangePct : cfg.dayMaxAbsChangePct)) return `오늘 등락폭이 큼(${row.changePct}%)`;
   return null;
 }
 
@@ -81,12 +88,16 @@ export function safetyReason(row, q, cfg) {
 export function selectByValue(rows, quotes, cfg) {
   const sorted = rows.slice().sort((a, b) => (b.tradeValue || 0) - (a.tradeValue || 0));
   const picks = [], rejected = [];
+  let swingCount = 0, dayOnlyCount = 0;
   sorted.forEach((row, i) => {
     const q = quotes[row.symbol];
     const why = safetyReason(row, q, cfg);
     const item = Object.assign({}, row, { rank: i + 1, pool: 'value', capEok: q && Number.isFinite(Number(q.hts_avls)) ? Number(q.hts_avls) : null });
     if (why) rejected.push(Object.assign(item, { why }));
-    else if (picks.length < cfg.maxPicks) picks.push(item);
+    else if (Math.abs(row.changePct) > cfg.maxAbsChangePct) {
+      if (dayOnlyCount < MAX_DAY_ONLY_PICKS) { dayOnlyCount++; picks.push(Object.assign(item, { dayOnly: true })); }
+      else rejected.push(Object.assign(item, { why: '단타 전용 후보 개수 제한(' + MAX_DAY_ONLY_PICKS + '개까지)' }));
+    } else if (swingCount < cfg.maxPicks) { swingCount++; picks.push(item); }
     else rejected.push(Object.assign(item, { why: '개수 제한(거래대금 순으로 ' + cfg.maxPicks + '개까지)' }));
   });
   return { picks, rejected };

@@ -39,7 +39,7 @@ export const REGIME_TREND_KO = { bull: '상승장', bear: '하락장', sideways:
 const clamp = (v) => Math.max(0, Math.min(100, Math.round(v)));
 const r2 = (v) => (v === null || v === undefined || !Number.isFinite(v) ? null : Math.round(v * 100) / 100);
 const avg = (xs) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : null);
-const isSell = (s) => s === 'STOP_LOSS' || s === 'TAKE_PROFIT' || s === 'DAY_CLOSE';
+const isSell = (s) => s === 'STOP_LOSS' || s === 'TAKE_PROFIT' || s === 'DAY_CLOSE' || s === 'MAX_HOLD' || s === 'REBALANCE';
 const pctStr = (v) => (v === null ? '—' : (v >= 0 ? '+' : '') + r2(v) + '%');
 
 export function gradeOf(score) {
