@@ -17,14 +17,15 @@
 // 환경변수 AUTO_TRADE_SECRET과 일치할 때만 동작합니다.
 
 import { getKisToken, kisHeaders, num, KIS_BASE } from './_kis.js';
-import { kvGetJson, kvSetJson, kvReady } from './_kv.js';
+import { kvGetJson, kvSetJson, kvMGetJson, kvMSetJson, kvReady } from './_kv.js';
 import { fetchSymbolHistory, annotateWithFactors, scoreForStrategy, classifyRegimeByDate } from './_backtest-core.js';
-import { loadCosts, planBuy, planSell, positionCostBasis, fetchUsdKrw, REALIZED_KEY_PREFIX } from './_costs.js';
+import { normalizeCosts, COST_CONFIG_KEY, planBuy, planSell, positionCostBasis, fetchUsdKrw, REALIZED_KEY_PREFIX } from './_costs.js';
 import { normalizeDaytrade, hhmmToMin } from './_daytrade.js';
 import { BASE_RISK, keysFor, STARTING_CASH_US } from './_strategies.js';
 import { isSellSide, recordEntries, ensureBackfilled } from './_ledger.js';
 import { askClaude, extractJson } from './_ai.js'; // AI 호출 공용 창구(사용량·예산·실패 이유 기록)
-import { resetAllStrategies, RESET_INFO_KEY } from './_reset.js';
+import { RESET_INFO_KEY } from './_reset.js';
+import { SCREEN_CACHE_KEY, beforeFirstPick, screenIsFresh } from './_picks.js';
 import {
   EXPERIMENTS_KEY, BEST_RISK_KEY, FLAGS_KEY, MAX_EXPERIMENTS, LEARN, RISK_FIELDS, RISK_LABELS,
   summarize, clampProposal, liftToFloors, judge, readyToJudge, forbiddenDirections, applyForbidden, lessonLine
@@ -36,7 +37,6 @@ export const config = { maxDuration: 30 };
 const CONFIG_KEY = 'autotrade:config';
 const LOG_KEY = 'autotrade:log';
 const MAX_LOG = 400;
-const ONE_TIME_RESET_KEY = 'autotrade:reset-done:2026-11-value-picks';
 
 // ---- 전략 자동 조정(설정한 주기마다, "전략 변경 이력" 탭에서 보이는 기록) ----
 const OVERRIDES_KEY = 'autotrade:strategy-overrides'; // 전략별로 자동 조정된 손절/익절/비중/매매한도
@@ -71,8 +71,7 @@ function regimeLabelKo(label) {
 
 // 오늘의 시장 상황(구간)을 분류합니다. 하루 안에서는 결과가 바뀌지 않으니 캐시해서 재사용합니다
 // (진화형 팩터 캐시와 같은 원칙 — EVOLVED_FACTORS_KEY 주석 참고).
-async function classifyTodayRegime(token, krCandidates, today) {
-  const cached = await kvGetJson(REGIME_CACHE_KEY, null);
+async function classifyTodayRegime(token, krCandidates, today, cached) {
   if (cached && cached.date === today) return cached.label;
 
   const sample = krCandidates.slice(0, REGIME_SAMPLE_SIZE);
@@ -256,23 +255,26 @@ async function fetchOverseasQuote(token, symbol, preferredExcd) {
   return null;
 }
 
-async function loadCandidateSymbols(cfg, req) {
+async function loadCandidateSymbols(cfg, req, cachedScreen) {
   const symbols = new Map();
   (cfg.symbols || []).forEach((s) => symbols.set(s, { symbol: s, name: null, reason: '관심종목' }));
 
   // 국내 장이 열렸을 때만 불러요(미국장 시간에 국내 순위를 볼 이유가 없어서). useAiCandidates는 옛 이름 그대로 쓰는 "거래대금 상위 종목 감시" 설정이에요.
   if (cfg.useAiCandidates && marketClock('KR').open) {
     try {
-      const proto = req.headers['x-forwarded-proto'] || 'https';
-      const host = req.headers.host;
-      const r = await fetch(`${proto}://${host}/api/screen-candidates`);
-      if (r.ok) {
-        const data = await r.json();
-        (data.candidates || []).forEach((c) => {
-          // (거래대금 상위 고르기는 국내 종목만 지원합니다.)
-          if (!symbols.has(c.symbol)) symbols.set(c.symbol, { symbol: c.symbol, name: c.name || null, reason: c.reason });
-        });
+      // 이미 저장된 결과가 유효하면 그대로 써요. 새로 고를 때만 고르기 함수를 불러서, 호출 횟수를 아껴요.
+      let data = null;
+      if (screenIsFresh(cachedScreen, Date.now())) data = cachedScreen;
+      else if (!beforeFirstPick(Date.now())) {
+        const proto = req.headers['x-forwarded-proto'] || 'https';
+        const host = req.headers.host;
+        const r = await fetch(`${proto}://${host}/api/screen-candidates`);
+        if (r.ok) data = await r.json();
       }
+      ((data && data.candidates) || []).forEach((c) => {
+        // (거래대금 상위 고르기는 국내 종목만 지원합니다.)
+        if (!symbols.has(c.symbol)) symbols.set(c.symbol, { symbol: c.symbol, name: c.name || null, reason: c.reason });
+      });
     } catch (e) {
       console.error('auto-trade-check: 거래대금 후보 조회 실패', e);
     }
@@ -378,10 +380,10 @@ function pushChange(changes, entry) {
 
 // 설정에서 정한 주기(cfg.adjustIntervalHours, 기본 24시간)마다 한 번 돌아요(스케줄러가 더 자주 불러도 건너뜀).
 // 돌려받는 overrides(전략별 지금 적용 중인 숫자)는 이번 매매에 바로 쓰여요.
-async function maybeRunLearningCycle(cfg, today, log) {
-  const overrides = await kvGetJson(OVERRIDES_KEY, {});
+async function maybeRunLearningCycle(cfg, today, log, snap) {
+  const overrides = snap[OVERRIDES_KEY] || {};
   const intervalHours = Math.max(1, Math.min(168, Number(cfg.adjustIntervalHours) || 24));
-  const lastRunTs = await kvGetJson(ADJUST_LASTRUN_KEY, 0);
+  const lastRunTs = snap[ADJUST_LASTRUN_KEY] || 0;
   if (Date.now() < (typeof lastRunTs === 'number' ? lastRunTs : 0) + intervalHours * 3600 * 1000) return overrides;
   await kvSetJson(ADJUST_LASTRUN_KEY, Date.now()); // 중간에 실패해도 같은 주기 안에서 무한 재시도하지 않게 먼저 기록
 
@@ -557,13 +559,15 @@ async function recordLearningSamples(actions) {
 }
 
 // 여러 전략이 같은 후보군을 동시에 평가하므로, 이번 실행 동안은 종목별 시세를 한 번만 조회해서
-// 캐시로 재사용합니다(전략 3개 x 시장 2개 = 최대 6번 반복 조회하던 걸 줄여서 실행시간 제한을 지킵니다).
+// 캐시로 재사용합니다. 전략들이 동시에 돌기 때문에 결과가 아니라 "진행 중인 요청"을 저장해요.
+// 결과를 저장하면 첫 응답이 오기 전에 전략마다 같은 종목을 또 조회해서, KIS 초당 호출 제한에 걸릴 수 있어요.
 function makeQuoteFetcher(token, marketKey, cache) {
-  return async function fetchQuote(symbol, preferredExcd) {
-    if (cache.has(symbol)) return cache.get(symbol);
-    const q = marketKey === 'KR' ? await fetchDomesticQuote(token, symbol) : await fetchOverseasQuote(token, symbol, preferredExcd);
-    cache.set(symbol, q);
-    return q;
+  return function fetchQuote(symbol, preferredExcd) {
+    if (!cache.has(symbol)) {
+      const request = marketKey === 'KR' ? fetchDomesticQuote(token, symbol) : fetchOverseasQuote(token, symbol, preferredExcd);
+      cache.set(symbol, request.catch(() => null)); // 한 종목이 실패해도 그 종목만 이번 실행에서 건너뛰어요
+    }
+    return cache.get(symbol);
   };
 }
 
@@ -573,15 +577,16 @@ function makeQuoteFetcher(token, marketKey, cache) {
 // costs: _costs.js의 매매 비용 설정(수수료·거래세·환전) — 살 때/팔 때 실제로 빠지는 돈을 반영해서,
 // 가상계좌 현금과 기록되는 손익(pnlPct/pnlAmount)이 실제 계좌에 남는 돈과 최대한 같아지게 합니다.
 // 손절/익절 "발동" 기준은 증권사 주문처럼 주가 등락률(가격 기준) 그대로 두고, 기록되는 손익만 비용을 뺀 값으로 남깁니다.
-async function processStrategyMarket(strategyDef, marketKey, fetchQuote, cfg, candidates, today, risk, apiKey, log, costs) {
-  const keys = keysFor(strategyDef.id, marketKey);
-  const positions = await kvGetJson(keys.positionsKey, {});
-  let cash = await kvGetJson(keys.cashKey, keys.startingCash);
-  if (typeof cash !== 'number') cash = keys.startingCash;
-
+// accounts: handler가 명령 1번으로 함께 읽어 둔 계좌 값이에요.
+async function processStrategyMarket(strategyDef, marketKey, fetchQuote, cfg, candidates, today, risk, apiKey, log, costs, accounts) {
   // 장이 닫혀 있으면 아무것도 하지 않습니다(손절·익절도 — 닫힌 장의 가격으론 실제로 팔 수 없으니까요).
   const clock = marketClock(marketKey);
-  if (!clock.open) return { actions: [], cash, positions };
+  if (!clock.open) return { actions: [], cash: null, positions: null };
+
+  const keys = keysFor(strategyDef.id, marketKey);
+  const positions = accounts[keys.positionsKey] || {};
+  let cash = accounts[keys.cashKey];
+  if (typeof cash !== 'number') cash = keys.startingCash;
   const intraday = !!strategyDef.intraday;
   const dt = intraday ? normalizeDaytrade(cfg.daytrade) : null; // 단타 설정(시간·손실한도·재매수 대기)
 
@@ -698,8 +703,15 @@ async function processStrategyMarket(strategyDef, marketKey, fetchQuote, cfg, ca
     }
   }
 
-  await kvSetJson(keys.positionsKey, positions);
-  await kvSetJson(keys.cashKey, cash);
+  // 매매가 없으면 계좌가 그대로라 저장하지 않아요. 저장에 실패하면 이번 매매를 기록하지 않아요:
+  // 계좌는 그대로인데 매매 기록만 남으면 장부가 어긋나고, 그대로 두면 다음 실행 때 같은 판단을 다시 할 수 있어요.
+  if (actions.length) {
+    const saved = await kvMSetJson({ [keys.positionsKey]: positions, [keys.cashKey]: cash });
+    if (!saved) {
+      console.error('auto-trade-check.js: 계좌 저장 실패', strategyDef.id, marketKey);
+      return { actions: [], cash: null, positions: null };
+    }
+  }
 
   return { actions, cash, positions };
 }
@@ -758,24 +770,27 @@ export default async function handler(req, res) {
     return;
   }
 
-  // 종목 선정 방식을 바꾸면서 하는 1회 초기화: 지난 성적의 절반 이상이 장이 닫혔을 때 산 거래라 비교 기준이 안 돼요.
-  // 사용자 요청으로 새 방식 배포 뒤 처음 실행될 때 딱 한 번 돌아요(표시를 남겨서 다시는 안 돌아요). 장이 닫혀 있어도 돌아요.
-  if (!(await kvGetJson(ONE_TIME_RESET_KEY, null))) {
-    await resetAllStrategies({
-      resetAccounts: true, today: todayKST(),
-      reason: '종목 선정을 "거래대금 상위 + 안전 기준"으로 바꾸면서, 사용자 요청으로 모든 전략을 처음 값으로 되돌리고 새로 시작했어요.'
-    });
-    await kvSetJson(ONE_TIME_RESET_KEY, { at: Date.now() });
-  }
-
-  const cfg = await kvGetJson(CONFIG_KEY, null);
-  if (!cfg || !cfg.enabled) {
-    res.status(200).json({ skipped: true, reason: 'disabled' });
+  // 국내·미국 둘 다 장이 닫혀 있으면 저장소도 안 읽고 바로 끝냅니다(스케줄러가 1분마다 불러도 낭비 없음).
+  const krOpen = marketClock('KR').open, usOpen = marketClock('US').open;
+  if (!krOpen && !usOpen) {
+    res.status(200).json({ skipped: true, reason: 'market-closed' });
     return;
   }
-  // 국내·미국 둘 다 장이 닫혀 있으면 시세 조회·AI 호출 없이 바로 끝냅니다(스케줄러가 자주 불러도 낭비 없음).
-  if (!marketClock('KR').open && !marketClock('US').open) {
-    res.status(200).json({ skipped: true, reason: 'market-closed' });
+
+  // 저장소 무료 한도가 "명령 횟수" 기준이라, 이번 실행에 필요한 값을 명령 1번으로 함께 읽어요.
+  // 읽기에 실패하면 이번 실행을 통째로 건너뜁니다. 그대로 진행하면 계좌가 빈 것으로 보여서 덮어쓸 수 있어요.
+  // 진화형·커스텀·시장적응형은 국내 전용이라, 국내장이 닫혀 있으면 읽지 않아요.
+  const snap = await kvMGetJson([
+    CONFIG_KEY, LOG_KEY, OVERRIDES_KEY, ADJUST_LASTRUN_KEY, COST_CONFIG_KEY, REGIME_CACHE_KEY, SCREEN_CACHE_KEY,
+    ...(krOpen ? [CUSTOM_STRATEGIES_KEY, EVOLVE_KEY, REGIME_LASTUSED_KEY, EVOLVED_FACTORS_KEY] : [])
+  ]);
+  if (!snap) {
+    res.status(503).json({ error: '저장소를 읽지 못해 이번 실행을 건너뛰었어요.' });
+    return;
+  }
+  const cfg = snap[CONFIG_KEY];
+  if (!cfg || !cfg.enabled) {
+    res.status(200).json({ skipped: true, reason: 'disabled' });
     return;
   }
 
@@ -783,7 +798,7 @@ export default async function handler(req, res) {
     const token = await getKisToken();
     const today = todayKST();
 
-    const allCandidates = await loadCandidateSymbols(cfg, req);
+    const allCandidates = await loadCandidateSymbols(cfg, req, snap[SCREEN_CACHE_KEY]);
     const krCandidates = allCandidates.filter((c) => /^\d{6}$/.test(c.symbol));
     const usCandidates = allCandidates.filter((c) => !/^\d{6}$/.test(c.symbol));
 
@@ -800,7 +815,7 @@ export default async function handler(req, res) {
     // cfg._regime은 이번 실행 동안만 쓰는 값이에요(설정에 저장되지 않음).
     try {
       // 09:30 전처럼 후보가 너무 적으면 한두 종목만 보고 하루치를 판단하게 되니, 저장된 값을 그대로 써요.
-      cfg._regime = krCandidates.length >= 3 ? await classifyTodayRegime(token, krCandidates, today) : ((await kvGetJson(REGIME_CACHE_KEY, null)) || {}).label || null;
+      cfg._regime = krCandidates.length >= 3 ? await classifyTodayRegime(token, krCandidates, today, snap[REGIME_CACHE_KEY]) : (snap[REGIME_CACHE_KEY] || {}).label || null;
     } catch (e) {
       cfg._regime = null;
     }
@@ -811,11 +826,35 @@ export default async function handler(req, res) {
     // 전체 매매 로그는 이번 실행에서 딱 한 번만 읽어옵니다. 각 전략이 "오늘 몇 번 매매했는지" 셀 때
     // 이 메모리 안의 log만 참조하고, 새로 생긴 매매는 맨 끝에서 한 번만 합쳐서 저장합니다
     // (전략마다 매번 KV에서 로그를 다시 읽고/쓰던 것을 없애, 동시 실행 시 덮어쓰기 충돌 위험도 줄입니다).
-    const log = await kvGetJson(LOG_KEY, []);
+    const log = snap[LOG_KEY] || [];
 
     const apiKey = process.env.ANTHROPIC_API_KEY;
-    const overrides = await maybeRunLearningCycle(cfg, today, log);
-    const costs = await loadCosts(); // 매매 비용 설정(기본: 토스증권) — 자동매매 탭에서 바꿀 수 있음
+    const overrides = await maybeRunLearningCycle(cfg, today, log, snap);
+    const costs = normalizeCosts(snap[COST_CONFIG_KEY] || null); // 매매 비용 설정(기본: 토스증권) — 자동매매 탭에서 바꿀 수 있음
+
+    // 가중치 전략(진화형·커스텀·시장적응형)은 국내 전용이에요. 국내장이 닫혀 있으면 아래 목록이 비어서 건너뛰어요.
+    const customList = krOpen ? (snap[CUSTOM_STRATEGIES_KEY] || []).filter((c) => c.enabled !== false) : [];
+    const evolveState = krOpen && strategiesEnabled.evolved !== false ? snap[EVOLVE_KEY] : null;
+    const evolvedStrategy = evolveState && evolveState.globalBest && evolveState.globalBest.strategy;
+    const regimeLabel = krOpen && strategiesEnabled['regime-adaptive'] !== false
+      ? (cfg._regime || await classifyTodayRegime(token, krCandidates, today, snap[REGIME_CACHE_KEY]))
+      : null;
+
+    // 이번 실행에서 쓸 계좌를 명령 1번으로 함께 읽어요. 열린 시장의 계좌만 읽습니다.
+    const accountKeys = [];
+    const addAccount = (id, market) => { const k = keysFor(id, market); accountKeys.push(k.positionsKey, k.cashKey); };
+    activeDefs.forEach((def) => {
+      if (krOpen) addAccount(def.id, 'KR');
+      if (usOpen && !def.krOnly) addAccount(def.id, 'US');
+    });
+    if (evolvedStrategy) addAccount('evolved', 'KR');
+    customList.forEach((c) => addAccount(c.id, 'KR'));
+    if (regimeLabel) { addAccount('regime-adaptive', 'KR'); accountKeys.push(REGIME_KEY_PREFIX + regimeLabel); }
+    const accounts = await kvMGetJson(accountKeys);
+    if (!accounts) {
+      res.status(503).json({ error: '저장소를 읽지 못해 이번 실행을 건너뛰었어요.' });
+      return;
+    }
 
     // 전략끼리는 서로 다른 KV 키(현금/보유종목)를 쓰기 때문에 서로 영향을 주지 않아, 동시에(병렬로)
     // 처리해도 안전합니다 — 순서대로 하나씩 기다리던 것보다 전체 실행 시간이 훨씬 짧아집니다.
@@ -824,10 +863,10 @@ export default async function handler(req, res) {
       // (단타는 사용자 설정만 따르므로 오버라이드를 적용하지 않음)
       const risk = def.intraday ? def.getRisk(cfg) : Object.assign({}, def.getRisk(cfg), overrides[def.id] || {});
       const [krResult, usResult] = await Promise.all([
-        processStrategyMarket(def, 'KR', fetchKrQuote, cfg, krCandidates, today, risk, apiKey, log, costs),
+        processStrategyMarket(def, 'KR', fetchKrQuote, cfg, krCandidates, today, risk, apiKey, log, costs, accounts),
         def.krOnly
           ? { actions: [], cash: STARTING_CASH_US, positions: {} } // 국내 전용 전략(단타)은 해외 계좌를 쓰지 않음
-          : processStrategyMarket(def, 'US', fetchUsQuote, cfg, usCandidates, today, risk, apiKey, log, costs)
+          : processStrategyMarket(def, 'US', fetchUsQuote, cfg, usCandidates, today, risk, apiKey, log, costs, accounts)
       ]);
       results[def.id] = { kr: { cash: krResult.cash, positions: krResult.positions }, us: { cash: usResult.cash, positions: usResult.positions } };
       allActions.push(...krResult.actions, ...usResult.actions);
@@ -836,19 +875,14 @@ export default async function handler(req, res) {
     // ---- 진화형(자동탐색) + 커스텀 전략 — 둘 다 "가중치 점수 ≥ 매수기준"이면 사는 같은 방식이라
     // (국내 종목만 지원), 종목별 팩터 계산을 한 번만 해서 같이 씁니다.
     // 위에서 이미 데운(캐시에 들어있는) 시세를 그대로 재사용하도록, 다른 전략들 처리가 끝난 뒤에 실행합니다.
-    const customList = (await kvGetJson(CUSTOM_STRATEGIES_KEY, [])).filter((c) => c.enabled !== false);
-    const evolveState = strategiesEnabled.evolved !== false ? await kvGetJson(EVOLVE_KEY, null) : null;
-    const evolvedStrategy = evolveState && evolveState.globalBest && evolveState.globalBest.strategy;
-
     // 시장적응형: 오늘의 시장 상황(구간)을 분류하고, backtest.js가 그 구간 전용으로 찾아둔 전략을 가져옵니다.
-    let regimeStrategy = null, regimeLabel = null;
-    if (strategiesEnabled['regime-adaptive'] !== false) {
-      regimeLabel = cfg._regime || await classifyTodayRegime(token, krCandidates, today);
-      const regimeState = await kvGetJson(REGIME_KEY_PREFIX + regimeLabel, null);
+    let regimeStrategy = null;
+    if (regimeLabel) {
+      const regimeState = accounts[REGIME_KEY_PREFIX + regimeLabel];
       regimeStrategy = regimeState && regimeState.globalBest && regimeState.globalBest.strategy;
 
       // 어제와 구간이 달라졌으면("상승장" → "하락장" 등) 전략 변경 이력에 남겨서, 왜 전략이 바뀌었는지 보이게 합니다.
-      const lastUsed = await kvGetJson(REGIME_LASTUSED_KEY, null);
+      const lastUsed = snap[REGIME_LASTUSED_KEY] || null;
       if (regimeStrategy && lastUsed !== regimeLabel) {
         try {
           const changes = await kvGetJson(CHANGES_KEY, []);
@@ -874,7 +908,7 @@ export default async function handler(req, res) {
     if (evolvedStrategy || customList.length || regimeStrategy) {
       // 팩터(이동평균/RSI 등)는 "그날의 일봉" 기준이라 하루 안에서는 바뀌지 않습니다. 이미 오늘 계산해둔
       // 종목은 캐시에서 그대로 쓰고, 새로 생긴 후보 종목만 추가로 계산해서 캐시를 채웁니다.
-      const cachedEntry = await kvGetJson(EVOLVED_FACTORS_KEY, null);
+      const cachedEntry = snap[EVOLVED_FACTORS_KEY] || null;
       const cachedFactors = (cachedEntry && cachedEntry.date === today && cachedEntry.factors) ? cachedEntry.factors : {};
       const missingCandidates = krCandidates.filter((c) => !cachedFactors[c.symbol]);
       let factorsObj = cachedFactors;
@@ -883,7 +917,8 @@ export default async function handler(req, res) {
         const freshObj = {};
         for (const [sym, factors] of freshMap) freshObj[sym] = factors;
         factorsObj = Object.assign({}, cachedFactors, freshObj);
-        await kvSetJson(EVOLVED_FACTORS_KEY, { date: today, factors: factorsObj });
+        // 일봉이 부족한 종목은 계속 비어 있으니, 새로 계산된 값이 있을 때만 저장해요.
+        if (freshMap.size) await kvSetJson(EVOLVED_FACTORS_KEY, { date: today, factors: factorsObj });
       }
       const factorMap = new Map(Object.entries(factorsObj));
 
@@ -903,7 +938,7 @@ export default async function handler(req, res) {
           }
         };
         const risk = evolvedRiskFrom(wd.strategy);
-        const result = await processStrategyMarket(def, 'KR', fetchKrQuote, cfg, krCandidates, today, risk, apiKey, log, costs);
+        const result = await processStrategyMarket(def, 'KR', fetchKrQuote, cfg, krCandidates, today, risk, apiKey, log, costs, accounts);
         results[wd.id] = { kr: { cash: result.cash, positions: result.positions }, us: { cash: STARTING_CASH_US, positions: {} } };
         allActions.push(...result.actions);
       }));
@@ -926,8 +961,10 @@ export default async function handler(req, res) {
     // 손익 캘린더용 날짜별 장부(_ledger.js) — 위 매매 기록은 400건만 남지만, 이 장부는 지워지지 않아요.
     // 장부가 처음 만들어지는 순간엔 방금 매매까지 포함된 log 전체로 채우니, 그때는 따로 더하지 않습니다(두 번 더해짐 방지).
     try {
-      const backfilled = await ensureBackfilled(log);
-      if (!backfilled && allActions.length) await recordEntries(allActions);
+      if (allActions.length) {
+        const backfilled = await ensureBackfilled(log);
+        if (!backfilled) await recordEntries(allActions);
+      }
     } catch (e) {
       console.error('auto-trade-check.js(daily ledger) error:', e);
     }

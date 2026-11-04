@@ -14,6 +14,28 @@ export const PICK_REPORT_KEY = 'picks:report';
 export const PICK_JOURNAL_KEY = 'picks:journal';
 export const SCREEN_CACHE_KEY = 'screen:cache:v2';
 const MAX_JOURNAL = 90;
+const RETRY_AFTER_FAIL_MS = 15 * 60 * 1000; // 고르기에 실패했으면 15분 뒤에 다시 시도해요
+const FIRST_PICK_MIN = 9 * 60 + 30; // 하루 첫 고르기 시각(09:30). 장 시작 직후엔 거래대금이 아직 얼마 안 쌓여서 순위를 믿기 어려워요.
+
+function kstOf(nowMs) {
+  return new Date(nowMs + 9 * 60 * 60 * 1000);
+}
+
+// 오늘(KST) + 오전/오후 구간 — 이 값이 바뀔 때만 새로 골라요.
+export function screenSlot(nowMs) {
+  const d = kstOf(nowMs);
+  return d.toISOString().slice(0, 10) + (d.getUTCHours() < 12 ? '-am' : '-pm');
+}
+
+export function beforeFirstPick(nowMs) {
+  const d = kstOf(nowMs);
+  return d.getUTCHours() * 60 + d.getUTCMinutes() < FIRST_PICK_MIN;
+}
+
+// 저장해 둔 고르기 결과를 그대로 써도 되는지. 자동매매 실행과 고르기 함수가 같은 기준을 봐야 해서 여기에 뒀어요.
+export function screenIsFresh(cached, nowMs) {
+  return !!cached && cached.slot === screenSlot(nowMs) && (!!cached.ok || nowMs - cached.generatedAt < RETRY_AFTER_FAIL_MS);
+}
 
 export const POOL_LABEL = { value: '거래대금 상위', rise: '오르는 중', calm: '조금 오른 활발한 종목', fall: '떨어진 탄탄한 종목' };
 

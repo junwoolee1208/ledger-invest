@@ -26,7 +26,7 @@
 //   action=reset-all-risk,  POST : 모든 전략의 숫자를 처음 값으로 되돌리고 실험을 새로 시작(선택: 가상계좌도 초기화)
 
 import { getKisToken, kisHeaders, num, KIS_BASE } from './_kis.js';
-import { kvGetJson, kvSetJson, kvCommand, kvReady } from './_kv.js';
+import { kvGetJson, kvSetJson, kvCommand, kvMGetJson, kvReady } from './_kv.js';
 import {
   COST_CONFIG_KEY, REALIZED_KEY_PREFIX, DEFAULT_COSTS, normalizeCosts, loadCosts,
   planSell, positionCostBasis, estimateOverseasTax
@@ -1216,11 +1216,9 @@ async function handleManualEdit(req, res) {
 
 async function loadAccount(strategyId, marketKey) {
   const keys = keysFor(strategyId, marketKey);
-  const [positions, cash] = await Promise.all([
-    kvGetJson(keys.positionsKey, {}),
-    kvGetJson(keys.cashKey, keys.startingCash)
-  ]);
-  return { positions, cash: typeof cash === 'number' ? cash : keys.startingCash, startingCash: keys.startingCash };
+  const saved = (await kvMGetJson([keys.positionsKey, keys.cashKey])) || {}; // 화면을 열 때마다 계좌 수만큼 호출돼서 명령 1번으로 함께 읽어요
+  const cash = saved[keys.cashKey];
+  return { positions: saved[keys.positionsKey] || {}, cash: typeof cash === 'number' ? cash : keys.startingCash, startingCash: keys.startingCash };
 }
 
 async function fetchDomesticQuote(token, symbol) {
@@ -1322,13 +1320,14 @@ async function handleLog(req, res) {
       }
     }
 
-    const log = await kvGetJson(LOG_KEY, []);
+    const year = todayKST().slice(0, 4);
+    const logAndRealized = (await kvMGetJson([LOG_KEY, REALIZED_KEY_PREFIX + year])) || {};
+    const log = logAndRealized[LOG_KEY] || [];
 
     // 올해 실현손익(전략별 가상계좌 기준)과 해외주식 양도세 추정치.
     // 매매 기록(log)은 최근 400건까지만 남기 때문에, 1년치 합계는 auto-trade-check.js가 매도할 때마다
     // 따로 누적해두는 연간 장부(REALIZED_KEY_PREFIX+연도)에서 읽습니다. 달러 손익은 매도 당시 환율로 원화 환산돼 있어요.
-    const year = todayKST().slice(0, 4);
-    const realized = await kvGetJson(REALIZED_KEY_PREFIX + year, {});
+    const realized = logAndRealized[REALIZED_KEY_PREFIX + year] || {};
     const taxByStrategy = {};
     Object.keys(realized || {}).forEach((id) => {
       const r = realized[id] || {};

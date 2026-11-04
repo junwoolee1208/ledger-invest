@@ -10,24 +10,13 @@ import { getKisToken, kisHeaders, num, KIS_BASE, fetchKisJson } from './_kis.js'
 import { kvGetJson, kvSetJson } from './_kv.js';
 import { fetchSymbolHistory } from './_backtest-core.js';
 import {
-  PICK_JOURNAL_KEY, PICK_REPORT_KEY, SCREEN_CACHE_KEY, normalizeScreen, selectByValue, gradeJournal, buildReport, appendJournal
+  PICK_JOURNAL_KEY, PICK_REPORT_KEY, SCREEN_CACHE_KEY, normalizeScreen, selectByValue, gradeJournal, buildReport, appendJournal,
+  screenSlot, beforeFirstPick, screenIsFresh
 } from './_picks.js';
 
 export const config = { maxDuration: 30 };
 
 const CONFIG_KEY = 'autotrade:config';
-const RETRY_AFTER_FAIL_MS = 15 * 60 * 1000;
-const FIRST_PICK_MIN = 9 * 60 + 30; // 하루 첫 고르기 시각(09:30)
-
-function kstNow() {
-  return new Date(Date.now() + 9 * 60 * 60 * 1000);
-}
-
-// 오늘(KST) + 오전/오후 구간 — 이 값이 바뀔 때만 새로 고릅니다.
-function screenSlot() {
-  const d = kstNow();
-  return d.toISOString().slice(0, 10) + (d.getUTCHours() < 12 ? '-am' : '-pm');
-}
 
 // 거래대금 순위. KIS 문서 기준으로 소속 구분 3 = 거래금액순이고, 제외 코드는 순서대로
 // 투자위험/경고/주의, 관리, 정리매매, 불성실공시, 우선주, 거래정지, ETF, ETN, 신용주문불가, SPAC 이에요(1이면 제외).
@@ -70,16 +59,14 @@ export default async function handler(req, res) {
     return;
   }
   try {
-    const now = kstNow();
-    if (now.getUTCHours() * 60 + now.getUTCMinutes() < FIRST_PICK_MIN) {
+    if (beforeFirstPick(Date.now())) {
       res.status(200).json({ waiting: true, candidates: [], note: '09:30부터 종목을 골라요.' });
       return;
     }
 
-    const slot = screenSlot();
+    const slot = screenSlot(Date.now());
     const cached = await kvGetJson(SCREEN_CACHE_KEY, null);
-    const fresh = cached && cached.slot === slot && (cached.ok || Date.now() - cached.generatedAt < RETRY_AFTER_FAIL_MS);
-    if (fresh && req.query.refresh !== '1') {
+    if (screenIsFresh(cached, Date.now()) && req.query.refresh !== '1') {
       res.status(200).json(Object.assign({}, cached, { cached: true }));
       return;
     }

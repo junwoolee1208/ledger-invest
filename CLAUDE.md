@@ -48,6 +48,11 @@
   사용하는 환경변수: `KIS_APP_KEY`, `KIS_APP_SECRET`, `FINNHUB_API_KEY`, `ANTHROPIC_API_KEY`,
   `AUTO_TRADE_SECRET`, `KV_REST_API_URL`/`KV_REST_API_TOKEN`(또는 `UPSTASH_REDIS_REST_*`)
 
+### 저장소 호출 횟수
+- Upstash 무료 한도는 **월 50만 명령**이고, `auto-trade-check.js`는 장중 1분마다 돌 수 있다.
+  이 파일에 저장소 읽기를 추가할 때는 맨 앞의 `kvMGetJson`에 키를 더한다. 따로 `kvGetJson`을 부르지 말 것(매매가 있거나 주기가 된 때만 도는 코드는 괜찮음).
+- 읽기에 실패하면(`kvMGetJson`이 `null`) 빈 계좌로 보고 진행하지 말고 그 실행을 건너뛴다.
+
 ### 자동매매
 - 아직 **가상계좌 시뮬레이션(`mode: 'dryrun'`)** 이다. 실제 주문 코드로 바꾸지 말 것(사용자가 명시적으로 요청할 때만).
 - 수익 계산은 `api/_costs.js`의 수수료·세금 설정(기본값: 토스증권)을 따른다.
