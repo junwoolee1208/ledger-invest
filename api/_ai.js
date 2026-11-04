@@ -28,7 +28,6 @@ export const AI_MODELS = {
 // AI를 쓰는 기능 목록. heavy=true인 기능은 월 예산을 다 쓰면 멈춰요(자동매매에 꼭 필요한 작은 일은 계속).
 // effort: 모델이 얼마나 깊게 생각할지(low < medium < high). 짧고 자주 하는 일은 low로 아껴요.
 export const AI_FEATURES = {
-  screen: { label: 'AI 추천 종목 거르기', defaultModel: 'claude-haiku-5-5', effort: 'low', heavy: false },
   sentiment: { label: '뉴스 호재·악재 점수', defaultModel: 'claude-haiku-5-5', effort: 'low', heavy: false },
   'stoploss-reason': { label: '손절 이유 설명', defaultModel: 'claude-haiku-5-5', effort: 'low', heavy: false },
   // 자동조정은 지난 실험 기록을 읽고 다음 실험을 설계하는 "판단" 일이라 Sonnet이 기본(하루 몇 번뿐이라 비용 부담 작음)

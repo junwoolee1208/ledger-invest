@@ -21,6 +21,7 @@
 //   action=scorecard-weights, POST: 채점표 부문별 가중치 저장
 //   action=scorecard-detail, GET : strategy=ID&period=7|30|90|all — 전략 상세 성적표(세부 지표·기준선 비교·개선 가이드·나눠 보기)
 //   action=deep-eval,       GET  : 최근 AI 심층 평가서 / POST(로그인) 또는 GET ?auto=1&key=…(주 1회 스케줄러): 새로 받기
+//   action=pick-config,     GET  : 종목 고르기 기준 + 마지막으로 고른 결과 / POST: 기준 저장(로그인한 본인만)
 //   action=chat,            POST : AI 전략 상담(로그인, 하루 30번) — 데이터 조회·그래프·표·변경 "제안"
 //   action=reset-all-risk,  POST : 모든 전략의 숫자를 처음 값으로 되돌리고 실험을 새로 시작(선택: 가상계좌도 초기화)
 
@@ -40,8 +41,9 @@ import {
 } from './_scorecard.js';
 import { runDeepEval, DEEPEVAL_LATEST_KEY, DEEPEVAL_HISTORY_KEY } from './_deepeval.js';
 import { fetchSymbolHistory } from './_backtest-core.js';
-import { PICK_REPORT_KEY } from './_picks.js';
+import { PICK_REPORT_KEY, SCREEN_CACHE_KEY, DEFAULT_SCREEN, normalizeScreen } from './_picks.js';
 import { runChat } from './_chat.js';
+import { resetAllStrategies, cancelExperimentsFor, RESET_INFO_KEY } from './_reset.js';
 import {
   AI_CONFIG_KEY, AI_MODELS, AI_FEATURES, AI_LAST_OK_KEY, AI_LAST_ERROR_KEY, AI_REASON_TEXT,
   normalizeAiConfig, loadAiUsage, modelFor
@@ -78,7 +80,7 @@ const DEFAULT_CONFIG = {
   enabled: false,
   mode: 'dryrun', // 'dryrun' | 'live' — 모의투자 키 연결 전까지는 dryrun 고정
   symbols: [], // 관심종목 외 추가로 감시할 종목 (보통은 프론트에서 관심종목을 합쳐서 채움)
-  useAiCandidates: true, // AI 추천 종목도 감시 대상에 포함할지
+  useAiCandidates: true, // 거래대금 상위 안전 종목도 감시 대상에 포함할지(옛 이름 그대로 저장돼 있어요)
   risk: {
     positionPct: 5, // 1회 매매당 총자산 대비 비중(%) — "모멘텀" 전략에 적용됨
     stopLossPct: 5, // 손절 기준(%)
@@ -151,6 +153,7 @@ async function handleConfig(req, res) {
     const strategiesIn = body.strategies || prev.strategies || {};
     const next = {
       daytrade: normalizeDaytrade(prev.daytrade),
+      screen: normalizeScreen(prev.screen),
       hidden: Array.isArray(prev.hidden) ? prev.hidden : [],
       enabled: !!body.enabled,
       mode: 'dryrun', // 실거래 전환은 모의투자 검증 후 서버 코드에서 명시적으로만 바꿉니다.
@@ -430,51 +433,17 @@ async function handleExperiments(req, res) {
   }
 }
 
-// 진행 중인 실험을 "중단됨"으로 닫고, 관찰 기록은 비워요(설정이 사람 손으로 바뀌어서, 그 전 거래로는 공정하게 비교할 수 없으니까).
-function cancelExperimentsFor(experiments, strategyId, reason) {
-  experiments.forEach((e) => {
-    if (strategyId && e.strategyId !== strategyId) return;
-    if (e.status === 'running') {
-      e.status = 'cancelled';
-      e.result = { verdict: 'cancelled', judgedAt: Date.now(), note: reason };
-    }
-    if (e.status === 'observing') { e.samples = []; e.startedAt = Date.now(); }
-  });
-}
-
 async function handleResetAllRisk(req, res) {
   if (req.method !== 'POST') { res.status(405).json({ error: 'POST만 지원합니다.' }); return; }
   const uid = await requireUid(req, res);
   if (!uid) return;
   const body = readBody(req);
   try {
-    const [overrides, experiments, changes] = await Promise.all([
-      kvGetJson(OVERRIDES_KEY, {}), kvGetJson(EXPERIMENTS_KEY, []), kvGetJson(CHANGES_KEY, [])
-    ]);
-    cancelExperimentsFor(experiments, null, '사용자가 "모든 전략 처음부터 다시"를 눌렀어요.');
-    const resetIds = Object.keys(overrides);
-    await Promise.all([
-      kvSetJson(OVERRIDES_KEY, {}), kvSetJson(EXPERIMENTS_KEY, experiments),
-      kvSetJson(BEST_RISK_KEY, {}), kvSetJson(FLAGS_KEY, {})
-    ]);
-    if (body.resetAccounts) {
-      const ids = STRATEGY_IDS.concat((await kvGetJson(CUSTOM_KEY, [])).map((c) => c.id));
-      const keys = [];
-      ids.forEach((id) => { const kr = keysFor(id, 'KR'), us = keysFor(id, 'US'); keys.push(kr.positionsKey, kr.cashKey, us.positionsKey, us.cashKey); });
-      await Promise.all(keys.map((k) => kvCommand(['DEL', k])));
-    }
-    changes.unshift({
-      id: Date.now() + '-reset-all', ts: Date.now(), date: todayKST(),
-      strategyId: 'all', strategyName: '모든 전략', source: 'manual',
-      diagnosis: '사용자가 모든 전략의 숫자(손절·익절·비중·하루 횟수)를 처음 값으로 되돌리고 실험을 새로 시작했어요.' +
-        (body.resetAccounts ? ' 가짜 계좌도 모두 처음 돈으로 초기화했어요.' : ''),
-      statsAtChange: null,
-      beforeDescription: resetIds.length ? `바뀌어 있던 전략 ${resetIds.length}개: ${resetIds.map((id) => STRATEGY_NAMES[id] || id).join(', ')}` : '바뀐 전략 없음',
-      afterDescription: '모든 전략 처음 값, 실험 기록은 남기고 새 실험부터 다시'
+    const { resetCount } = await resetAllStrategies({
+      resetAccounts: !!body.resetAccounts, today: todayKST(), resetIdNames: STRATEGY_NAMES,
+      reason: '사용자가 모든 전략의 숫자(손절·익절·비중·하루 횟수)를 처음 값으로 되돌리고 실험을 새로 시작했어요.'
     });
-    if (changes.length > MAX_CHANGES) changes.length = MAX_CHANGES;
-    await kvSetJson(CHANGES_KEY, changes);
-    res.status(200).json({ ok: true, resetCount: resetIds.length });
+    res.status(200).json({ ok: true, resetCount });
   } catch (e) {
     console.error('auto-trade-status.js(reset-all-risk) error:', e);
     res.status(500).json({ error: '서버 오류가 발생했습니다.' });
@@ -540,6 +509,20 @@ async function loadRecentTrades(days) {
   return lists.flat();
 }
 
+// 채점표용: 가짜 계좌를 초기화했다면 그 전 거래는 빼요(지금 계좌와 안 맞는 지난 성적이 섞이지 않게). 기록 자체는 캘린더·이력에 남아 있어요.
+async function loadScoringTrades(days) {
+  const [list, info] = await Promise.all([loadRecentTrades(days), kvGetJson(RESET_INFO_KEY, {})]);
+  const since = (info && info.scoreSince) || 0;
+  return list.filter((t) => (t.ts || 0) >= since);
+}
+
+// 초기화보다 먼저 계산해 둔 저장본은 쓰지 않아요.
+async function cacheIsCurrent(cached) {
+  if (!cached || cached.date !== todayKST()) return false;
+  const info = await kvGetJson(RESET_INFO_KEY, {});
+  return (cached.computedAt || 0) >= ((info && info.scoreSince) || 0);
+}
+
 function accountPct(acct) {
   let posValue = 0;
   Object.values(acct.positions || {}).forEach((p) => {
@@ -552,7 +535,7 @@ async function buildScorecard() {
   const today = todayKST();
   const [cfgRaw, overrides, customList, experiments, flags, weightsRaw, trades] = await Promise.all([
     kvGetJson(CONFIG_KEY, null), kvGetJson(OVERRIDES_KEY, {}), kvGetJson(CUSTOM_KEY, []),
-    kvGetJson(EXPERIMENTS_KEY, []), kvGetJson(FLAGS_KEY, {}), kvGetJson(SCORECARD_WEIGHTS_KEY, null), loadRecentTrades(30)
+    kvGetJson(EXPERIMENTS_KEY, []), kvGetJson(FLAGS_KEY, {}), kvGetJson(SCORECARD_WEIGHTS_KEY, null), loadScoringTrades(30)
   ]);
   const cfg = cfgRaw || DEFAULT_CONFIG;
   const weights = normalizeWeights(weightsRaw);
@@ -650,7 +633,7 @@ async function buildScorecardDetail(id, period) {
   const days = DETAIL_PERIODS[period] || 30;
   const [cfgRaw, overrides, customList, experiments, flags, weightsRaw, trades] = await Promise.all([
     kvGetJson(CONFIG_KEY, null), kvGetJson(OVERRIDES_KEY, {}), kvGetJson(CUSTOM_KEY, []),
-    kvGetJson(EXPERIMENTS_KEY, []), kvGetJson(FLAGS_KEY, {}), kvGetJson(SCORECARD_WEIGHTS_KEY, null), loadRecentTrades(days)
+    kvGetJson(EXPERIMENTS_KEY, []), kvGetJson(FLAGS_KEY, {}), kvGetJson(SCORECARD_WEIGHTS_KEY, null), loadScoringTrades(days)
   ]);
   const cfg = cfgRaw || DEFAULT_CONFIG;
   const names = Object.assign({}, STRATEGY_NAMES);
@@ -729,7 +712,7 @@ async function handleScorecardDetail(req, res) {
   try {
     const key = SCORECARD_DETAIL_PREFIX + id + ':' + period;
     const cached = await kvGetJson(key, null);
-    if (cached && cached.date === todayKST() && req.query.refresh !== '1') { res.status(200).json(cached); return; }
+    if ((await cacheIsCurrent(cached)) && req.query.refresh !== '1') { res.status(200).json(cached); return; }
     const data = await buildScorecardDetail(id, period);
     if (!data) { res.status(404).json({ error: '그런 전략이 없어요.' }); return; }
     await kvSetJson(key, data);
@@ -743,7 +726,7 @@ async function handleScorecardDetail(req, res) {
 async function handleScorecard(req, res) {
   try {
     const cached = await kvGetJson(SCORECARD_CACHE_KEY, null);
-    const data = (cached && cached.date === todayKST() && req.query.refresh !== '1') ? cached : await buildScorecard();
+    const data = ((await cacheIsCurrent(cached)) && req.query.refresh !== '1') ? cached : await buildScorecard();
     const [history, deepEval, pickReport] = await Promise.all([
       kvGetJson(SCORECARD_HISTORY_KEY, []), kvGetJson(DEEPEVAL_LATEST_KEY, null), kvGetJson(PICK_REPORT_KEY, null)
     ]);
@@ -783,7 +766,7 @@ async function handleDeepEval(req, res) {
   }
   try {
     const cached = await kvGetJson(SCORECARD_CACHE_KEY, null);
-    const scorecard = (cached && cached.date === todayKST()) ? cached : await buildScorecard();
+    const scorecard = (await cacheIsCurrent(cached)) ? cached : await buildScorecard();
     const [pickReport, regimeCache] = await Promise.all([kvGetJson(PICK_REPORT_KEY, null), kvGetJson('autotrade:regime:cache', null)]);
     const result = await runDeepEval({ scorecard, pickReport, regimeLabel: regimeCache ? regimeCache.label : null, today: todayKST() });
     if (!result.ok) { res.status(502).json({ error: 'AI 심층 평가를 만들지 못했어요. ' + result.message, reason: result.reason }); return; }
@@ -792,6 +775,25 @@ async function handleDeepEval(req, res) {
     console.error('auto-trade-status.js(deep-eval) error:', e);
     res.status(500).json({ error: '서버 오류가 발생했습니다.' });
   }
+}
+
+/* ==================== action=pick-config (종목 고르기 기준) ====================
+   기준은 자동매매 설정(cfg.screen)에 저장해요. 기준이 바뀌면 저장해 둔 고르기 결과를 지워서 다음 실행 때 새 기준으로 고르게 해요. */
+async function handlePickConfig(req, res) {
+  if (req.method === 'GET') {
+    const [cfg, last] = await Promise.all([kvGetJson(CONFIG_KEY, null), kvGetJson(SCREEN_CACHE_KEY, null)]);
+    res.status(200).json({ screen: normalizeScreen(cfg && cfg.screen), defaults: DEFAULT_SCREEN, last });
+    return;
+  }
+  if (req.method !== 'POST') { res.status(405).json({ error: 'GET 또는 POST만 지원합니다.' }); return; }
+  const uid = await requireUid(req, res);
+  if (!uid) return;
+  const cfg = (await kvGetJson(CONFIG_KEY, null)) || Object.assign({}, DEFAULT_CONFIG);
+  cfg.screen = normalizeScreen(readBody(req).screen);
+  cfg.updatedAt = Date.now();
+  await kvSetJson(CONFIG_KEY, cfg);
+  await kvCommand(['DEL', SCREEN_CACHE_KEY]);
+  res.status(200).json({ ok: true, screen: cfg.screen });
 }
 
 /* ==================== action=chat (AI 전략 상담) ====================
@@ -913,14 +915,14 @@ async function handleChat(req, res) {
     }
     if (name === 'get_scorecard') {
       const cached = await kvGetJson(SCORECARD_CACHE_KEY, null);
-      const sc = cached || await buildScorecard();
+      const sc = (await cacheIsCurrent(cached)) ? cached : await buildScorecard();
       return { date: sc.date, strategies: sc.strategies.map((s) => ({ id: s.id, name: s.name, total: s.total, grade: s.grade, confidence: s.confidence, trend: s.trend, cats: s.cats })), system: sc.system };
     }
     if (name === 'get_scorecard_detail') {
       const period = DETAIL_PERIODS[String(input.period)] ? String(input.period) : '30';
       const key = SCORECARD_DETAIL_PREFIX + input.strategyId + ':' + period;
       const cached = await kvGetJson(key, null);
-      const d = (cached && cached.date === today) ? cached : await buildScorecardDetail(String(input.strategyId), period);
+      const d = (await cacheIsCurrent(cached)) ? cached : await buildScorecardDetail(String(input.strategyId), period);
       if (!d) return { error: '그런 전략이 없어요.' };
       if (d !== cached) await kvSetJson(key, d);
       return { name: d.name, period: d.period, total: d.total, grade: d.grade, confidence: d.confidence, cats: d.cats, baselineCats: d.baselineCats,
@@ -1487,5 +1489,6 @@ export default async function handler(req, res) {
   if (action === 'scorecard-detail') return handleScorecardDetail(req, res);
   if (action === 'deep-eval') return handleDeepEval(req, res);
   if (action === 'chat') return handleChat(req, res);
+  if (action === 'pick-config') return handlePickConfig(req, res);
   return handleConfig(req, res);
 }

@@ -10,7 +10,7 @@
 // 각 전략은 시장(국내/해외)별로 완전히 독립된 가상 현금/보유종목을 가집니다.
 //
 // 국내(KR)와 해외(US) 종목을 각각 별도의 가상 계좌(원화/달러)로 나눠서 동시에 운용합니다.
-// AI 추천 종목 스크리닝(screen-candidates.js)은 현재 국내 종목만 지원하므로, 해외 종목은
+// 거래대금 상위 종목 고르기(screen-candidates.js)는 국내 종목만 지원하므로, 해외 종목은
 // 관심종목(watchlist)에 등록된 것만 자동매매 대상이 됩니다.
 //
 // 보안: 아무나 이 URL을 호출해서 매매를 조작하지 못하도록, 쿼리 파라미터 key가
@@ -24,6 +24,7 @@ import { normalizeDaytrade, hhmmToMin } from './_daytrade.js';
 import { BASE_RISK, keysFor, STARTING_CASH_US } from './_strategies.js';
 import { isSellSide, recordEntries, ensureBackfilled } from './_ledger.js';
 import { askClaude, extractJson } from './_ai.js'; // AI 호출 공용 창구(사용량·예산·실패 이유 기록)
+import { resetAllStrategies, RESET_INFO_KEY } from './_reset.js';
 import {
   EXPERIMENTS_KEY, BEST_RISK_KEY, FLAGS_KEY, MAX_EXPERIMENTS, LEARN, RISK_FIELDS, RISK_LABELS,
   summarize, clampProposal, liftToFloors, judge, readyToJudge, forbiddenDirections, applyForbidden, lessonLine
@@ -35,6 +36,7 @@ export const config = { maxDuration: 30 };
 const CONFIG_KEY = 'autotrade:config';
 const LOG_KEY = 'autotrade:log';
 const MAX_LOG = 400;
+const ONE_TIME_RESET_KEY = 'autotrade:reset-done:2026-11-value-picks';
 
 // ---- 전략 자동 조정(설정한 주기마다, "전략 변경 이력" 탭에서 보이는 기록) ----
 const OVERRIDES_KEY = 'autotrade:strategy-overrides'; // 전략별로 자동 조정된 손절/익절/비중/매매한도
@@ -94,8 +96,9 @@ async function classifyTodayRegime(token, krCandidates, today) {
   return label;
 }
 
-function isAiCand(cand) {
-  return cand.reason.indexOf('AI 추천') === 0;
+// 거래대금 상위에서 고른 후보인지(관심종목보다 조금 낮은 상승률에서도 삽니다).
+function isRankCand(cand) {
+  return cand.reason.indexOf('거래대금') === 0;
 }
 
 // 전략별 정의 — 매수 트리거(shouldBuy)와 리스크 규칙(risk)이 서로 다릅니다.
@@ -108,7 +111,7 @@ const STRATEGY_DEFS = [
     id: 'momentum',
     name: '모멘텀(추세 추종)',
     getRisk: (cfg) => Object.assign({}, BASE_RISK.momentum, cfg.risk || {}),
-    shouldBuy: (cand, q) => q.changePct !== null && q.changePct >= (isAiCand(cand) ? 1 : 3)
+    shouldBuy: (cand, q) => q.changePct !== null && q.changePct >= (isRankCand(cand) ? 1 : 3)
   },
   {
     id: 'pullback',
@@ -122,7 +125,7 @@ const STRATEGY_DEFS = [
     name: '강한 돌파',
     getRisk: () => BASE_RISK.breakout,
     // 더 강한 상승 모멘텀만 선택하고, 손절/익절 폭도 더 크게 잡아 추세를 오래 태웁니다.
-    shouldBuy: (cand, q) => q.changePct !== null && q.changePct >= (isAiCand(cand) ? 4 : 6)
+    shouldBuy: (cand, q) => q.changePct !== null && q.changePct >= (isRankCand(cand) ? 4 : 6)
   },
   {
     id: 'reversal',
@@ -136,21 +139,21 @@ const STRATEGY_DEFS = [
     name: '초단타(잦은 매매)',
     getRisk: () => BASE_RISK.scalp,
     // 문턱을 낮춰 자주 매매하고, 손절/익절 폭도 아주 좁게 잡아 빠르게 치고 빠집니다.
-    shouldBuy: (cand, q) => q.changePct !== null && q.changePct >= (isAiCand(cand) ? 0.5 : 1.5)
+    shouldBuy: (cand, q) => q.changePct !== null && q.changePct >= (isRankCand(cand) ? 0.5 : 1.5)
   },
   {
     id: 'selective',
     name: '신중한 선별(엄격)',
     getRisk: () => BASE_RISK.selective,
     // 아주 강한 조건에서만 매매하되, 한 번 살 때 비중을 크게 실어(8%) 소수 정예로 갑니다.
-    shouldBuy: (cand, q) => q.changePct !== null && q.changePct >= (isAiCand(cand) ? 2.5 : 4)
+    shouldBuy: (cand, q) => q.changePct !== null && q.changePct >= (isRankCand(cand) ? 2.5 : 4)
   },
   {
     id: 'wideswing',
     name: '광폭 스윙(길게 보유)',
     getRisk: () => BASE_RISK.wideswing,
     // 모멘텀과 매수 조건은 비슷하지만, 손절/익절 폭을 훨씬 넓게 잡아 추세를 오래 들고 갑니다.
-    shouldBuy: (cand, q) => q.changePct !== null && q.changePct >= (isAiCand(cand) ? 1.5 : 3)
+    shouldBuy: (cand, q) => q.changePct !== null && q.changePct >= (isRankCand(cand) ? 1.5 : 3)
   },
   {
     id: 'baseline',
@@ -257,7 +260,8 @@ async function loadCandidateSymbols(cfg, req) {
   const symbols = new Map();
   (cfg.symbols || []).forEach((s) => symbols.set(s, { symbol: s, name: null, reason: '관심종목' }));
 
-  if (cfg.useAiCandidates) {
+  // 국내 장이 열렸을 때만 불러요(미국장 시간에 국내 순위를 볼 이유가 없어서). useAiCandidates는 옛 이름 그대로 쓰는 "거래대금 상위 종목 감시" 설정이에요.
+  if (cfg.useAiCandidates && marketClock('KR').open) {
     try {
       const proto = req.headers['x-forwarded-proto'] || 'https';
       const host = req.headers.host;
@@ -265,12 +269,12 @@ async function loadCandidateSymbols(cfg, req) {
       if (r.ok) {
         const data = await r.json();
         (data.candidates || []).forEach((c) => {
-          // (AI 스크리닝은 현재 국내 종목만 지원합니다.)
-          if (!symbols.has(c.symbol)) symbols.set(c.symbol, { symbol: c.symbol, name: c.name || null, reason: 'AI 추천: ' + c.reason });
+          // (거래대금 상위 고르기는 국내 종목만 지원합니다.)
+          if (!symbols.has(c.symbol)) symbols.set(c.symbol, { symbol: c.symbol, name: c.name || null, reason: c.reason });
         });
       }
     } catch (e) {
-      console.error('auto-trade-check: AI 후보 조회 실패', e);
+      console.error('auto-trade-check: 거래대금 후보 조회 실패', e);
     }
   }
   return Array.from(symbols.values()).slice(0, 20); // 과호출 방지로 상한
@@ -382,10 +386,11 @@ async function maybeRunLearningCycle(cfg, today, log) {
   await kvSetJson(ADJUST_LASTRUN_KEY, Date.now()); // 중간에 실패해도 같은 주기 안에서 무한 재시도하지 않게 먼저 기록
 
   try {
-    const [experiments, best, flags, changes, regimeCache, deepEval] = await Promise.all([
+    const [experiments, best, flags, changes, regimeCache, deepEval, resetInfo] = await Promise.all([
       kvGetJson(EXPERIMENTS_KEY, []), kvGetJson(BEST_RISK_KEY, {}), kvGetJson(FLAGS_KEY, {}),
-      kvGetJson(CHANGES_KEY, []), kvGetJson(REGIME_CACHE_KEY, null), kvGetJson(DEEPEVAL_LATEST_KEY, null)
+      kvGetJson(CHANGES_KEY, []), kvGetJson(REGIME_CACHE_KEY, null), kvGetJson(DEEPEVAL_LATEST_KEY, null), kvGetJson(RESET_INFO_KEY, {})
     ]);
+    const learnSince = (resetInfo && resetInfo.learnSince) || 0; // 전략을 초기화했다면 그 전 거래로는 판단하지 않아요
     // 주간 심층 평가서가 전략별로 제안한 "다음 실험"을 자동조정 AI에게 참고자료로 넘겨요(평가 → 실험이 이어지도록).
     const adviceFor = (id) => {
       const s = deepEval && deepEval.report && Array.isArray(deepEval.report.strategies) ? deepEval.report.strategies.find((x) => x.id === id) : null;
@@ -455,14 +460,14 @@ async function maybeRunLearningCycle(cfg, today, log) {
 
       // ② 관찰 기록이 없으면 만들어요. 처음엔 남아 있는 매매 기록에서 "지금 설정으로 한 거래"를 가져와 바로 시작해요.
       if (!observing) {
-        const since = overrides[def.id] && overrides[def.id].updatedAt ? overrides[def.id].updatedAt : 0;
+        const since = Math.max(overrides[def.id] && overrides[def.id].updatedAt ? overrides[def.id].updatedAt : 0, learnSince);
         observing = { id: 'obs-' + now + '-' + def.id, strategyId: def.id, strategyName: def.name, status: 'observing',
           startedAt: now, risk: current, samples: sellSamplesFromLog(log, def.id, since, LEARN.beforeTrades) };
         experiments.unshift(observing);
       }
 
       // 사는 조건 문제 자동 감지: 최근 20건 승률이 20% 미만이면 숫자를 더 바꾸지 않고 표시만 해요(30% 이상 회복하면 해제).
-      const recent = summarize(sellSamplesFromLog(log, def.id, 0, LEARN.buyRuleWindow));
+      const recent = summarize(sellSamplesFromLog(log, def.id, learnSince, LEARN.buyRuleWindow));
       if (recent.trades >= LEARN.buyRuleWindow && recent.winRate < LEARN.buyRuleWinRate) {
         if (!flags[def.id]) flags[def.id] = { type: 'buy-rule', at: now, winRate: recent.winRate,
           note: `최근 ${recent.trades}건 승률 ${recent.winRate}% — 손절·익절 숫자보다 "사는 조건"이 안 맞을 가능성이 커요. 끄거나 전략연구실에서 검증해 보세요.` };
@@ -502,7 +507,7 @@ async function maybeRunLearningCycle(cfg, today, log) {
         lessonUsed: String(proposal.lessonUsed || '').slice(0, 300),
         diagnosis: String(proposal.diagnosis || '').slice(0, 400),
         beforeStats: stats,
-        controlBeforeStats: summarize(sellSamplesFromLog(log, 'baseline', 0, LEARN.beforeTrades)),
+        controlBeforeStats: summarize(sellSamplesFromLog(log, 'baseline', learnSince, LEARN.beforeTrades)),
         samples: [], controlSamples: []
       };
       experiments.splice(experiments.indexOf(observing), 1); // 관찰 기록은 이 실험의 "바꾸기 전" 기준이 됐으니 정리
@@ -753,6 +758,16 @@ export default async function handler(req, res) {
     return;
   }
 
+  // 종목 선정 방식을 바꾸면서 하는 1회 초기화: 지난 성적의 절반 이상이 장이 닫혔을 때 산 거래라 비교 기준이 안 돼요.
+  // 사용자 요청으로 새 방식 배포 뒤 처음 실행될 때 딱 한 번 돌아요(표시를 남겨서 다시는 안 돌아요). 장이 닫혀 있어도 돌아요.
+  if (!(await kvGetJson(ONE_TIME_RESET_KEY, null))) {
+    await resetAllStrategies({
+      resetAccounts: true, today: todayKST(),
+      reason: '종목 선정을 "거래대금 상위 + 안전 기준"으로 바꾸면서, 사용자 요청으로 모든 전략을 처음 값으로 되돌리고 새로 시작했어요.'
+    });
+    await kvSetJson(ONE_TIME_RESET_KEY, { at: Date.now() });
+  }
+
   const cfg = await kvGetJson(CONFIG_KEY, null);
   if (!cfg || !cfg.enabled) {
     res.status(200).json({ skipped: true, reason: 'disabled' });
@@ -784,7 +799,8 @@ export default async function handler(req, res) {
     // 하루 한 번만 계산해 저장하니(classifyTodayRegime 캐시) 자주 불려도 부담이 없어요. 실패해도 매매는 계속돼요.
     // cfg._regime은 이번 실행 동안만 쓰는 값이에요(설정에 저장되지 않음).
     try {
-      cfg._regime = krCandidates.length ? await classifyTodayRegime(token, krCandidates, today) : ((await kvGetJson(REGIME_CACHE_KEY, null)) || {}).label || null;
+      // 09:30 전처럼 후보가 너무 적으면 한두 종목만 보고 하루치를 판단하게 되니, 저장된 값을 그대로 써요.
+      cfg._regime = krCandidates.length >= 3 ? await classifyTodayRegime(token, krCandidates, today) : ((await kvGetJson(REGIME_CACHE_KEY, null)) || {}).label || null;
     } catch (e) {
       cfg._regime = null;
     }

@@ -16,7 +16,7 @@
   - `market-data.js` 시세/순위/실적/시장뉴스 (`source=kis|finnhub`, `type=...`)
   - `investment-opinion.js` AI 투자의견
   - `explain.js` AI 요약 (`mode` 없음=뉴스, `mode=earnings`=실적)
-  - `screen-candidates.js` AI 추천 종목 스크리닝
+  - `screen-candidates.js` 종목 고르기(거래대금 상위 + 안전 기준, AI 안 씀)
   - `sync.js` 관심종목/포트폴리오 저장 (Firebase ID 토큰 검증 → Vercel KV)
   - `auto-trade-check.js` 자동매매 실행 (외부 크론이 호출, `key`=`AUTO_TRADE_SECRET` 필요)
   - `auto-trade-status.js` 자동매매 설정/현황 (`action=config|log`)
@@ -27,7 +27,7 @@
   - `_ai.js` 모든 AI 호출(모델 선택·사용량·예산·실패 기록), `_chat.js` AI 상담 대화 엔진(도구 사용 반복)
   - `_strategies.js` 전략 이름·기본 규칙·가상계좌 키, `_daytrade.js` 단타 설정, `_ledger.js` 날짜별 손익 장부
   - `_learning.js` 학습하는 자동조정 규칙, `_scorecard.js` 채점표 계산, `_deepeval.js` 주간 AI 심층 평가서
-  - `_picks.js` 종목 고르기 규칙·기록·성적표
+  - `_picks.js` 종목 고르기 규칙·기록·성적표, `_reset.js` 모든 전략 초기화
 - 데이터 저장: Vercel KV(Upstash Redis). 로그인: Firebase Authentication.
 
 ## 반드시 지킬 규칙

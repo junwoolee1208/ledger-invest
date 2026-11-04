@@ -654,7 +654,7 @@
       전략마다 가짜 돈(국내 1,000만원, 해외 7,000달러)을 따로 주고, 누가 더 잘 버는지 겨루게 해요. 실제 주문은 들어가지 않아요.
       <details class="more" style="margin:8px 0 0;"><summary>자세히 보기</summary><div class="more-body">
         <p>지금은 한국투자증권의 "모의투자" 연결이 아직 없어서, 이 사이트 안에서 가짜 계좌를 직접 만들어 계산해요. 주식을 "샀다"고 기록하고, 가격이 오르내리면 그만큼 계좌 금액이 바뀌는 식이에요.</p>
-        <p>관심종목에 넣은 주식과(켜두면) AI가 골라준 주식을 지켜봐요. AI 추천은 아직 국내 주식만 돼요.</p>
+        <p>관심종목에 넣은 주식과(켜두면) 거래대금이 많은 안전한 국내 주식을 지켜봐요. 미국 주식은 관심종목만 봐요.</p>
         <p>장이 열려 있는 시간(국내 평일 09:00~15:20, 미국 정규장)에만 사고팔아요. 장이 닫힌 밤에는 실제로 살 수 없는 가격이라 쉬어요.</p>
         <p>모의투자 연결이 준비되면 같은 규칙으로 모의투자 계좌에 주문이 들어가게 바꿀 수 있어요.</p>
       </div></details>
@@ -676,7 +676,7 @@
       </label>
       <label style="display:flex; align-items:center; gap:8px; margin-bottom:16px; font-size:13px;">
         <input type="checkbox" id="atUseAi" style="width:16px; height:16px;">
-        AI 추천 종목도 감시 대상에 포함
+        거래대금 상위 안전 종목도 감시 대상에 포함
       </label>
       <div style="border-top:1px solid var(--line); padding-top:14px; margin-bottom:16px;">
         <div style="font-size:13px; font-weight:600; margin-bottom:4px;">자동 점검 주기</div>
@@ -696,6 +696,24 @@
             <input type="number" id="atEvolveInterval" class="mono" style="width:100%; margin-top:4px;" min="1" max="168">
           </div>
         </div>
+      </div>
+      <div style="border-top:1px solid var(--line); padding-top:14px; margin-bottom:16px;">
+        <div style="font-size:13px; font-weight:600; margin-bottom:4px;">종목 고르기 기준</div>
+        <p class="easy" style="font-size:12px;">거래대금이 많은 종목 중 안전 기준을 통과한 종목만 후보로 써요. AI를 쓰지 않아서 크레딧이 없어도 돌아가요.</p>
+        <details class="more"><summary>자세히 보기</summary><div class="more-body">
+          <p><b>거래대금</b>: 오늘 사고판 돈의 합이에요. 많을수록 원하는 가격에 사고팔기 쉬워요. 다만 급등 테마주도 많이 올라오니 안전 기준으로 걸러요.</p>
+          <p><b>자동으로 빼는 종목</b>: 관리종목, 거래정지, 투자주의·경고·위험, 단기과열, 정리매매, 우선주, ETF·ETN, 스팩이에요. 시가총액이나 위험 표시를 확인하지 못한 종목도 빼요.</p>
+          <p><b>언제 고르나요</b>: 평일 09:30 뒤 한 번, 12시 뒤 한 번 골라요. 장 시작 직후엔 거래대금이 아직 얼마 안 쌓여서 09:30까지 기다려요. 관심종목은 이 기준과 상관없이 계속 지켜봐요.</p>
+          <p>"안전"은 크게 흔들릴 위험을 줄인다는 뜻이고, 손해가 안 난다는 뜻은 아니에요.</p>
+        </div></details>
+        <div class="stat-grid">
+          <div class="stat"><div class="k">거래대금 상위 몇 개를 볼까요</div><input type="number" id="pickTopN" class="mono" style="width:100%; margin-top:4px;" min="5" max="30"></div>
+          <div class="stat"><div class="k">시가총액 최소(억 원, 10000 = 1조)</div><input type="number" id="pickMinCap" class="mono" style="width:100%; margin-top:4px;" min="0" step="1000"></div>
+          <div class="stat"><div class="k">오늘 등락폭 최대(±%)</div><input type="number" id="pickMaxChange" class="mono" style="width:100%; margin-top:4px;" min="1" max="30"></div>
+          <div class="stat"><div class="k">후보 최대 개수</div><input type="number" id="pickMax" class="mono" style="width:100%; margin-top:4px;" min="1" max="30"></div>
+        </div>
+        <div style="margin-top:10px;"><button class="btn ghost" id="pickSave" type="button">기준 저장</button><span id="pickMsg" class="st-msg"></span></div>
+        <div id="pickLast" style="font-size:12.5px; line-height:1.7; margin-top:10px;"></div>
       </div>
       <button class="btn" id="atSave">설정 저장</button>
       <span id="atSaveMsg" style="margin-left:10px; font-size:12.5px; color:var(--muted);"></span>
@@ -1911,6 +1929,7 @@
     if(btn.dataset.view === 'autotrade' || btn.dataset.view === 'settings'){
       loadAiUsage();
     }
+    if(btn.dataset.view === 'autotrade') loadPickConfig();
   });
 
   /* ---------------- Ticker Tape ---------------- */
@@ -2864,22 +2883,22 @@
   var AT_STRATEGY_DEFS = [
     { id:'momentum', name:'모멘텀(추세 추종)', tag:'스윙',
       easy:'오늘 많이 오르고 있는 주식을 따라 사요.',
-      detail:'"오르는 주식은 계속 오르는 경향이 있다"는 생각으로 사는 전략이에요. 관심종목은 어제보다 3% 이상, AI 추천 종목은 1% 이상 오르면 사요. 며칠씩 갖고 있을 수 있어요.' },
+      detail:'"오르는 주식은 계속 오르는 경향이 있다"는 생각으로 사는 전략이에요. 관심종목은 어제보다 3% 이상, 거래대금 상위 종목은 1% 이상 오르면 사요. 며칠씩 갖고 있을 수 있어요.' },
     { id:'pullback', name:'눌림목(과열 회피)', tag:'스윙',
       easy:'조금만(0~2%) 오른 주식을 사요. 너무 많이 오른 건 피해요.',
       detail:'이미 크게 오른 주식은 다시 떨어질 위험이 커요. 그래서 이제 막 천천히 오르기 시작한(어제보다 0~2%) 주식을 골라요.' },
     { id:'breakout', name:'강한 돌파', tag:'스윙',
       easy:'아주 힘있게(6% 이상) 오르는 주식만 사서 오래 태워요.',
-      detail:'관심종목은 어제보다 6% 이상, AI 추천은 4% 이상 오를 때만 사요. 큰 흐름을 타려고 손절·익절 폭을 넓게 잡아요.' },
+      detail:'관심종목은 어제보다 6% 이상, 거래대금 상위 종목은 4% 이상 오를 때만 사요. 큰 흐름을 타려고 손절·익절 폭을 넓게 잡아요.' },
     { id:'reversal', name:'역추세(저가 반등)', tag:'스윙',
       easy:'조금 떨어진(-2~-6%) 주식이 다시 오를 걸 노려요.',
       detail:'"떨어진 주식은 다시 조금 오르곤 한다"는 생각이에요. 어제보다 2~6% 떨어진 주식을 사요. 예상이 틀리면 빨리 빠지려고 손절 폭을 좁게 잡아요.' },
     { id:'scalp', name:'초단타(잦은 매매)', tag:'스윙',
       easy:'조건을 낮춰 자주 사고, 조금만 오르거나 내려도 바로 팔아요.',
-      detail:'관심종목은 1.5%, AI 추천은 0.5%만 올라도 사요. 손절·익절 폭을 아주 좁게 잡아 빠르게 치고 빠져요. 이름은 초단타지만 장이 끝나도 다음 날까지 갖고 있을 수 있어요(하루 안에 다 파는 건 "데이트레이딩"이에요).' },
+      detail:'관심종목은 1.5%, 거래대금 상위 종목은 0.5%만 올라도 사요. 손절·익절 폭을 아주 좁게 잡아 빠르게 치고 빠져요. 이름은 초단타지만 장이 끝나도 다음 날까지 갖고 있을 수 있어요(하루 안에 다 파는 건 "데이트레이딩"이에요).' },
     { id:'selective', name:'신중한 선별(엄격)', tag:'스윙',
       easy:'아주 확실해 보일 때만, 대신 한 번에 크게 사요.',
-      detail:'관심종목은 4%, AI 추천은 2.5% 이상 오를 때만 사요. 자주 안 사는 대신 한 번에 큰 비중으로 사요.' },
+      detail:'관심종목은 4%, 거래대금 상위 종목은 2.5% 이상 오를 때만 사요. 자주 안 사는 대신 한 번에 큰 비중으로 사요.' },
     { id:'wideswing', name:'광폭 스윙(길게 보유)', tag:'스윙',
       easy:'모멘텀처럼 사지만, 오르내림을 크게 참고 오래 갖고 있어요.',
       detail:'사는 조건은 모멘텀과 비슷해요. 대신 손절·익절 폭을 아주 넓게 잡아서, 작은 흔들림에 팔지 않고 큰 흐름을 노려요.' },
@@ -3589,6 +3608,36 @@
     }).join('');
   }
 
+  /* ---- 종목 고르기 기준 + 마지막으로 고른 결과 ---- */
+  function loadPickConfig(){
+    fetch('/api/auto-trade-status?action=pick-config').then(function(r){ return r.json(); }).then(function(d){
+      if(d.error) throw new Error(d.error);
+      var s = d.screen;
+      document.getElementById('pickTopN').value = s.topN;
+      document.getElementById('pickMinCap').value = s.minCapEok;
+      document.getElementById('pickMaxChange').value = s.maxAbsChangePct;
+      document.getElementById('pickMax').value = s.maxPicks;
+      var box = document.getElementById('pickLast');
+      var last = d.last;
+      if(!last){ box.innerHTML = '<span style="color:var(--muted-2);">아직 고른 기록이 없어요. 평일 09:30 뒤 자동매매가 실행되면 골라요.</span>'; return; }
+      if(!last.ok){ box.innerHTML = '<span style="color:var(--up);">마지막 고르기 실패: '+escapeHtml(last.failReason || '')+' 15분 뒤 다시 시도해요.</span>'; return; }
+      box.innerHTML = '<b>지금 후보 '+last.candidates.length+'개</b> <span style="color:var(--muted-2);">('+atFmtDate(last.generatedAt)+' 고름)</span><br>' +
+        (last.candidates.map(function(c){ return escapeHtml(c.name); }).join(', ') || '기준을 통과한 종목이 없어요.') +
+        (last.excluded && last.excluded.length ? '<details class="more" style="margin:6px 0 0;"><summary>뺀 종목 '+last.excluded.length+'개와 이유</summary><div class="more-body">'+last.excluded.map(function(x){ return escapeHtml(x.name)+' — '+escapeHtml(x.why); }).join('<br>')+'</div></details>' : '');
+    }).catch(function(e){ console.error('pick config load failed', e); });
+  }
+  document.getElementById('pickSave').addEventListener('click', function(){
+    var msg = document.getElementById('pickMsg');
+    msg.textContent = '저장 중…'; msg.style.color = 'var(--muted-2)';
+    atPost('pick-config', { screen: {
+      topN: Number(document.getElementById('pickTopN').value), minCapEok: Number(document.getElementById('pickMinCap').value),
+      maxAbsChangePct: Number(document.getElementById('pickMaxChange').value), maxPicks: Number(document.getElementById('pickMax').value)
+    } }).then(function(){
+      msg.textContent = '저장했어요. 다음 자동매매 실행 때 새 기준으로 골라요.'; msg.style.color = 'var(--up)';
+      loadPickConfig();
+    }).catch(function(err){ msg.textContent = err.message; msg.style.color = 'var(--down)'; });
+  });
+
   /* ---- AI 사용량·예산·연결 상태 (설정 탭 계기판 + 자동매매 탭 경고 띠) ---- */
   var aiUsageData = null;
   function aiFmtUsd(v){
@@ -3616,7 +3665,7 @@
       alert.style.display = '';
       alert.innerHTML = '<b>⚠️ AI 연결이 끊겨 있어요</b><br>' + escapeHtml(st.hasKey ? failText : 'Vercel 환경변수에 ANTHROPIC_API_KEY가 없어요.') +
         (when ? ' <span style="color:var(--muted-2); font-size:12px;">('+when+' 마지막 실패)</span>' : '') +
-        '<br><span style="font-size:12.5px;">그동안 <b>AI 추천 종목은 사지 않고</b>, 관심종목만 사고팔아요. 사용량과 예산은 설정 탭에서 볼 수 있어요.</span>';
+        '<br><span style="font-size:12.5px;">종목 고르기와 매매는 AI 없이 계속 돌아가고, 실험 설계·상담·요약처럼 AI가 필요한 기능만 멈춰요. 사용량과 예산은 설정 탭에서 볼 수 있어요.</span>';
     } else {
       alert.style.display = 'none';
     }
@@ -3998,7 +4047,7 @@
       '<div>🔎 <b>종목 고르기</b>: '+(pick && pick.summary ? escapeHtml(pick.summary) : '아직 채점된 기록이 없어요(고른 지 3거래일이 지나야 채점돼요).')+'</div>' +
       (pick && pick.buckets && pick.buckets.length ? '<details class="more" style="margin:4px 0 6px 20px;"><summary>고를 때 상태별 3거래일 뒤 성적</summary><div class="more-body"><table><thead><tr><th>고를 때 상태</th><th>종목 수</th><th>3일 뒤 평균</th><th>오른 비율</th></tr></thead><tbody>' +
         pick.buckets.map(function(b){ return '<tr><td>'+escapeHtml(b.bucket)+'</td><td>'+b.n+'</td><td class="'+(b.avgRet3>=0?'up':'down')+'">'+(b.avgRet3>=0?'+':'')+b.avgRet3+'%</td><td>'+b.upRate+'%</td></tr>'; }).join('') +
-        '</tbody></table><p style="margin-top:6px;">5개 이상 쌓인 구간은 "교훈"으로 AI 종목 거르기에 전달돼요.</p></div></details>' : '') +
+        '</tbody></table><p style="margin-top:6px;">5개 이상 쌓이면 어떤 상태의 종목이 잘 됐는지 믿고 볼 수 있어요.</p></div></details>' : '') +
       '<div>🧪 <b>자동조정 학습</b>: 채점된 실험 '+(sys.judged||0)+'개 — 좋아짐 <span class="up">'+(sys.improved||0)+'</span>, 나빠짐 <span class="down">'+(sys.worse||0)+'</span>, 되돌림 '+(sys.rolledBack||0)+'번, 지금 실험 중 '+(sys.running||0)+'개</div>';
 
     renderScorecardTrend();

@@ -1,70 +1,78 @@
 // /api/_picks.js
-// "종목 고르기" 규칙과 성적표입니다. screen-candidates.js(고르기)와 auto-trade-status.js(채점표 화면)가 같이 써요.
+// "종목 고르기" 규칙과 성적표입니다. screen-candidates.js(고르기)와 auto-trade-status.js(설정·화면)가 같이 써요.
 // _로 시작해서 Vercel 함수 개수에 안 잡혀요.
 //
-// 예전 문제(2026-10 실제 기록): AI가 실패하면 "오늘 제일 많이 오른 3종목(+17~22%)"을 그대로 사서, 41번 판 결과가
-// 승률 20%·평균 -2.23%였어요. 후보도 "많이 오른 주식"뿐이라 눌림목·역추세 전략은 거의 매매를 못 했어요.
-// 이제는:
-//   1) 기본 걸러내기 — 우선주·스팩·ETF/ETN·동전주·거래가 적은 종목, 오늘 이미 +15% 넘게 오른 종목은 빼요.
-//   2) 전략별 후보 묶음 — 오르는 중(모멘텀·돌파), 조금만 오른 활발한 종목(눌림목), 떨어진 탄탄한 종목(역추세).
-//   3) 점수 규칙으로 먼저 순위를 매기고(공짜, 늘 같은 결과), AI는 "피해야 할 종목"만 걸러요.
-//   4) 고른 종목과 걸러진 종목을 기록해 두고, 3거래일 뒤 실제로 어떻게 됐는지 채점해 성적표와 교훈을 만들어요.
+// 고르는 방법(2026-11, 사용자 결정): 거래대금이 많은 종목 중 안전 기준을 통과한 종목만 씁니다. AI는 쓰지 않아요.
+//   1) 거래대금 상위 N개를 받아요(거래가 많아야 원하는 가격에 사고팔기 쉬워요).
+//   2) 시가총액, 위험 표시(관리·경고·단기과열 등), 오늘 등락폭으로 걸러요.
+//   3) 남은 종목을 거래대금 순으로 최대 M개까지 후보로 써요.
+//   4) 고른 종목과 뺀 종목을 기록해 두고, 3거래일 뒤 실제로 어떻게 됐는지 채점해 성적표를 만들어요.
+// 거래대금 상위에는 급등 테마주도 많이 올라오므로, 거래대금만으로는 안전하지 않아서 2)가 꼭 필요해요.
+// 시가총액·위험 표시를 확인하지 못한 종목은 안전한지 알 수 없으니 뺍니다.
 
 export const PICK_REPORT_KEY = 'picks:report';
 export const PICK_JOURNAL_KEY = 'picks:journal';
+export const SCREEN_CACHE_KEY = 'screen:cache:v2';
 const MAX_JOURNAL = 90;
 
-const EXCLUDE_NAME = /스팩|SPAC|ETN|ETF|KODEX|TIGER|KBSTAR|ARIRANG|HANARO|KOSEF|TIMEFOLIO|RISE |PLUS |SOL |ACE |레버리지|인버스|선물|채권/i;
-export const POOL_LABEL = { rise: '오르는 중', calm: '조금 오른 활발한 종목', fall: '떨어진 탄탄한 종목' };
+export const POOL_LABEL = { value: '거래대금 상위', rise: '오르는 중', calm: '조금 오른 활발한 종목', fall: '떨어진 탄탄한 종목' };
 
-// 기본 걸러내기. 걸러지면 이유 문자열, 통과하면 null
-export function excludeReason(row) {
-  if (!row || !/^\d{6}$/.test(String(row.symbol))) return '코드 이상';
-  if (!/0$/.test(row.symbol)) return '우선주 등(보통주 아님)';
-  if (EXCLUDE_NAME.test(row.name || '')) return 'ETF·ETN·스팩 등';
-  if (row.price !== null && row.price < 1000) return '1,000원 미만 동전주';
-  if (row.volume && row.price && row.price * row.volume < 3e9) return '거래대금 30억 미만';
+// 화면에서 바꿀 수 있는 기준 (자동매매 설정 cfg.screen에 저장)
+export const DEFAULT_SCREEN = { topN: 30, minCapEok: 10000, maxAbsChangePct: 10, maxPicks: 15 };
+
+function clipNum(v, lo, hi, fallback) {
+  const n = Number(v);
+  if (v === '' || v === null || v === undefined || !Number.isFinite(n)) return fallback;
+  return Math.max(lo, Math.min(hi, n));
+}
+
+export function normalizeScreen(raw) {
+  const r = raw || {}, d = DEFAULT_SCREEN;
+  return {
+    topN: Math.round(clipNum(r.topN, 5, 30, d.topN)), // KIS 순위 API가 한 번에 최대 30개를 줘요
+    minCapEok: Math.round(clipNum(r.minCapEok, 0, 1000000, d.minCapEok)), // 억 원 단위 (10000 = 1조)
+    maxAbsChangePct: clipNum(r.maxAbsChangePct, 1, 30, d.maxAbsChangePct),
+    maxPicks: Math.round(clipNum(r.maxPicks, 1, 30, d.maxPicks))
+  };
+}
+
+// 안전 기준 검사. 통과하면 null, 걸리면 쉬운 이유. row: 순위 행, q: 종목 시세(주식현재가 응답의 output)
+export function safetyReason(row, q, cfg) {
+  if (!/^\d{5}0$/.test(String(row.symbol))) return '보통주가 아님(우선주 등)';
+  if (!q) return '시세를 확인하지 못함';
+  const cap = Number(q.hts_avls);
+  if (!Number.isFinite(cap) || cap <= 0) return '시가총액을 확인하지 못함';
+  if (cap < cfg.minCapEok) return `시가총액 부족(${Math.round(cap).toLocaleString()}억)`;
+  if (q.mang_issu_cls_code === 'Y') return '관리종목';
+  if (q.sltr_yn === 'Y') return '정리매매';
+  if (q.temp_stop_yn === 'Y') return '거래 임시정지';
+  if (q.invt_caful_yn === 'Y') return '투자유의';
+  if (q.short_over_yn === 'Y') return '단기과열';
+  // 시장경고코드: 00 없음, 01 투자주의, 02 투자경고, 03 투자위험
+  if (q.mrkt_warn_cls_code && q.mrkt_warn_cls_code !== '00') return '시장경고(투자주의·경고·위험)';
+  if (row.changePct === null || row.changePct === undefined) return '등락률을 확인하지 못함';
+  if (Math.abs(row.changePct) > cfg.maxAbsChangePct) return `오늘 등락폭이 큼(${row.changePct}%)`;
   return null;
 }
 
-// 후보 묶음 만들기 + 점수 순위(묶음마다 최대 5개). rise/fall은 등락률 순위, vol은 거래량 순위 목록.
-export function buildPools(riseRows, fallRows, volRows) {
-  const volSet = new Set(volRows.map((r) => r.symbol));
-  const tv = (r) => (r.price && r.volume ? r.price * r.volume : 0);
-  const logTv = (r) => (tv(r) > 0 ? Math.log10(tv(r)) : 8);
-  const pools = { rise: [], calm: [], fall: [] };
-  const excluded = [];
-  const seen = new Set();
-  const add = (pool, r, score) => {
-    if (seen.has(r.symbol)) return;
-    const why = excludeReason(r);
-    if (why) { excluded.push({ symbol: r.symbol, name: r.name, why }); return; }
-    seen.add(r.symbol);
-    pools[pool].push(Object.assign({}, r, { pool, inVolumeTop: volSet.has(r.symbol), score: Math.round(score * 10) / 10 }));
-  };
-  riseRows.forEach((r) => {
-    if (r.changePct === null) return;
-    if (r.changePct > 15) { excluded.push({ symbol: r.symbol, name: r.name, why: '오늘 이미 +15% 넘게 오름(고점 매수 위험)' }); return; }
-    if (r.changePct < 2) return;
-    // 거래량 상위에도 든 종목 우대, 상승률은 10%까지만 점수에 반영(더 오른 건 가산점 없음), 거래대금이 클수록 우대
-    add('rise', r, (volSet.has(r.symbol) ? 20 : 0) + Math.min(r.changePct, 10) + logTv(r));
+// rows: 거래대금 순위 행, quotes: { 종목: 시세 output }. 거래대금 큰 순서로 최대 maxPicks개를 고르고, 뺀 종목은 이유와 함께 돌려줘요.
+export function selectByValue(rows, quotes, cfg) {
+  const sorted = rows.slice().sort((a, b) => (b.tradeValue || 0) - (a.tradeValue || 0));
+  const picks = [], rejected = [];
+  sorted.forEach((row, i) => {
+    const q = quotes[row.symbol];
+    const why = safetyReason(row, q, cfg);
+    const item = Object.assign({}, row, { rank: i + 1, pool: 'value', capEok: q && Number.isFinite(Number(q.hts_avls)) ? Number(q.hts_avls) : null });
+    if (why) rejected.push(Object.assign(item, { why }));
+    else if (picks.length < cfg.maxPicks) picks.push(item);
+    else rejected.push(Object.assign(item, { why: '개수 제한(거래대금 순으로 ' + cfg.maxPicks + '개까지)' }));
   });
-  volRows.forEach((r) => {
-    if (r.changePct === null || r.changePct < 0 || r.changePct > 2 || (r.price !== null && r.price < 3000)) return;
-    add('calm', r, logTv(r) + (2 - Math.abs(r.changePct - 1)));
-  });
-  fallRows.forEach((r) => {
-    if (r.changePct === null || r.changePct > -2 || r.changePct < -6) return;
-    if (r.price !== null && r.price < 5000) return;
-    if (r.volume && tv(r) < 5e9) return; // 떨어진 종목은 더 엄격하게(거래대금 50억 이상)
-    add('fall', r, logTv(r) + (volSet.has(r.symbol) ? 10 : 0));
-  });
-  Object.keys(pools).forEach((k) => { pools[k] = pools[k].sort((a, b) => b.score - a.score).slice(0, 5); });
-  return { pools, excluded };
+  return { picks, rejected };
 }
 
-// 지난 기록에서 배운 것: 고를 때의 상승률 구간·묶음별 3거래일 뒤 평균 — AI 프롬프트와 성적표에 써요
+// 고를 때 상태별 3거래일 뒤 평균 — 성적표에 써요. 거래대금 방식은 고를 때의 등락률 구간으로 나눠 봐요.
 function bucketOf(p) {
+  if (p.pool === 'value') return p.changePct >= 5 ? '고를 때 +5% 이상' : p.changePct >= 0 ? '고를 때 0~+5%' : p.changePct > -5 ? '고를 때 -5~0%' : '고를 때 -5% 이하';
   if (p.pool !== 'rise') return POOL_LABEL[p.pool] || p.pool;
   return p.changePct >= 10 ? '오르는 중(+10% 이상)' : p.changePct >= 5 ? '오르는 중(+5~10%)' : '오르는 중(+2~5%)';
 }
@@ -79,13 +87,15 @@ function closeAfter(history, isoDate, n) {
   return row && row.close ? row.close : null;
 }
 
-// 채점: 고른 지 3거래일이 지난 기록의 고른 종목·걸러진 종목 수익률을 계산해 기록에 붙여요.
+// 채점: 고른 지 3거래일이 지난 기록의 고른 종목·뺀 종목 수익률을 계산해 기록에 붙여요.
 // fetchHistory(symbol) → 일봉 배열. 한 번에 최대 maxSymbols 종목만(시간 제한 때문에), 나머지는 다음에.
-export async function gradeJournal(journal, fetchHistory, maxSymbols) {
+// 아직 3거래일이 안 된 최근 기록이 조회 횟수를 다 쓰지 않도록, 5일 이상 지난 기록만 오래된 순서로 봐요.
+export async function gradeJournal(journal, fetchHistory, maxSymbols, nowMs) {
   const cache = {};
   let fetched = 0;
-  for (const entry of journal) {
-    if (entry.graded) continue;
+  const oldEnough = (e) => (nowMs || Date.now()) - Date.parse(e.date) >= 5 * 86400000;
+  for (const entry of journal.slice().reverse()) {
+    if (entry.graded || !oldEnough(entry)) continue;
     const all = (entry.picks || []).concat(entry.rejected || []);
     let complete = true;
     for (const p of all) {
@@ -126,7 +136,7 @@ export function buildReport(journal) {
   let summary = '아직 채점된 기록이 없어요(고른 지 3거래일이 지나야 채점돼요).';
   if (picks.length) {
     summary = `고른 종목 ${picks.length}개의 3거래일 뒤 평균 ${pickAvg >= 0 ? '+' : ''}${pickAvg}%, 오른 비율 ${hit}%` +
-      (rejected.length ? ` / AI·규칙이 걸러낸 종목 ${rejected.length}개는 평균 ${rejAvg >= 0 ? '+' : ''}${rejAvg}% → 거르기가 ${pickAvg > rejAvg ? '도움이 됐어요' : '아직 도움이 안 됐어요'}` : '');
+      (rejected.length ? ` / 기준에 걸려 뺀 종목 ${rejected.length}개는 평균 ${rejAvg >= 0 ? '+' : ''}${rejAvg}% → 거르기가 ${pickAvg > rejAvg ? '도움이 됐어요' : '아직 도움이 안 됐어요'}` : '');
   }
   return {
     updatedAt: Date.now(), picks: picks.length, rejected: rejected.length,
