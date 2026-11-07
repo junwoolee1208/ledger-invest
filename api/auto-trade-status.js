@@ -24,6 +24,8 @@
 //   action=pick-config,     GET  : 종목 고르기 기준 + 마지막으로 고른 결과 / POST: 기준 저장(로그인한 본인만)
 //   action=chat,            POST : AI 전략 상담(로그인, 하루 30번) — 데이터 조회·그래프·표·변경 "제안"
 //   action=reset-all-risk,  POST : 모든 전략의 숫자를 처음 값으로 되돌리고 실험을 새로 시작(선택: 가상계좌도 초기화)
+//   action=methods,         GET  : 전략별 사는/파는 방법 / POST(로그인): 방법 저장·되돌리기
+//   action=universe,        GET  : 고정 50종목 목록 + 마지막 점검 / POST(로그인): 지금 점검
 
 import { getKisToken, kisHeaders, num, KIS_BASE } from './_kis.js';
 import { kvGetJson, kvSetJson, kvCommand, kvMGetJson, kvReady } from './_kv.js';
@@ -32,7 +34,14 @@ import {
   planSell, positionCostBasis, estimateOverseasTax
 } from './_costs.js';
 import { DEFAULT_DAYTRADE, normalizeDaytrade, describeDaytrade } from './_daytrade.js';
-import { STRATEGY_IDS, STRATEGY_NAMES, WEIGHT_BASED_IDS, OWN_SETTINGS_IDS, FIXED_RULE_IDS, BASE_RISK, keysFor, horizonOf, normalizeHorizon } from './_strategies.js';
+import {
+  STRATEGY_IDS, STRATEGY_NAMES, WEIGHT_BASED_IDS, OWN_SETTINGS_IDS, FIXED_RULE_IDS, BASE_RISK, keysFor, horizonOf, normalizeHorizon,
+  BEAR_IDS, LINEUP_VERSION, LINEUP_DEFAULTS, enabledMapOf
+} from './_strategies.js';
+import { METHODS_KEY, DEFAULT_METHODS, methodOf, normalizeMethod, describeMethod } from './_methods.js';
+import {
+  FIXED_UNIVERSE, INVERSE_ETF, UNIVERSE_CHOSEN_AT, UNIVERSE_RULE, UNIVERSE_REVIEW_KEY, UNIVERSE_REVIEW_DAYS, fetchUniverseStats
+} from './_universe.js';
 import { LONGTERM_STATE_KEY } from './_longterm.js';
 import { isSellSide, ensureBackfilled, DAILY_KEY_PREFIX, TRADES_KEY_PREFIX } from './_ledger.js';
 import { EXPERIMENTS_KEY, BEST_RISK_KEY, FLAGS_KEY, LEARN, lessonLine, VERDICT_TEXT } from './_learning.js';
@@ -93,11 +102,9 @@ const DEFAULT_CONFIG = {
   // 스케줄러 쪽 호출 간격은 그대로 둬도 돼요.
   adjustIntervalHours: 24, // 전략 자동조정(실거래 성과 기반) 실행 주기
   evolveIntervalHours: 24, // 진화형 탐색 자동 실행 주기
-  strategies: {
-    momentum: true, pullback: true, breakout: true, reversal: true,
-    scalp: true, selective: true, wideswing: true, baseline: true, daytrade: true, evolved: true,
-    'regime-adaptive': true, 'opening-breakout': true, 'vwap-pullback': true, longterm: true
-  },
+  // 전략 켜짐/꺼짐: 2026-11-08 새 구성(_strategies.js LINEUP_DEFAULTS). lineup 번호가 같을 때만 저장된 값을 따라요.
+  strategies: Object.assign({}, LINEUP_DEFAULTS),
+  lineup: LINEUP_VERSION,
   updatedAt: null
 };
 
@@ -151,7 +158,8 @@ async function handleConfig(req, res) {
     // 요청에 안 들어 있으면 기존 값을 그대로 이어받습니다. momentum 손절/익절(risk)도 이제 카드에서 바꾸므로 같은 방식이에요.
     const prev = (await kvGetJson(CONFIG_KEY, null)) || {};
     const risk = Object.assign({}, DEFAULT_CONFIG.risk, prev.risk || {}, body.risk || {});
-    const strategiesIn = body.strategies || prev.strategies || {};
+    // 전략 켜기/끄기는 카드 스위치에서만 바꿔요. 이 저장 버튼은 지금 켜짐 상태(새 구성 기준)를 그대로 이어받아요.
+    const strategiesIn = enabledMapOf(prev);
     const next = {
       daytrade: normalizeDaytrade(prev.daytrade),
       screen: normalizeScreen(prev.screen),
@@ -172,6 +180,7 @@ async function handleConfig(req, res) {
         acc[id] = strategiesIn[id] !== false;
         return acc;
       }, {}),
+      lineup: LINEUP_VERSION,
       updatedAt: Date.now()
     };
 
@@ -255,9 +264,9 @@ async function handleStrategies(req, res) {
 // 카드 목록과 AI 상담(get_overview)이 같이 쓰는 "전략 목록 만들기"
 async function buildStrategyList() {
   {
-    const [cfgRaw, overrides, customList, experiments, flags, longterm] = await Promise.all([
+    const [cfgRaw, overrides, customList, experiments, flags, longterm, methods] = await Promise.all([
       kvGetJson(CONFIG_KEY, null), kvGetJson(OVERRIDES_KEY, {}), kvGetJson(CUSTOM_KEY, []),
-      kvGetJson(EXPERIMENTS_KEY, []), kvGetJson(FLAGS_KEY, {}), kvGetJson(LONGTERM_STATE_KEY, null)
+      kvGetJson(EXPERIMENTS_KEY, []), kvGetJson(FLAGS_KEY, {}), kvGetJson(LONGTERM_STATE_KEY, null), kvGetJson(METHODS_KEY, {})
     ]);
     // 카드에 보여줄 학습 상태: 지금 실험/관찰 중인지, 몇 건 쌓였는지, 최근 채점 결과
     function learningOf(id) {
@@ -272,7 +281,7 @@ async function buildStrategyList() {
       };
     }
     const cfg = cfgRaw || DEFAULT_CONFIG;
-    const enabledMap = cfg.strategies || {};
+    const enabledMap = enabledMapOf(cfg);
     const hidden = Array.isArray(cfg.hidden) ? cfg.hidden : [];
     const list = STRATEGY_IDS.map((id) => {
       let kind = 'builtin', risk = null, daytrade = null;
@@ -286,13 +295,93 @@ async function buildStrategyList() {
         const base = id === 'momentum' ? Object.assign({}, BASE_RISK.momentum, cfg.risk || {}) : BASE_RISK[id];
         risk = clipRisk(Object.assign({}, base, overrides[id] || {}), base);
       }
-      return { id, name: STRATEGY_NAMES[id], kind, horizon: horizonOf(id), enabled: enabledMap[id] !== false, hidden: hidden.includes(id), risk, daytrade, learning: learningOf(id),
+      const method = WEIGHT_BASED_IDS.includes(id) && id !== 'evolved' || id === 'longterm' ? null : methodOf(id, methods);
+      return { id, name: STRATEGY_NAMES[id], kind, horizon: horizonOf(id), bear: BEAR_IDS.includes(id), enabled: enabledMap[id] !== false, hidden: hidden.includes(id), risk, daytrade, learning: learningOf(id),
+        method, methodText: method ? describeMethod(method) : null,
         ...(id === 'longterm' ? { longterm } : {}) };
     });
     customList.forEach((c) => list.push({
       id: c.id, name: c.name, kind: 'custom', horizon: normalizeHorizon(c.horizon), enabled: c.enabled !== false, hidden: false, risk: null, createdAt: c.createdAt || null
     }));
     return list;
+  }
+}
+
+
+/* ==================== action=methods (전략별 사는/파는 방법) ====================
+   GET : 전략별 지금 쓰는 방법과 설명
+   POST(로그인): { strategyId, method } 저장 / { strategyId, reset: true } 처음 방법으로. 전략연구실 "방법 찾기"의 [이 방법 적용]이 써요.
+   기준선(대조군)은 비교 기준이라 바꾸지 않아요. 바꾼 내용은 "전략 변경 이력"에 남겨요.
+   이미 들고 있는 종목은 산 때의 방법을 끝까지 따르고, 새로 사는 종목부터 새 방법을 써요. */
+async function handleMethods(req, res) {
+  try {
+    if (req.method === 'GET') {
+      const saved = await kvGetJson(METHODS_KEY, {});
+      const out = {};
+      STRATEGY_IDS.forEach((id) => {
+        const m = methodOf(id, saved);
+        out[id] = { method: m, text: describeMethod(m), changed: !!saved[id] };
+      });
+      res.status(200).json({ methods: out });
+      return;
+    }
+    if (req.method !== 'POST') { res.status(405).json({ error: '허용되지 않은 메서드입니다.' }); return; }
+    const uid = await requireUid(req, res);
+    if (!uid) return;
+    const body = readBody(req);
+    const id = String(body.strategyId || '');
+    if (!STRATEGY_IDS.includes(id)) { res.status(400).json({ error: '알 수 없는 전략입니다.' }); return; }
+    if (id === 'baseline') { res.status(400).json({ error: '기준선은 비교 기준이라 방법을 바꾸지 않아요.' }); return; }
+    const saved = await kvGetJson(METHODS_KEY, {});
+    const before = methodOf(id, saved);
+    if (body.reset) delete saved[id];
+    else saved[id] = normalizeMethod(body.method, DEFAULT_METHODS[id]);
+    const after = methodOf(id, saved);
+    await kvSetJson(METHODS_KEY, saved);
+    const changes = await kvGetJson(CHANGES_KEY, []);
+    changes.unshift({
+      id: Date.now() + '-method-' + id, ts: Date.now(), date: todayKST(),
+      strategyId: id, strategyName: STRATEGY_NAMES[id] || id, source: body.source === 'backtest' ? 'backtest' : 'manual',
+      diagnosis: body.reset ? '사는/파는 방법을 처음 방법으로 되돌렸어요.'
+        : (body.source === 'backtest' ? '전략연구실 "방법 찾기"에서 앞 기간에 고르고 뒤 기간에서도 이익이었던 방법으로 바꿨어요.' : '사는/파는 방법을 직접 바꿨어요.') +
+          (body.note ? ' ' + String(body.note).slice(0, 200) : ''),
+      statsAtChange: null, beforeDescription: describeMethod(before), afterDescription: describeMethod(after)
+    });
+    if (changes.length > 200) changes.length = 200;
+    await kvSetJson(CHANGES_KEY, changes);
+    res.status(200).json({ ok: true, method: after, text: describeMethod(after) });
+  } catch (e) {
+    console.error('auto-trade-status.js(methods) error:', e);
+    res.status(500).json({ error: '서버 오류가 발생했습니다.' });
+  }
+}
+
+/* ==================== action=universe (고정 50종목) ====================
+   GET : 목록 + 마지막 점검 결과(점검할 때가 됐는지)
+   POST(로그인): { review: true } 지금 점검 — 50종목의 20일 평균 거래대금·시가총액을 새로 받아 기준 밖 종목을 알려줘요.
+   자동으로 바꾸지 않아요(목록이 계속 바뀌면 전략끼리 비교가 흐려져서). 바꿀지는 사용자가 정해요. */
+async function handleUniverse(req, res) {
+  try {
+    if (req.method === 'GET') {
+      const review = await kvGetJson(UNIVERSE_REVIEW_KEY, null);
+      const ageDays = review && review.at ? Math.floor((Date.now() - review.at) / 86400000) : null;
+      res.status(200).json({
+        list: FIXED_UNIVERSE, inverse: INVERSE_ETF, chosenAt: UNIVERSE_CHOSEN_AT, rule: UNIVERSE_RULE,
+        review, reviewDue: ageDays === null || ageDays >= UNIVERSE_REVIEW_DAYS, reviewAgeDays: ageDays
+      });
+      return;
+    }
+    if (req.method !== 'POST') { res.status(405).json({ error: '허용되지 않은 메서드입니다.' }); return; }
+    const uid = await requireUid(req, res);
+    if (!uid) return;
+    const token = await getKisToken();
+    const rows = await fetchUniverseStats(token);
+    const review = { at: Date.now(), date: todayKST(), rows, flagged: rows.filter((r) => r.flags.length).length };
+    await kvSetJson(UNIVERSE_REVIEW_KEY, review);
+    res.status(200).json({ ok: true, review });
+  } catch (e) {
+    console.error('auto-trade-status.js(universe) error:', e);
+    res.status(500).json({ error: e.message === 'NO_KEYS' ? 'KIS 키가 설정되지 않았습니다.' : '서버 오류가 발생했습니다.' });
   }
 }
 
@@ -317,7 +406,8 @@ async function handleStrategyToggle(req, res) {
     }
     if (!STRATEGY_IDS.includes(id)) { res.status(400).json({ error: '알 수 없는 전략입니다.' }); return; }
     const cfg = (await kvGetJson(CONFIG_KEY, null)) || Object.assign({}, DEFAULT_CONFIG);
-    cfg.strategies = Object.assign({}, DEFAULT_CONFIG.strategies, cfg.strategies || {});
+    cfg.strategies = enabledMapOf(cfg); // 새 구성 기준 지금 상태에서 시작해요
+    cfg.lineup = LINEUP_VERSION;
     let hidden = Array.isArray(cfg.hidden) ? cfg.hidden.slice() : [];
     if (typeof body.hidden === 'boolean') {
       hidden = hidden.filter((h) => h !== id);
@@ -577,7 +667,7 @@ async function buildScorecard() {
 
   const history = await kvGetJson(SCORECARD_HISTORY_KEY, []);
   const weekAgo = history.find((h) => h.date <= kstDateMinus(7));
-  const enabledMap = cfg.strategies || {};
+  const enabledMap = enabledMapOf(cfg);
   const analyze = (id) => scoreStrategy({
     id, trades: trades.filter((t) => (t.strategy || 'momentum') === id), accountPct: pctOf(id),
     experiments: experiments.filter((e) => e.strategyId === id), histories,
@@ -1497,5 +1587,7 @@ export default async function handler(req, res) {
   if (action === 'deep-eval') return handleDeepEval(req, res);
   if (action === 'chat') return handleChat(req, res);
   if (action === 'pick-config') return handlePickConfig(req, res);
+  if (action === 'methods') return handleMethods(req, res);
+  if (action === 'universe') return handleUniverse(req, res);
   return handleConfig(req, res);
 }

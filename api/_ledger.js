@@ -17,8 +17,10 @@ const BACKFILL_FLAG_KEY = 'autotrade:daily:backfilled';
 const MAX_TRADES_PER_DAY = 1500; // 하루 상세 기록 상한(값 하나가 너무 커지지 않게)
 
 // 매도 종류: 손절 / 익절 / 장마감 청산(단타) / 보유 기한 도달(스윙) / 비중 조정(장기)
+// + 나눠 팔기(일부 익절) / 따라가는 손절 / 위험 줄이기(장 마감 전 급락 대비 절반 매도) / 흐름 전환 매도(인버스: 하락장 끝)
+export const SELL_SIDES = ['STOP_LOSS', 'TAKE_PROFIT', 'DAY_CLOSE', 'MAX_HOLD', 'REBALANCE', 'PARTIAL_TAKE', 'TRAIL_STOP', 'RISK_CUT', 'SIGNAL_EXIT'];
 export function isSellSide(side) {
-  return side === 'STOP_LOSS' || side === 'TAKE_PROFIT' || side === 'DAY_CLOSE' || side === 'MAX_HOLD' || side === 'REBALANCE';
+  return SELL_SIDES.includes(side);
 }
 
 // 손익 금액이 없는 옛 기록(필드 추가 전 데이터)은 남아 있는 값으로 근사치를 계산합니다(화면 매매 기록과 같은 방식).

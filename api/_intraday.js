@@ -10,11 +10,12 @@ export const INTRADAY_STATE_KEY = 'autotrade:intraday-state'; // { date, ranges:
 // 새 단타 전략 2개의 규칙. 14:30 뒤에 사면 목표가까지 갈 시간이 짧아서 그때부터는 안 사요.
 export const INTRADAY_RULES = {
   buyStart: '09:31', buyEnd: '14:30', closeAt: '15:10',
-  dailyLossLimitPct: 1.5, cooldownMin: 30, maxBuysPerDay: 6, maxPositions: 4
+  // 재매수 대기는 10분이에요. 대신 "다른 근거"가 있어야 다시 사요(_bear.js reentryAllowed).
+  dailyLossLimitPct: 1.5, cooldownMin: 10, maxBuysPerDay: 6, maxPositions: 4
 };
 
 // 사는 조건은 그대로 두고 "당일 청산"만 더하는 전략(초단타, 단타로 저장한 내 전략)의 규칙.
-// 손실 한도와 재매수 대기는 원래 없던 규칙이라 넣지 않아요(dailyLossLimitPct: null = 한도 없음).
+// 하루 손실 한도는 모든 전략 공통 1.5%(_strategies.js COMMON_RULES)를 따르고, 재매수 대기는 공통 10분이에요.
 export const DAY_CLOSE_RULES = {
   buyStart: '09:00', buyEnd: '15:00', closeAt: '15:10', dailyLossLimitPct: null, cooldownMin: 0
 };

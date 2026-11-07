@@ -6,6 +6,8 @@
 //
 // mode=presets (기본값, 생략 가능): 고정 9개 전략(가중치·청산·사이징 조합)을 과거 데이터로 한 번에
 //   비교하고 AI가 피드백을 줍니다. 예전 /api/backtest 와 동일.
+// mode=strategy-prep / strategy / method-search: 고정 50종목으로 실제 자동매매 전략을 기간 백테스트하고,
+//   사는/파는 방법 조합을 비교해요(로직은 _strategy-sim.js, 설명은 아래 해당 함수 위 주석).
 // mode=evolve: "계속 더 나은 전략을 찾는" 반복 탐색. 서로 다른 시작점의 계보(lineage) 3개를 동시에
 //   진화시켜서 한 조합에 갇히지 않게 합니다 (로직은 _evolve-core.js).
 //   - 프론트엔드 버튼이 부르는 수동 실행: mode=evolve&symbols=...&days=...
@@ -22,7 +24,10 @@ import {
   annotateWithFactors, runBacktest, classifyRegimeByDate, REGIME_LABELS, STARTING_CASH, FEE_PCT
 } from './_backtest-core.js';
 import { DEFAULT_LINEAGES, describeStrategy, advanceGeneration, MAX_HISTORY } from './_evolve-core.js';
-import { kvGetJson, kvSetJson, kvReady } from './_kv.js';
+import { kvGetJson, kvSetJson, kvReady, kvMGetJson, kvMSetJson } from './_kv.js';
+import { FIXED_UNIVERSE, INVERSE_ETF } from './_universe.js';
+import { METHODS_KEY } from './_methods.js';
+import { prepareData, simulateStrategy, searchMethods, benchmarks, SIM_STRATEGY_IDS, SIM_NOTES } from './_strategy-sim.js';
 import { loadCosts, buyCostPct, sellCostPct } from './_costs.js';
 import { askClaude } from './_ai.js'; // AI 호출 공용 창구(사용량·예산·실패 이유 기록)
 
@@ -711,6 +716,196 @@ async function handleDetail(req, res) {
   }
 }
 
+
+/* ==================== 기간 백테스트(전략 선택) · 방법 찾기 ====================
+   고정 50종목 + 인버스 ETF + 코스피200의 일봉을 저장소에 하루 동안 보관해 두고(bt:bars:v1:종목),
+   화면에서 고른 전략·기간으로 _strategy-sim.js가 계산해요.
+   - mode=strategy-prep&batch=0..N : 일봉 준비(한 번에 다 받으면 30초 제한에 걸려서 나눠 받아요). 오늘 받은 건 건너뛰어요.
+   - mode=strategy&ids=a,b&start=YYYYMMDD&end=YYYYMMDD&cash=10000000 : 기간 백테스트
+   - mode=method-search&id=...&start=...&end=... : 사는/파는 방법 조합 비교(앞 2/3 기간에서 고르고 뒤 1/3에서 확인)
+   조회·계산만 하고 매매나 설정은 바꾸지 않아서 로그인 없이 쓸 수 있어요(방법 "적용"은 auto-trade-status.js에서 로그인 후). */
+
+const BARS_PREFIX = 'bt:bars:v1:';
+const BARS_LOOKBACK_DAYS = 450; // 약 300거래일(14개월). 저장소 값 크기를 1MB 아래로 유지하려고 이만큼만 보관해요
+const INDEX_BARS_SYMBOL = 'KOSPI200';
+const PREP_BATCH = 9;
+
+function barsSymbols() {
+  return FIXED_UNIVERSE.map((u) => u.symbol).concat([INVERSE_ETF.symbol, INDEX_BARS_SYMBOL]);
+}
+function kstToday() {
+  return new Date(Date.now() + 9 * 3600 * 1000).toISOString().slice(0, 10);
+}
+function ymdDaysAgo(days) {
+  return new Date(Date.now() + 9 * 3600 * 1000 - days * 86400000).toISOString().slice(0, 10).replace(/-/g, '');
+}
+// 저장 크기를 줄이려고 "날짜,시가,고가,저가,종가,거래량;..." 한 줄 문자열로 보관해요.
+function packRows(rows) {
+  return rows.map((r) => [r.date, r.open, r.high, r.low, r.close, r.volume || 0].join(',')).join(';');
+}
+function unpackRows(s) {
+  if (!s) return [];
+  return String(s).split(';').map((x) => {
+    const [date, open, high, low, close, volume] = x.split(',');
+    return { date, open: Number(open), high: Number(high), low: Number(low), close: Number(close), volume: Number(volume) };
+  });
+}
+
+// 코스피200 일봉. 실패하면 빈 배열(그때는 50종목 평균을 시장 대신 써요).
+async function fetchIndexHistoryRange(token, startYmd, endYmd) {
+  const rows = [];
+  let curEnd = endYmd;
+  let lastEarliest = null;
+  for (let page = 0; page < 15; page++) {
+    const url = `${KIS_BASE}/uapi/domestic-stock/v1/quotations/inquire-daily-indexchartprice` +
+      `?FID_COND_MRKT_DIV_CODE=U&FID_INPUT_ISCD=2001&FID_INPUT_DATE_1=${startYmd}&FID_INPUT_DATE_2=${curEnd}&FID_PERIOD_DIV_CODE=D`;
+    const data = await fetchKisJson(url, kisHeaders(token, 'FHKUP03500100'));
+    const out = data && Array.isArray(data.output2) ? data.output2.filter((r) => r.stck_bsop_date) : [];
+    if (!out.length) break;
+    out.forEach((r) => rows.push({
+      date: r.stck_bsop_date, open: num(r.bstp_nmix_oprc), high: num(r.bstp_nmix_hgpr), low: num(r.bstp_nmix_lwpr),
+      close: num(r.bstp_nmix_prpr), volume: num(r.acml_vol) || 0
+    }));
+    const earliest = out[out.length - 1].stck_bsop_date;
+    if (earliest <= startYmd || earliest === lastEarliest) break;
+    lastEarliest = earliest;
+    curEnd = String(Number(earliest) - 1);
+  }
+  const uniq = new Map();
+  rows.forEach((r) => { if (r.date >= startYmd && r.date <= endYmd && r.open && r.close) uniq.set(r.date, r); });
+  return Array.from(uniq.values()).sort((a, b) => a.date.localeCompare(b.date));
+}
+
+async function handleStrategyPrep(req, res) {
+  const all = barsSymbols();
+  const batches = Math.ceil(all.length / PREP_BATCH);
+  const batch = Math.max(0, Math.min(batches - 1, Number(req.query.batch) || 0));
+  const list = all.slice(batch * PREP_BATCH, (batch + 1) * PREP_BATCH);
+  try {
+    const today = kstToday();
+    const cached = (await kvMGetJson(list.map((s) => BARS_PREFIX + s))) || {};
+    const need = list.filter((s) => !(cached[BARS_PREFIX + s] && cached[BARS_PREFIX + s].at === today));
+    const failed = [];
+    if (need.length) {
+      const token = await getKisToken();
+      const start = ymdDaysAgo(BARS_LOOKBACK_DAYS), end = ymdDaysAgo(0);
+      const fresh = {};
+      for (let i = 0; i < need.length; i += 3) {
+        await Promise.all(need.slice(i, i + 3).map(async (sym) => {
+          try {
+            const rows = sym === INDEX_BARS_SYMBOL ? await fetchIndexHistoryRange(token, start, end) : await fetchSymbolHistoryRange(token, sym, start, end);
+            if (rows.length >= 20) fresh[BARS_PREFIX + sym] = { at: today, rows: packRows(rows) };
+            else failed.push(sym);
+          } catch (e) {
+            failed.push(sym);
+          }
+        }));
+      }
+      if (Object.keys(fresh).length) await kvMSetJson(fresh);
+    }
+    res.status(200).json({ ok: true, batch, batches, done: batch === batches - 1, fetched: need.length - failed.length, failed });
+  } catch (e) {
+    console.error('backtest.js(strategy-prep) error:', e);
+    res.status(500).json({ error: e.message === 'NO_KEYS' ? 'KIS 키가 설정되지 않았습니다.' : '서버 오류가 발생했습니다.' });
+  }
+}
+
+// 저장해 둔 일봉을 4번에 나눠 읽어요(한 번에 너무 큰 값을 주고받지 않게).
+async function loadSimInputs() {
+  const syms = barsSymbols();
+  const bars = {};
+  let indexRows = null;
+  const missing = [];
+  for (let i = 0; i < syms.length; i += 14) {
+    const part = syms.slice(i, i + 14);
+    const got = await kvMGetJson(part.map((s) => BARS_PREFIX + s));
+    if (!got) return { error: '저장소를 읽지 못했어요. 잠시 뒤 다시 해 주세요.' };
+    part.forEach((s) => {
+      const v = got[BARS_PREFIX + s];
+      if (!v) { missing.push(s); return; }
+      const rows = unpackRows(v.rows);
+      if (s === INDEX_BARS_SYMBOL) indexRows = rows; else bars[s] = rows;
+    });
+  }
+  const [cfg, methods, evolve, costs, overrides] = await Promise.all([
+    kvGetJson(CONFIG_KEY, null), kvGetJson(METHODS_KEY, {}), kvGetJson(EVOLVE_KEY, null), loadCosts(), kvGetJson('autotrade:strategy-overrides', {})
+  ]);
+  // 실제 매매와 같은 숫자: 모멘텀은 설정의 손절/익절, 자동조정 값이 있으면 그 위에 덮어써요.
+  const riskOverrides = {};
+  Object.keys(overrides || {}).forEach((id) => {
+    const o = overrides[id] || {};
+    riskOverrides[id] = {};
+    ['positionPct', 'stopLossPct', 'takeProfitPct', 'maxTradesPerDay'].forEach((f) => { if (typeof o[f] === 'number') riskOverrides[id][f] = o[f]; });
+  });
+  if (cfg && cfg.risk) riskOverrides.momentum = Object.assign({}, cfg.risk, riskOverrides.momentum || {});
+  return {
+    bars, indexRows, missing,
+    opts: {
+      costs, methods: methods || {}, daytrade: cfg && cfg.daytrade, riskOverrides,
+      evolved: evolve && evolve.globalBest && evolve.globalBest.strategy ? evolve.globalBest.strategy : null
+    }
+  };
+}
+
+function simDates(data, startYmd, endYmd) {
+  return data.allDates.filter((d) => d >= startYmd && d <= endYmd);
+}
+function cleanYmd(v, fb) {
+  const s = String(v || '').replace(/-/g, '');
+  return /^\d{8}$/.test(s) ? s : fb;
+}
+
+async function handleStrategySim(req, res) {
+  try {
+    const ids = String(req.query.ids || '').split(',').map((s) => s.trim()).filter((s) => SIM_STRATEGY_IDS.includes(s)).slice(0, 8);
+    if (!ids.length) { res.status(400).json({ error: '전략을 하나 이상 골라 주세요.' }); return; }
+    const input = await loadSimInputs();
+    if (input.error) { res.status(503).json({ error: input.error }); return; }
+    if (input.missing.length > 10) { res.status(409).json({ error: '과거 가격을 먼저 준비해야 해요.', needPrep: true, missing: input.missing.length }); return; }
+    const data = prepareData(input.bars, input.indexRows);
+    const startYmd = cleanYmd(req.query.start, ymdDaysAgo(180)), endYmd = cleanYmd(req.query.end, ymdDaysAgo(0));
+    const dates = simDates(data, startYmd, endYmd);
+    if (dates.length < 5) { res.status(400).json({ error: '고른 기간에 거래일이 너무 적어요(보관 중인 기간: ' + (data.allDates[25] || '') + ' ~ ' + (data.allDates[data.allDates.length - 1] || '') + ').' }); return; }
+    const cash = Math.max(1_000_000, Math.min(1_000_000_000, Number(req.query.cash) || 10_000_000));
+    // 하루 안의 가격 순서를 두 가지로 계산해서, 나쁜 쪽을 대표 결과로 쓰고 범위(range)를 같이 보여줘요.
+    const results = ids.map((id) => {
+      const a = simulateStrategy(id, data, dates, Object.assign({}, input.opts, { startingCash: cash, keepTrades: true }));
+      if (a.skipped) return a;
+      const b = simulateStrategy(id, data, dates, Object.assign({}, input.opts, { startingCash: cash, keepTrades: true, pathMode: 'optimistic' }));
+      const main = b.totalReturnPct < a.totalReturnPct ? b : a;
+      main.range = { low: Math.min(a.totalReturnPct, b.totalReturnPct), high: Math.max(a.totalReturnPct, b.totalReturnPct) };
+      return main;
+    });
+    res.status(200).json({
+      ok: true, period: [dates[0], dates[dates.length - 1]], tradingDays: dates.length, startingCash: cash,
+      available: [data.allDates[25] || data.allDates[0], data.allDates[data.allDates.length - 1]],
+      results, benchmark: benchmarks(data, dates), missing: input.missing, notes: SIM_NOTES
+    });
+  } catch (e) {
+    console.error('backtest.js(strategy) error:', e);
+    res.status(500).json({ error: '서버 오류가 발생했습니다.' });
+  }
+}
+
+async function handleMethodSearch(req, res) {
+  try {
+    const id = String(req.query.id || '');
+    if (!SIM_STRATEGY_IDS.includes(id)) { res.status(400).json({ error: '알 수 없는 전략입니다.' }); return; }
+    const input = await loadSimInputs();
+    if (input.error) { res.status(503).json({ error: input.error }); return; }
+    if (input.missing.length > 10) { res.status(409).json({ error: '과거 가격을 먼저 준비해야 해요.', needPrep: true }); return; }
+    const data = prepareData(input.bars, input.indexRows);
+    const startYmd = cleanYmd(req.query.start, ymdDaysAgo(365)), endYmd = cleanYmd(req.query.end, ymdDaysAgo(0));
+    const dates = simDates(data, startYmd, endYmd);
+    const out = searchMethods(id, data, dates, input.opts);
+    if (out.error) { res.status(400).json(out); return; }
+    res.status(200).json(Object.assign({ ok: true, notes: SIM_NOTES }, out));
+  } catch (e) {
+    console.error('backtest.js(method-search) error:', e);
+    res.status(500).json({ error: '서버 오류가 발생했습니다.' });
+  }
+}
+
 /* ==================== 진입점 ==================== */
 
 export default async function handler(req, res) {
@@ -743,6 +938,16 @@ export default async function handler(req, res) {
   }
 
   if (mode === 'detail') return handleDetail(req, res);
+
+  if (mode === 'strategy-prep' || mode === 'strategy' || mode === 'method-search') {
+    if (!kvReady()) {
+      res.status(500).json({ error: 'KV(Upstash Redis)가 설정되지 않았습니다.' });
+      return;
+    }
+    if (mode === 'strategy-prep') return handleStrategyPrep(req, res);
+    if (mode === 'strategy') return handleStrategySim(req, res);
+    return handleMethodSearch(req, res);
+  }
 
   return handlePresets(req, res);
 }

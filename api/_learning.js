@@ -21,6 +21,7 @@ export const LEARN = {
   maxDays: 14, // 이 기간이 지나도 다 안 쌓이면, 5건 이상일 때 그때까지로 채점해요
   minTradesAtMaxDays: 5,
   beforeTrades: 10, // 비교 기준: 바꾸기 직전 설정으로 한 마지막 거래 수
+  firstExperimentTrades: 30, // 초기화 뒤 첫 실험은 매도가 이만큼 쌓인 뒤에(관찰 표본은 최근 50건까지 보관)
   effectPctPoint: 0.5, // 평균 손익이 이만큼(%p) 이상 달라져야 "효과 있음/나빠짐"으로 봐요(그보다 작으면 우연일 수 있어서)
   maxStepRatio: 0.3, // 한 번에 바꿀 수 있는 폭: 지금 값의 ±30%
   floors: { positionPct: 3, maxTradesPerDay: 2, stopLossPct: 1, takeProfitPct: 1 }, // 이 밑으로는 안 내려가요(바닥까지 줄어 멈추는 것 방지)

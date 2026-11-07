@@ -96,9 +96,12 @@ export function planBuy(costs, market, budget, price) {
 }
 
 // 팔았을 때 비용을 빼고 실제로 손에 들어오는 금액
-export function planSell(costs, market, qty, price) {
+// opts.etf: 국내 ETF는 팔 때 증권거래세가 없어요(인버스 ETF 전략). 수수료·체결 오차는 그대로 빼요.
+export function planSell(costs, market, qty, price, opts) {
   const gross = qty * price;
-  const fee = gross * (sellCostPct(costs, market) / 100);
+  let pct = sellCostPct(costs, market);
+  if (opts && opts.etf && market === 'KR') pct -= (costs || DEFAULT_COSTS).kr.sellTaxPct;
+  const fee = gross * (pct / 100);
   return { gross, fee, proceeds: gross - fee };
 }
 

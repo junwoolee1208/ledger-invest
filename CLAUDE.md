@@ -20,7 +20,7 @@
   - `sync.js` 관심종목/포트폴리오 저장 (Firebase ID 토큰 검증 → Vercel KV)
   - `auto-trade-check.js` 자동매매 실행 (외부 크론이 호출, `key`=`AUTO_TRADE_SECRET` 필요)
   - `auto-trade-status.js` 자동매매 설정/현황 (`action=config|log`)
-  - `backtest.js` 전략연구실 (`mode=presets|evolve`)
+  - `backtest.js` 전략연구실 (`mode=presets|evolve|strategy-prep|strategy|method-search`)
 - `api/_*.js` — 공용 코드 (Vercel 함수 개수에 안 잡힘)
   - `_kis.js` KIS 토큰 발급·KV 공유 캐시, `_kv.js` Vercel KV 헬퍼, `_costs.js` 수수료·세금,
     `_sentiment.js` 뉴스 긍정/부정 점수, `_backtest-core.js` / `_evolve-core.js` 백테스트·진화 탐색 로직
@@ -29,6 +29,8 @@
   - `_learning.js` 학습하는 자동조정 규칙, `_scorecard.js` 채점표 계산, `_deepeval.js` 주간 AI 심층 평가서
   - `_picks.js` 종목 고르기 규칙·기록·성적표, `_reset.js` 모든 전략 초기화
   - `_intraday.js` 새 단타 전략 판단·금액 규칙, `_longterm.js` 장기 분산 전략 규칙
+  - `_universe.js` 자동매매 고정 50종목(+하락장 전략용 인버스 ETF), `_methods.js` 사는/파는 방법(나눠 사기·나눠 팔기·따라가는 손절)
+  - `_bear.js` 시장 필터·하락장 전략·재매수 규칙, `_strategy-sim.js` 기간 백테스트·방법 찾기(실제 매매와 같은 방법 계산)
 - 데이터 저장: Vercel KV(Upstash Redis). 로그인: Firebase Authentication.
 
 ## 반드시 지킬 규칙
@@ -62,6 +64,10 @@
   `maybeRunLearningCycle`). 기준선(baseline)은 대조군이라 절대 자동/수동으로 바꾸지 않는다.
 - 전략은 보유 기간으로 단타·스윙·장기로 나눈다(`api/_strategies.js`의 `horizonOf`). 단타는 당일 청산, 스윙은 최대 20거래일,
   장기는 월 1회 조정이다. 채점표는 같은 갈래끼리 묶고, 규칙이 고정된 전략(`FIXED_RULE_IDS`)은 자동조정 대상이 아니다.
+- 자동매매 종목은 **고정 50종목**(`_universe.js`)이다. 관심종목은 자동매매에 쓰지 않는다. 목록은 자동으로 바꾸지 않고 월 1회 점검만 한다.
+- 켜진 전략 구성은 `LINEUP_VERSION`/`LINEUP_DEFAULTS`(`_strategies.js`)를 따른다. 켜짐 확인은 `strategyEnabled`/`enabledMapOf`로 한다(`cfg.strategies` 직접 읽지 말 것).
+- 모든 전략 공통 안전장치는 `COMMON_RULES`(하루 손실 1.5%, 스윙 보유 30%, 장 마감 전 위험 줄이기)이고, 시장 필터는 `_bear.js`의 `marketGate`다.
+- "어떻게 사고팔지"는 `_methods.js`에 있고 자동매매와 백테스트가 같이 쓴다. 매매 방식 계산을 한쪽에만 따로 만들지 말 것.
 
 ## 작업 방식
 

@@ -698,8 +698,11 @@
         </div>
       </div>
       <div style="border-top:1px solid var(--line); padding-top:14px; margin-bottom:16px;">
-        <div style="font-size:13px; font-weight:600; margin-bottom:4px;">종목 고르기 기준</div>
-        <p class="easy" style="font-size:12px;">거래대금이 많은 종목 중 안전 기준을 통과한 종목만 후보로 써요. AI를 쓰지 않아서 크레딧이 없어도 돌아가요.</p>
+        <div style="font-size:13px; font-weight:600; margin-bottom:4px;">자동매매 종목: 고정 50종목</div>
+        <p class="easy" style="font-size:12px;">자동매매는 꾸준히 거래가 많은 큰 회사 50곳만 사고팔아요(최근 20거래일 평균 거래대금 상위 + 시가총액 5조 원 이상). 관심종목은 자동매매에 쓰지 않아요. 한 달에 한 번 기준에서 벗어난 종목이 없는지 점검해요.</p>
+        <div id="uniBox" style="font-size:12.5px; line-height:1.7; margin-bottom:14px;"><span style="color:var(--muted-2);">불러오는 중…</span></div>
+        <div style="font-size:13px; font-weight:600; margin-bottom:4px;">거래대금 순위 보기(참고용)</div>
+        <p class="easy" style="font-size:12px;">그날 거래대금이 많은 종목을 안전 기준으로 걸러 보여줘요. 지금은 참고용이고, 자동매매는 위 50종목만 써요.</p>
         <details class="more"><summary>자세히 보기</summary><div class="more-body">
           <p><b>거래대금</b>: 오늘 사고판 돈의 합이에요. 많을수록 원하는 가격에 사고팔기 쉬워요. 다만 급등 테마주도 많이 올라오니 안전 기준으로 걸러요.</p>
           <p><b>자동으로 빼는 종목</b>: 관리종목, 거래정지, 투자주의·경고·위험, 단기과열, 정리매매, 우선주, ETF·ETN, 스팩이에요. 시가총액이나 위험 표시를 확인하지 못한 종목도 빼요.</p>
@@ -1018,8 +1021,48 @@
 
     <div class="banner">
       <b>여기서는 실제/모의 매매가 일어나지 않아요</b><br>
-      관심종목의 과거 데이터로만 전략을 실험하는 공간이에요. 여기서 좋다고 확인된 조합을 나중에 "자동매매" 탭의 리스크 규칙에 직접 반영하시면 돼요.
+      과거 데이터로만 전략을 실험하는 공간이에요. 맨 위 "전략 기간 백테스트"와 "방법 찾기"는 자동매매와 같은 고정 50종목·같은 규칙으로 계산해요. 그 아래 기존 도구들은 관심종목으로 실험해요.
     </div>
+
+    <div class="panel pad" style="margin-bottom:20px;">
+      <h3 style="margin:0 0 4px; font-size:15px;">전략 기간 백테스트 (고정 50종목)</h3>
+      <p class="easy" style="font-size:12.5px;">자동매매 전략을 골라서, 정한 기간에 그 전략을 썼다면 얼마나 벌었을지 과거 가격으로 계산해요. 실제 매매는 일어나지 않아요.</p>
+      <details class="more"><summary>자세히 보기</summary><div class="more-body">
+        <p><b>무엇으로 계산하나요</b>: 자동매매와 같은 50종목(하락장 전략은 인버스 ETF), 같은 사는/파는 방법, 같은 비용(수수료·세금)으로 계산해요. 과거 가격은 약 14개월치까지 볼 수 있어요.</p>
+        <p><b>숫자가 두 개인 이유</b>: 과거 1분 단위 가격이 없어서 하루 가격 4개(시가·고가·저가·종가)로 장중 흐름을 흉내 내요. 하루 안에서 손절과 익절 중 무엇이 먼저였는지 알 수 없어서 두 가지 순서로 계산하고, <b>나쁜 쪽을 큰 숫자</b>로, 범위를 옆에 보여줘요. 실제는 대개 그 범위 안이에요.</p>
+        <p><b>신뢰도</b>: 단타는 하루 가격으로 흉내 내기 어려워 범위가 아주 넓을 수 있어요(낮음). 며칠씩 들고 가는 스윙은 비교적 믿을 만해요(보통).</p>
+        <p><b>비교 기준</b>: 같은 기간 코스피200(받지 못하면 50종목 평균으로 대신), 그리고 50종목을 똑같이 나눠 사서 그냥 들고 있었을 때의 수익률이에요.</p>
+      </div></details>
+      <div id="sbStrategies" style="display:flex; flex-wrap:wrap; gap:6px 14px; margin:10px 0; font-size:12.5px;"></div>
+      <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(140px,1fr)); gap:10px; align-items:end; margin-bottom:10px;">
+        <div><label style="font-size:11.5px; color:var(--muted-2); display:block; margin-bottom:4px;">시작일</label><input type="date" id="sbStart" style="width:100%"></div>
+        <div><label style="font-size:11.5px; color:var(--muted-2); display:block; margin-bottom:4px;">종료일</label><input type="date" id="sbEnd" style="width:100%"></div>
+        <div><label style="font-size:11.5px; color:var(--muted-2); display:block; margin-bottom:4px;">시작 금액(원)</label><input type="number" id="sbCash" style="width:100%" value="10000000" step="1000000" min="1000000"></div>
+        <div><button class="btn" id="sbRun" type="button" style="width:100%;">백테스트 실행</button></div>
+      </div>
+      <div id="sbMsg" style="font-size:12.5px; color:var(--muted);"></div>
+      <div id="sbResult" style="margin-top:12px;"></div>
+    </div>
+
+    <div class="panel pad" style="margin-bottom:20px;">
+      <h3 style="margin:0 0 4px; font-size:15px;">방법 찾기 (사는 방법·파는 방법 비교)</h3>
+      <p class="easy" style="font-size:12.5px;">한 전략에 여러 사는/파는 방법을 붙여 보고, 수익이 가장 좋은 방법을 찾아요. 정답은 없어서 테스트로 계속 고쳐가요.</p>
+      <details class="more"><summary>자세히 보기</summary><div class="more-body">
+        <p><b>사는 방법</b>: 한 번에 사기 / 떨어질 때 나눠 사기(첫 매수가보다 싸지면 더 사기) / 오를 때 더 사기(더 사면 손절선을 본전으로)</p>
+        <p><b>파는 방법</b>: 한 번에 팔기 / 나눠 팔기(목표 절반에서 반 팔고 나머지는 본전 지키기) / 따라가는 손절(가장 높았던 가격에서 일정 % 밀리면 팔기)</p>
+        <p><b>왜 기간을 나누나요</b>: 고른 기간의 앞 2/3에서 가장 좋았던 방법이 뒤 1/3에서도 벌었는지 확인해요. 과거에 우연히 딱 맞은 방법을 고르는 실수를 막으려는 거예요. 순위는 두 가지 계산 중 나쁜 쪽으로 매겨요.</p>
+        <p><b>적용</b>: [이 방법 적용]을 누르면(로그인 필요) 그 전략이 <b>새로 사는 종목부터</b> 그 방법을 써요. 이미 들고 있는 종목은 산 때의 방법을 끝까지 따라요. 바꾼 내용은 "전략 변경 이력"에 남아요.</p>
+      </div></details>
+      <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(140px,1fr)); gap:10px; align-items:end; margin:10px 0;">
+        <div><label style="font-size:11.5px; color:var(--muted-2); display:block; margin-bottom:4px;">전략</label><select id="msStrategy" style="width:100%"></select></div>
+        <div><label style="font-size:11.5px; color:var(--muted-2); display:block; margin-bottom:4px;">시작일</label><input type="date" id="msStart" style="width:100%"></div>
+        <div><label style="font-size:11.5px; color:var(--muted-2); display:block; margin-bottom:4px;">종료일</label><input type="date" id="msEnd" style="width:100%"></div>
+        <div><button class="btn" id="msRun" type="button" style="width:100%;">방법 찾기</button></div>
+      </div>
+      <div id="msMsg" style="font-size:12.5px; color:var(--muted);"></div>
+      <div id="msResult" style="margin-top:12px;"></div>
+    </div>
+
 
     <div class="panel pad" style="margin-bottom:20px;">
       <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:10px;">
@@ -2092,7 +2135,7 @@
       if(todays.length === 0){ el.textContent = '오늘 자동매매 기록이 아직 없어요.'; return; }
       var krPnl = 0, usPnl = 0, closedCount = 0;
       todays.forEach(function(e){
-        if(e.side === 'TAKE_PROFIT' || e.side === 'STOP_LOSS' || e.side === 'DAY_CLOSE' || e.side === 'MAX_HOLD' || e.side === 'REBALANCE'){
+        if(AT_SELL_SIDES.indexOf(e.side) >= 0){
           closedCount++;
           if(e.market === 'KR') krPnl += (e.pnlAmount || 0);
           else usPnl += (e.pnlAmount || 0);
@@ -2873,8 +2916,14 @@
     var d = new Date(ts);
     return (d.getMonth()+1)+'/'+d.getDate()+' '+String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0');
   }
+  // 매도 종류(서버 _ledger.js SELL_SIDES와 같은 목록)
+  var AT_SELL_SIDES = ['TAKE_PROFIT','STOP_LOSS','DAY_CLOSE','MAX_HOLD','REBALANCE','PARTIAL_TAKE','TRAIL_STOP','RISK_CUT','SIGNAL_EXIT'];
   function atSideLabel(side){
     if(side==='BUY') return '<span style="color:var(--up);">매수</span>';
+    if(side==='PARTIAL_TAKE') return '<span style="color:var(--up);">나눠 팔기(일부 익절)</span>';
+    if(side==='TRAIL_STOP') return '<span style="color:var(--muted);">따라가는 손절</span>';
+    if(side==='RISK_CUT') return '<span style="color:var(--muted);">위험 줄이기 매도</span>';
+    if(side==='SIGNAL_EXIT') return '<span style="color:var(--muted);">흐름 전환 매도</span>';
     if(side==='TAKE_PROFIT') return '<span style="color:var(--up);">익절매도</span>';
     if(side==='STOP_LOSS') return '<span style="color:var(--down);">손절매도</span>';
     if(side==='DAY_CLOSE') return '<span style="color:var(--muted);">장마감 청산</span>';
@@ -2887,7 +2936,7 @@
   var AT_STRATEGY_DEFS = [
     { id:'momentum', horizon:'swing', name:'모멘텀(추세 추종)', tag:'스윙',
       easy:'오늘 많이 오르고 있는 주식을 따라 사요.',
-      detail:'"오르는 주식은 계속 오르는 경향이 있다"는 생각으로 사는 전략이에요. 관심종목은 어제보다 3% 이상, 거래대금 상위 종목은 1% 이상 오르면 사요. 며칠씩 갖고 있을 수 있어요.' },
+      detail:'"오르는 주식은 계속 오르는 경향이 있다"는 생각으로 사는 전략이에요. 고정 50종목 중 어제보다 1% 이상 오르면 사요. 며칠씩 갖고 있을 수 있어요(최대 20거래일). 하락장이거나 코스피200이 약한 날(-1% 아래, 시가 아래)은 새로 사지 않아요. 처음 방법은 "오르면 한 번 더 사고, 가장 높았던 가격에서 5% 밀리면 팔기"이고 전략연구실의 방법 찾기로 바꿀 수 있어요.' },
     { id:'pullback', horizon:'swing', name:'눌림목(과열 회피)', tag:'스윙',
       easy:'조금만(0~2%) 오른 주식을 사요. 너무 많이 오른 건 피해요.',
       detail:'이미 크게 오른 주식은 다시 떨어질 위험이 커요. 그래서 이제 막 천천히 오르기 시작한(어제보다 0~2%) 주식을 골라요.' },
@@ -2908,7 +2957,7 @@
       detail:'사는 조건은 모멘텀과 비슷해요. 대신 손절·익절 폭을 아주 넓게 잡아서, 작은 흔들림에 팔지 않고 큰 흐름을 노려요.' },
     { id:'baseline', horizon:'base', name:'기준선(대조군)', tag:'비교용',
       easy:'아무 조건 없이 그냥 사요. 다른 전략과 비교하는 "기준"이에요.',
-      detail:'과학 실험의 "대조군"과 같아요. 다른 전략이 이것보다 성적이 좋아야 "규칙이 실제로 도움이 됐다"고 말할 수 있어요. 이것보다 못한 전략은 규칙이 오히려 손해라는 뜻이에요.' },
+      detail:'과학 실험의 "대조군"과 같아요. 다른 전략과 같은 고정 50종목에서, 시장 필터 없이 조건 없이 사요. 다른 전략이 이것보다 성적이 좋아야 "규칙이 실제로 도움이 됐다"고 말할 수 있어요. 이것보다 못한 전략은 규칙이 오히려 손해라는 뜻이에요.' },
     { id:'daytrade', horizon:'day', name:'데이트레이딩(당일 청산)', tag:'단타',
       easy:'하루 안에 사고팔고, 장이 끝나기 전에 전부 팔아요.',
       detail:'오늘 아침 시작 가격(시가)보다 오르고 있고, 오늘 최고가 근처에서 버티는 주식을 사요. 정해둔 시각이 되면 이익이든 손해든 전부 팔아서 다음 날로 넘기지 않아요. 판 주식은 잠깐 쉬었다가 다시 사고, 하루에 정해둔 만큼 잃으면 그날은 더 사지 않아요. 국내 주식만 해요. 숫자는 모두 [수정]에서 바꿀 수 있어요.' },
@@ -2921,7 +2970,7 @@
     { id:'opening-breakout', horizon:'day', name:'장 초반 돌파', tag:'단타',
       easy:'09:30까지의 최고가를 넘고 평균 가격보다 위에 있으면 사요.',
       rules:'손절 1~4%(오늘 변동폭에 맞춤) · 익절은 손절의 2배 · 한 번 손절에 계좌의 약 0.5%',
-      detail:'09:00~09:30의 최고가를 기록해 두고, 그 값을 1% 안쪽으로 넘어설 때 사요. 이때 가격이 오늘 평균 체결가(거래량을 반영한 평균 가격)보다 높아야 해요. 흔들림이 큰 종목일수록 손절을 넓히고 금액을 줄여서, 한 번 손절로 잃는 돈을 계좌의 약 0.5%로 맞춰요. 한 종목에 계좌의 25%를 넘기지 않아요. 09:31~14:30에만 사고 15:10에 모두 팔아요. 동시에 4종목, 하루 6번까지 사고, 하루 손실이 계좌의 1.5%에 닿으면 그날은 그만 사요. 아직 검증 중인 전략이라 숫자는 고정해 뒀어요.' },
+      detail:'09:00~09:30의 최고가를 기록해 두고, 그 값을 1% 안쪽으로 넘어설 때 사요. 이때 가격이 오늘 평균 체결가(거래량을 반영한 평균 가격)보다 높아야 해요. 흔들림이 큰 종목일수록 손절을 넓히고 금액을 줄여서, 한 번 손절로 잃는 돈을 계좌의 약 0.5%로 맞춰요. 한 종목에 계좌의 25%를 넘기지 않아요. 장 시작 직후 급락하는 종목을 쫓아 사지 않도록 09:45~14:30에만 사고 15:10에 모두 팔아요. 동시에 4종목, 하루 6번까지 사고, 하루 손실이 계좌의 1.5%에 닿으면 그날은 그만 사요. 목표 절반에서 반을 팔고 나머지는 본전을 지켜요(방법은 바꿀 수 있어요).' },
     { id:'vwap-pullback', horizon:'day', name:'강한 종목 눌림', tag:'단타',
       easy:'오늘 강한 종목이 평균 가격까지 내려왔다가 다시 오를 때 사요.',
       rules:'손절 1~4%(오늘 변동폭에 맞춤) · 익절은 손절의 2배 · 한 번 손절에 계좌의 약 0.5%',
@@ -2929,7 +2978,23 @@
     { id:'longterm', horizon:'long', name:'장기 분산(시가총액 상위)', tag:'장기',
       easy:'시가총액 상위 10개에 나눠 담고 한 달에 한 번만 점검해요.',
       rules:'손절·익절 없음 · 매달 한 번 비중 조정 · 코스피200과 비교',
-      detail:'우리나라에서 회사 가치가 가장 큰 보통주 중 안전 기준을 통과한 10개에 돈을 똑같이 나눠요. 매달 첫 거래일 10시 뒤에 점검해서, 10위 밖으로 나간 종목은 팔고 목표 금액에서 20% 넘게 벗어난 종목만 맞춰요. 며칠의 등락으로는 팔지 않아요. 성적은 같은 기간의 코스피200과 비교하고, 판단하려면 최소 1년은 봐야 해요. 국내 주식만 해요.' }
+      detail:'우리나라에서 회사 가치가 가장 큰 보통주 중 안전 기준을 통과한 10개에 돈을 똑같이 나눠요. 매달 첫 거래일 10시 뒤에 점검해서, 10위 밖으로 나간 종목은 팔고 목표 금액에서 20% 넘게 벗어난 종목만 맞춰요. 며칠의 등락으로는 팔지 않아요. 성적은 같은 기간의 코스피200과 비교하고, 판단하려면 최소 1년은 봐야 해요. 국내 주식만 해요. (고정 50종목 전환 때 잠시 꺼 뒀어요.)' },
+    { id:'staged-dip', horizon:'day', name:'단계별 저점 매수', tag:'단타',
+      easy:'시가보다 2% 넘게 내려오면 조금 사고, 더 내려오면 나눠서 더 사요.',
+      rules:'세 번 나눠 사기(전체 비중 15%) · 손절은 마지막 단계보다 3% 아래 · 당일 정리',
+      detail:'고정 50종목 중 오늘 시가보다 -2~-4% 내려온 종목을 계획한 금액의 1/3만 사요. 첫 매수가보다 2% 더 싸지면 1/3을 더, 4% 더 싸지면 마지막 1/3을 사서 평균 단가를 낮춰요. 반등해서 목표 절반에 닿으면 반을 팔고 나머지는 본전을 지켜요. 15:10에 모두 팔아요. 시장 전체가 -2% 넘게 무너지는 날은 쉬어요. 숫자는 출발점이고 전략연구실의 방법 찾기로 바꿀 수 있어요.' },
+    { id:'dip-rebound', horizon:'day', bear:true, name:'급락 반등 단타', tag:'하락장',
+      easy:'크게 빠진 종목이 바닥에서 다시 오르기 시작하면 사서, 조금 벌고 팔아요.',
+      rules:'하락장일 때만 · 손절 1~4%(오늘 변동폭에 맞춤) · 당일 정리',
+      detail:'하락장이거나 오늘 코스피200이 -1% 넘게 빠질 때만 움직여요. 시가보다 -3% 넘게 빠진 종목이 오늘 가장 낮았던 가격에서 1~3% 다시 올라오면(바닥 확인) 사요. 10시부터 사고, 목표 절반에서 반을 팔고, 15:10에 모두 팔아요. 하락장에서는 많이 빠진 날 반등 폭도 크다는 점을 노려요.' },
+    { id:'dip-nextday', horizon:'swing', bear:true, name:'급락 다음날 매수', tag:'하락장',
+      easy:'어제 크게 떨어진 종목이 오늘 버티면 사서 며칠 들고 가요.',
+      rules:'어제 -5% 넘게 하락한 종목 · 손절 4% · 최대 5거래일',
+      detail:'하루 단위로만 보지 않는 전략이에요. 어제 -5% 넘게 빠진 종목이 오늘 09:30 뒤에 시가 위에 있고, 오늘 가장 낮았던 가격보다 1% 위에서 버티면 사요. 떨어진 다음에 사니까, 사기 전 밤사이 급락은 피해요. 반등하면 반을 팔고 나머지는 가장 높았던 가격에서 3% 밀리면 팔아요. 최대 5거래일 갖고 있어요.' },
+    { id:'inverse', horizon:'swing', bear:true, name:'인버스 ETF(하락장)', tag:'하락장',
+      easy:'시장이 떨어질수록 오르는 상품을 사요. 하락장이 끝나면 팔아요.',
+      rules:'KODEX 인버스(50종목 밖 예외) · 하락장일 때만 · 따라가는 손절 3%',
+      detail:'하락장이고 오늘 코스피200이 시가보다 낮고 -0.3% 이하로 약하면 KODEX 인버스를 사요. 코스피200이 떨어지는 만큼 오르는 상품이에요. 여러 날 들고 갈 수 있고, 하락장이 끝나거나 가장 높았던 가격에서 3% 밀리면 팔아요. ETF는 팔 때 거래세가 없어서 비용 계산도 그렇게 해요.' }
   ];
   var AT_STRATEGY_NAMES = {};
   var AT_STRATEGY_DESC = {};
@@ -3052,6 +3117,7 @@
       : s.risk
       ? '손절 '+fmt(s.risk.stopLossPct,1)+'% · 익절 '+fmt(s.risk.takeProfitPct,1)+'% · 비중 '+fmt(s.risk.positionPct,0)+'% · 하루 '+fmt(s.risk.maxTradesPerDay,0)+'번'
       : '사고파는 기준은 전략연구실 결과를 따라요';
+    if(s.methodText) rules += '<br>방법: '+escapeHtml(s.methodText);
     var lt = s.longterm;
     if(lt && lt.startIndex && lt.lastIndex){
       var idxPct = (lt.lastIndex / lt.startIndex - 1) * 100;
@@ -3090,9 +3156,12 @@
   function atHorizonOf(s){
     return s.horizon || (AT_STRATEGY_DEF[s.id] && AT_STRATEGY_DEF[s.id].horizon) || 'swing';
   }
+  // 하락장 전략은 보유 기간과 상관없이 "하락장" 묶음으로 따로 보여줘요.
+  function atIsBear(s){ return !!(s.bear || (AT_STRATEGY_DEF[s.id] && AT_STRATEGY_DEF[s.id].bear)); }
   var AT_GROUPS = [
-    { key:'day', title:'단타', sub:'하루 안에 다 팔아요', test:function(s){ return atHorizonOf(s) === 'day'; } },
-    { key:'swing', title:'스윙', sub:'최대 20거래일 갖고 있어요', test:function(s){ return atHorizonOf(s) === 'swing'; } },
+    { key:'day', title:'단타', sub:'하루 안에 다 팔아요', test:function(s){ return atHorizonOf(s) === 'day' && !atIsBear(s); } },
+    { key:'swing', title:'스윙', sub:'최대 20거래일 갖고 있어요', test:function(s){ return atHorizonOf(s) === 'swing' && !atIsBear(s); } },
+    { key:'bear', title:'하락장', sub:'시장이 떨어질 때 움직여요(반등 노리기·인버스)', test:function(s){ return atIsBear(s); } },
     { key:'long', title:'장기', sub:'몇 달 이상, 한 달에 한 번 점검해요', test:function(s){ return atHorizonOf(s) === 'long'; } },
     { key:'base', title:'비교용', sub:'다른 전략을 재는 기준', test:function(s){ return atHorizonOf(s) === 'base'; } }
   ];
@@ -3468,7 +3537,7 @@
     } else if(atLogGroupBy === 'strategy'){
       keys.sort(function(a,b){ return AT_STRATEGY_ORDER.indexOf(a) - AT_STRATEGY_ORDER.indexOf(b); });
     } else if(atLogGroupBy === 'side'){
-      var sideOrder = ['BUY', 'TAKE_PROFIT', 'STOP_LOSS', 'DAY_CLOSE', 'MAX_HOLD', 'REBALANCE'];
+      var sideOrder = ['BUY', 'TAKE_PROFIT', 'PARTIAL_TAKE', 'STOP_LOSS', 'TRAIL_STOP', 'DAY_CLOSE', 'MAX_HOLD', 'RISK_CUT', 'SIGNAL_EXIT', 'REBALANCE'];
       keys.sort(function(a,b){ return sideOrder.indexOf(a) - sideOrder.indexOf(b); });
     } else if(atLogGroupBy === 'market'){
       keys.sort(); // 'KR' < 'US'
@@ -3635,6 +3704,7 @@
 
   /* ---- 종목 고르기 기준 + 마지막으로 고른 결과 ---- */
   function loadPickConfig(){
+    loadUniverse();
     fetch('/api/auto-trade-status?action=pick-config').then(function(r){ return r.json(); }).then(function(d){
       if(d.error) throw new Error(d.error);
       var s = d.screen;
@@ -4798,6 +4868,185 @@
       msg.style.color = 'var(--down)';
     });
   });
+
+
+  /* ---------------- 전략 기간 백테스트 · 방법 찾기 (고정 50종목, backtest.js mode=strategy / method-search) ---------------- */
+  var SB_IDS = ['daytrade','scalp','vwap-pullback','opening-breakout','staged-dip','momentum','evolved','dip-rebound','dip-nextday','inverse','baseline','pullback','breakout','reversal','selective','wideswing'];
+  var SB_DEFAULT_ON = ['staged-dip','momentum','dip-nextday','inverse','baseline','daytrade'];
+  var sbChart = null;
+  function sbYmd(d){ return d.toISOString().slice(0,10); }
+  function sbDaysAgo(n){ return sbYmd(new Date(Date.now() + 9*3600*1000 - n*86400000)); }
+  (function initStrategyBacktest(){
+    var box = document.getElementById('sbStrategies');
+    box.innerHTML = SB_IDS.map(function(id){
+      return '<label style="display:inline-flex; gap:4px; align-items:center; cursor:pointer;"><input type="checkbox" value="'+id+'"'+(SB_DEFAULT_ON.indexOf(id)>=0?' checked':'')+'> '+escapeHtml(AT_STRATEGY_NAMES[id] || id)+'</label>';
+    }).join('');
+    document.getElementById('sbStart').value = sbDaysAgo(180);
+    document.getElementById('sbEnd').value = sbDaysAgo(0);
+    var sel = document.getElementById('msStrategy');
+    sel.innerHTML = SB_IDS.filter(function(id){ return id !== 'baseline'; }).map(function(id){
+      return '<option value="'+id+'">'+escapeHtml(AT_STRATEGY_NAMES[id] || id)+'</option>';
+    }).join('');
+    sel.value = 'momentum';
+    document.getElementById('msStart').value = sbDaysAgo(365);
+    document.getElementById('msEnd').value = sbDaysAgo(0);
+  })();
+
+  // 과거 가격을 나눠서 준비해요(서버 30초 제한 때문에). 오늘 이미 받은 건 바로 넘어가요.
+  function sbPrepare(msgEl){
+    function step(batch){
+      msgEl.innerHTML = '<span class="spinner"></span>&nbsp; 과거 가격 준비 중… ('+(batch+1)+'단계)';
+      return fetch('/api/backtest?mode=strategy-prep&batch='+batch).then(function(r){ return r.json(); }).then(function(d){
+        if(d.error) throw new Error(d.error);
+        if(d.done || batch + 1 >= d.batches) return d;
+        return step(batch + 1);
+      });
+    }
+    return step(0);
+  }
+  function sbPct(v){ if(v===null || v===undefined) return '—'; return '<span class="'+(v>=0?'up':'down')+'">'+(v>=0?'+':'')+fmt(v,2)+'%</span>'; }
+  var SB_SIDE = { TAKE_PROFIT:'익절', STOP_LOSS:'손절', DAY_CLOSE:'장마감 청산', MAX_HOLD:'보유 기한', PARTIAL_TAKE:'나눠 팔기', TRAIL_STOP:'따라가는 손절', RISK_CUT:'위험 줄이기', SIGNAL_EXIT:'흐름 전환' };
+  function sbYmdText(s){ return s ? s.slice(0,4)+'-'+s.slice(4,6)+'-'+s.slice(6,8) : ''; }
+
+  document.getElementById('sbRun').addEventListener('click', function(){
+    var btn = this, msg = document.getElementById('sbMsg'), out = document.getElementById('sbResult');
+    var ids = Array.prototype.slice.call(document.querySelectorAll('#sbStrategies input:checked')).map(function(x){ return x.value; });
+    if(!ids.length){ msg.textContent = '전략을 하나 이상 골라 주세요.'; return; }
+    if(ids.length > 8){ msg.textContent = '한 번에 8개까지 비교할 수 있어요.'; return; }
+    var start = document.getElementById('sbStart').value.replace(/-/g,''), end = document.getElementById('sbEnd').value.replace(/-/g,'');
+    var cash = Number(document.getElementById('sbCash').value) || 10000000;
+    btn.disabled = true; out.innerHTML = '';
+    sbPrepare(msg).then(function(){
+      msg.innerHTML = '<span class="spinner"></span>&nbsp; 계산 중…';
+      return fetch('/api/backtest?mode=strategy&ids='+encodeURIComponent(ids.join(','))+'&start='+start+'&end='+end+'&cash='+cash)
+        .then(function(r){ return r.json().then(function(d){ if(!r.ok) throw new Error(d.error || '계산하지 못했어요.'); return d; }); });
+    }).then(function(d){
+      btn.disabled = false;
+      msg.innerHTML = '기간 '+sbYmdText(d.period[0])+' ~ '+sbYmdText(d.period[1])+' ('+d.tradingDays+'거래일) · 시작 금액 '+fmt(d.startingCash,0)+'원 · 볼 수 있는 기간 '+sbYmdText(d.available[0])+' ~ '+sbYmdText(d.available[1]);
+      var bm = d.benchmark || {};
+      var rows = d.results.slice().sort(function(a,b){ return (b.totalReturnPct||-999) - (a.totalReturnPct||-999); });
+      var html = '<div style="overflow-x:auto;"><table><thead><tr><th>전략</th><th>수익률(나쁜 쪽)</th><th>범위</th><th>최대 손실 폭</th><th>매수/매도</th><th>승률</th><th>비용</th><th>신뢰도</th></tr></thead><tbody>';
+      rows.forEach(function(r){
+        if(r.skipped){ html += '<tr><td>'+escapeHtml(AT_STRATEGY_NAMES[r.id] || r.id)+'</td><td colspan="7" style="color:var(--muted-2);">'+escapeHtml(r.skipped)+'</td></tr>'; return; }
+        html += '<tr><td><b>'+escapeHtml(AT_STRATEGY_NAMES[r.id] || r.name)+'</b><br><span style="color:var(--muted-2); font-size:11px;">'+escapeHtml(r.methodText || '')+'</span></td>' +
+          '<td style="font-size:15px; font-weight:700;">'+sbPct(r.totalReturnPct)+'</td>' +
+          '<td style="font-size:12px;">'+(r.range ? sbPct(r.range.low)+' ~ '+sbPct(r.range.high) : '—')+'</td>' +
+          '<td class="down">'+fmt(r.maxDrawdownPct,2)+'%</td>' +
+          '<td>'+r.buys+' / '+r.sells+'</td>' +
+          '<td>'+(r.winRate===null?'—':fmt(r.winRate,1)+'%')+'</td>' +
+          '<td>'+fmt(r.fees,0)+'원</td>' +
+          '<td>'+(r.reliability === 'low' ? '<span style="color:var(--up);">낮음</span>' : '보통')+'</td></tr>';
+      });
+      html += '<tr style="background:var(--bg-2, rgba(0,0,0,.03));"><td>'+(bm.kospiIsProxy ? '시장(50종목 평균으로 대신)' : '코스피200')+'</td><td>'+sbPct(bm.kospi200Pct)+'</td><td colspan="6" style="color:var(--muted-2); font-size:11.5px;">같은 기간 시장 전체</td></tr>';
+      html += '<tr style="background:var(--bg-2, rgba(0,0,0,.03));"><td>50종목 똑같이 사서 보유</td><td>'+sbPct(bm.equalWeightPct)+'</td><td colspan="6" style="color:var(--muted-2); font-size:11.5px;">아무것도 안 하고 들고만 있었을 때</td></tr>';
+      html += '</tbody></table></div>';
+      html += '<div style="position:relative; height:260px; margin-top:14px;"><canvas id="sbChart"></canvas></div>';
+      rows.forEach(function(r){
+        if(r.skipped || !r.trades || !r.trades.length) return;
+        var sides = Object.keys(r.bySide || {}).map(function(k){ return (SB_SIDE[k]||k)+' '+r.bySide[k]; }).join(' · ');
+        html += '<details class="more" style="margin-top:8px;"><summary>'+escapeHtml(AT_STRATEGY_NAMES[r.id] || r.name)+' 매매 기록 (최근 '+Math.min(40, r.trades.length)+'건) — '+escapeHtml(sides)+'</summary><div class="more-body" style="overflow-x:auto;"><table><thead><tr><th>판 날</th><th>종목</th><th>종류</th><th>산 날</th><th>손익</th></tr></thead><tbody>' +
+          r.trades.slice(0, 40).map(function(t){
+            return '<tr><td>'+sbYmdText(t.exitDate)+'</td><td>'+escapeHtml(t.symbol)+'</td><td>'+escapeHtml(SB_SIDE[t.side]||t.side)+'</td><td>'+sbYmdText(t.entryDate)+'</td><td>'+sbPct(t.pnlPct)+' ('+fmt(t.pnlAmount,0)+'원)</td></tr>';
+          }).join('') + '</tbody></table></div></details>';
+      });
+      html += '<ul style="color:var(--muted-2); font-size:11.5px; margin:10px 0 0; padding-left:18px;">'+(d.notes||[]).map(function(n){ return '<li>'+escapeHtml(n)+'</li>'; }).join('')+'</ul>';
+      out.innerHTML = html;
+      // 자산 변화 그래프(시작 금액 대비 %)
+      if(sbChart){ sbChart.destroy(); sbChart = null; }
+      var palette = ['#e5484d','#3e63dd','#30a46c','#f76b15','#8e4ec6','#12a594','#d6409f','#978365'];
+      var valid = rows.filter(function(r){ return !r.skipped && r.equity && r.equity.length; });
+      if(valid.length && window.Chart){
+        var labels = valid[0].equity.map(function(e){ return sbYmdText(e.date); });
+        sbChart = new Chart(document.getElementById('sbChart').getContext('2d'), {
+          type: 'line',
+          data: { labels: labels, datasets: valid.map(function(r, i){
+            return { label: AT_STRATEGY_NAMES[r.id] || r.name, data: r.equity.map(function(e){ return Math.round((e.equity / d.startingCash - 1) * 10000) / 100; }),
+              borderColor: palette[i % palette.length], backgroundColor: palette[i % palette.length], pointRadius: 0, borderWidth: 2, tension: 0.15 };
+          }) },
+          options: { responsive: true, maintainAspectRatio: false, interaction: { mode: 'index', intersect: false },
+            plugins: { legend: { labels: { boxWidth: 10, font: { size: 11 } } } },
+            scales: { y: { ticks: { callback: function(v){ return v + '%'; } } }, x: { ticks: { maxTicksLimit: 8 } } } }
+        });
+      }
+    }).catch(function(e){
+      btn.disabled = false;
+      msg.innerHTML = '<span style="color:var(--down);">'+escapeHtml(e.message || '실패했어요.')+'</span>';
+    });
+  });
+
+  var msLast = null;
+  document.getElementById('msRun').addEventListener('click', function(){
+    var btn = this, msg = document.getElementById('msMsg'), out = document.getElementById('msResult');
+    var id = document.getElementById('msStrategy').value;
+    var start = document.getElementById('msStart').value.replace(/-/g,''), end = document.getElementById('msEnd').value.replace(/-/g,'');
+    btn.disabled = true; out.innerHTML = '';
+    sbPrepare(msg).then(function(){
+      msg.innerHTML = '<span class="spinner"></span>&nbsp; 여러 방법으로 계산 중…';
+      return fetch('/api/backtest?mode=method-search&id='+encodeURIComponent(id)+'&start='+start+'&end='+end)
+        .then(function(r){ return r.json().then(function(d){ if(!r.ok) throw new Error(d.error || '계산하지 못했어요.'); return d; }); });
+    }).then(function(d){
+      btn.disabled = false;
+      msLast = d;
+      msg.innerHTML = '앞 기간(방법 고르기) '+sbYmdText(d.trainPeriod[0])+' ~ '+sbYmdText(d.trainPeriod[1])+' · 뒤 기간(확인) '+sbYmdText(d.testPeriod[0])+' ~ '+sbYmdText(d.testPeriod[1]);
+      var recKey = d.recommended ? JSON.stringify(d.recommended) : null;
+      var html = d.recommended
+        ? '<p style="margin:0 0 8px;">추천: <b>'+escapeHtml(d.recommendedText)+'</b>'+(d.beatsCurrent ? ' — 지금 방법보다 뒤 기간 성적이 좋아요.' : '')+'</p>'
+        : '<p style="margin:0 0 8px; color:var(--up);">앞 기간과 뒤 기간 모두 이익인 방법이 없어요. 이 기간에는 어떤 방법도 믿고 쓰기 어려워요. 기간을 바꿔 보거나 지금 방법을 유지하세요.</p>';
+      html += '<div style="overflow-x:auto;"><table><thead><tr><th>방법</th><th>앞 기간 수익률</th><th>뒤 기간 수익률</th><th>뒤 기간 최대 손실 폭</th><th>매도 수(앞/뒤)</th><th></th></tr></thead><tbody>';
+      d.rows.forEach(function(r, i){
+        var isRec = recKey && JSON.stringify(r.method) === recKey;
+        html += '<tr'+(isRec ? ' style="background:rgba(229,72,77,.06);"' : '')+'><td>'+escapeHtml(r.methodText)+(r.isCurrent ? ' <span style="font-size:10.5px; color:var(--muted);">(지금 방법)</span>' : '')+(isRec ? ' <b style="font-size:10.5px; color:var(--up);">추천</b>' : '')+'</td>' +
+          '<td>'+sbPct(r.train.returnPct)+'</td><td>'+sbPct(r.test.returnPct)+'</td><td class="down">'+fmt(r.test.mdd,2)+'%</td><td>'+r.train.sells+' / '+r.test.sells+'</td>' +
+          '<td>'+(r.isCurrent ? '' : '<button class="btn ghost" type="button" data-ms-apply="'+i+'" style="font-size:11.5px; padding:4px 10px;">이 방법 적용</button>')+'</td></tr>';
+      });
+      html += '</tbody></table></div><ul style="color:var(--muted-2); font-size:11.5px; margin:10px 0 0; padding-left:18px;">'+(d.notes||[]).map(function(n){ return '<li>'+escapeHtml(n)+'</li>'; }).join('')+'</ul>';
+      out.innerHTML = html;
+    }).catch(function(e){
+      btn.disabled = false;
+      msg.innerHTML = '<span style="color:var(--down);">'+escapeHtml(e.message || '실패했어요.')+'</span>';
+    });
+  });
+  document.getElementById('msResult').addEventListener('click', function(ev){
+    var b = ev.target.closest('[data-ms-apply]');
+    if(!b || !msLast) return;
+    var r = msLast.rows[Number(b.getAttribute('data-ms-apply'))];
+    if(!r) return;
+    if(!window.confirm((AT_STRATEGY_NAMES[msLast.id] || msLast.id)+' 전략의 사는/파는 방법을 바꿀까요?\n\n'+r.methodText+'\n\n새로 사는 종목부터 적용돼요.')) return;
+    b.disabled = true;
+    atPost('methods', { strategyId: msLast.id, method: r.method, source: 'backtest',
+      note: '앞 기간 '+r.train.returnPct+'%, 뒤 기간 '+r.test.returnPct+'%(두 계산 중 나쁜 쪽).' })
+      .then(function(){ b.textContent = '적용됨'; if(typeof loadStrategyCards === 'function') loadStrategyCards(); })
+      .catch(function(e){ b.disabled = false; window.alert(e.message); });
+  });
+
+  /* ---------------- 고정 50종목 목록 · 점검 (auto-trade-status.js action=universe) ---------------- */
+  function renderUniverseReview(review){
+    if(!review) return '<span style="color:var(--muted-2);">아직 점검한 적이 없어요.</span>';
+    var flagged = (review.rows || []).filter(function(r){ return r.flags && r.flags.length; });
+    var head = '마지막 점검 '+escapeHtml(review.date || '')+' · ';
+    if(!flagged.length) return head + '<span style="color:var(--down);">50종목 모두 기준 안이에요.</span>';
+    return head + '<span style="color:var(--up);">기준에서 벗어난 종목 '+flagged.length+'개</span> (바꿀지는 직접 정해요)<ul style="margin:4px 0 0; padding-left:18px;">' +
+      flagged.map(function(r){ return '<li>'+escapeHtml(r.name)+' — '+escapeHtml(r.flags.join(', '))+'</li>'; }).join('') + '</ul>';
+  }
+  function loadUniverse(){
+    var box = document.getElementById('uniBox');
+    if(!box) return;
+    fetch('/api/auto-trade-status?action=universe').then(function(r){ return r.json(); }).then(function(d){
+      if(d.error) throw new Error(d.error);
+      var chips = d.list.map(function(u){ return '<span style="display:inline-block; border:1px solid var(--line); border-radius:999px; padding:1px 8px; margin:2px; font-size:11.5px;">'+u.rank+'. '+escapeHtml(u.name)+' <span style="color:var(--muted-2);">'+escapeHtml(u.sector)+'</span></span>'; }).join('');
+      box.innerHTML = '<details class="more"><summary>50종목 보기 ('+escapeHtml(d.chosenAt)+' 선정, 하락장 전략만 예외로 '+escapeHtml(d.inverse.name)+')</summary><div class="more-body">'+chips+'</div></details>' +
+        '<div style="margin-top:6px;" id="uniReview">'+(d.reviewDue ? '<b style="color:var(--up);">한 달에 한 번 점검할 때가 됐어요.</b> ' : '')+renderUniverseReview(d.review)+'</div>' +
+        '<button class="btn ghost" type="button" id="uniReviewBtn" style="font-size:12px; padding:5px 12px; margin-top:6px;">지금 점검</button> <span id="uniMsg" class="st-msg"></span>';
+      document.getElementById('uniReviewBtn').addEventListener('click', function(){
+        var btn = this, m = document.getElementById('uniMsg');
+        btn.disabled = true; m.textContent = '50종목의 거래대금·시가총액을 확인하는 중… (10~20초)';
+        atPost('universe', { review: true }).then(function(res){
+          btn.disabled = false; m.textContent = '';
+          document.getElementById('uniReview').innerHTML = renderUniverseReview(res.review);
+        }).catch(function(e){ btn.disabled = false; m.textContent = e.message; });
+      });
+    }).catch(function(){ box.innerHTML = '<span style="color:var(--muted-2);">목록을 불러오지 못했어요.</span>'; });
+  }
 
   /* ---------------- Backtest ---------------- */
   document.getElementById('btRunBtn').addEventListener('click', function(){
