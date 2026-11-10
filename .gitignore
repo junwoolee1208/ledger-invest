@@ -1,1 +1,3 @@
 node_modules/
+tools/toss.env
+tools/.toss-data/

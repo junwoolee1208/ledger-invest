@@ -28,10 +28,15 @@ import { kvGetJson, kvSetJson, kvReady, kvMGetJson, kvMSetJson } from './_kv.js'
 import { FIXED_UNIVERSE, INVERSE_ETF } from './_universe.js';
 import { METHODS_KEY } from './_methods.js';
 import { prepareData, simulateStrategy, searchMethods, benchmarks, SIM_STRATEGY_IDS, SIM_NOTES } from './_strategy-sim.js';
+import {
+  MIN5_PREFIX, MIN5_INDEX_KEY, TOSS_META_KEY, KR_HOLIDAYS_KEY, INDEX_MIN_SYMBOL,
+  validPacked, validMonth, validYmd, monthsBetween, minuteAccessor
+} from './_minute-data.js';
 import { loadCosts, buyCostPct, sellCostPct } from './_costs.js';
 import { askClaude } from './_ai.js'; // AI 호출 공용 창구(사용량·예산·실패 이유 기록)
 
-export const config = { maxDuration: 30 };
+// 분봉으로 단타를 계산하면 저장소에서 읽는 양이 많아서 60초까지 기다려요(다른 모드는 여전히 금방 끝나요).
+export const config = { maxDuration: 60 };
 
 const EVOLVE_KEY = 'backtest:evolution:v2';
 const EVOLVE_AUTO_LASTRUN_KEY = 'backtest:evolve-auto:lastrun'; // 자동(크론) 실행 주기 판단용 — auto-trade-status.js의 설정(evolveIntervalHours)을 따름
@@ -847,6 +852,132 @@ async function loadSimInputs() {
   };
 }
 
+/* ==================== 토스증권 분봉·메타 (이 PC의 tools/toss-sync.mjs가 올려요) ====================
+   - mode=toss-upload (POST, 헤더 x-ledger-key = AUTO_TRADE_SECRET): { kind:'min5', items:[{sym, month, days}] } 또는
+     { kind:'meta', meta:{...}, holidays:{from,to,dates} }. 토스 API는 허용 IP(사용자 PC)에서만 불러서 서버는 받기만 해요.
+   - mode=toss-status (GET): 받아 둔 분봉 범위·메타 요약(화면 표시용). */
+const DAY_INTRADAY_IDS = ['daytrade', 'scalp', 'vwap-pullback', 'opening-breakout', 'staged-dip', 'dip-rebound'];
+function minuteSymbols() {
+  return FIXED_UNIVERSE.map((u) => u.symbol).concat([INVERSE_ETF.symbol, INDEX_MIN_SYMBOL]);
+}
+
+async function handleTossUpload(req, res) {
+  if (req.method !== 'POST') { res.status(405).json({ error: 'POST만 지원합니다.' }); return; }
+  const secret = process.env.AUTO_TRADE_SECRET;
+  if (!secret) { res.status(500).json({ error: 'AUTO_TRADE_SECRET 환경변수가 설정되지 않았습니다.' }); return; }
+  if ((req.headers['x-ledger-key'] || '') !== secret) { res.status(401).json({ error: '올리기 열쇠(LEDGER_UPLOAD_KEY)가 맞지 않아요.' }); return; }
+  let body = req.body;
+  if (typeof body === 'string') { try { body = JSON.parse(body); } catch (e) { body = {}; } }
+  body = body || {};
+  try {
+    if (body.kind === 'min5') {
+      const allowed = new Set(minuteSymbols());
+      const items = Array.isArray(body.items) ? body.items.slice(0, 120) : [];
+      const write = {};
+      const index = (await kvGetJson(MIN5_INDEX_KEY, null)) || { months: {}, ranges: {} };
+      index.months = index.months || {}; index.ranges = index.ranges || {};
+      let bad = 0;
+      for (const it of items) {
+        if (!it || !allowed.has(it.sym) || !validMonth(it.month) || !it.days || typeof it.days !== 'object') { bad++; continue; }
+        const days = {};
+        const prefix = it.month.replace('-', '');
+        Object.keys(it.days).slice(0, 31).forEach((d) => { if (validYmd(d) && d.startsWith(prefix) && validPacked(it.days[d])) days[d] = it.days[d]; });
+        const keys = Object.keys(days).sort();
+        if (!keys.length) { bad++; continue; }
+        write[MIN5_PREFIX + it.sym + ':' + it.month] = { v: 1, sym: it.sym, month: it.month, days, at: Date.now() };
+        index.months[it.sym] = Array.from(new Set((index.months[it.sym] || []).concat([it.month]))).sort();
+        const r = index.ranges[it.sym] || {};
+        index.ranges[it.sym] = { first: !r.first || keys[0] < r.first ? keys[0] : r.first, last: !r.last || keys[keys.length - 1] > r.last ? keys[keys.length - 1] : r.last };
+      }
+      if (!Object.keys(write).length) { res.status(400).json({ error: '올릴 수 있는 값이 없어요.', bad }); return; }
+      index.updatedAt = Date.now();
+      write[MIN5_INDEX_KEY] = index;
+      // 저장소 한 번 쓰기 크기를 넘지 않게 약 700KB씩 나눠 써요.
+      let chunk = {}, size = 0;
+      const flush = async () => {
+        if (!Object.keys(chunk).length) return true;
+        const ok = await kvMSetJson(chunk);
+        chunk = {}; size = 0;
+        return !!ok;
+      };
+      for (const k of Object.keys(write)) {
+        const s = JSON.stringify(write[k]).length;
+        if (size + s > 700_000 && !(await flush())) { res.status(503).json({ error: '저장소에 쓰지 못했어요.' }); return; }
+        chunk[k] = write[k]; size += s;
+      }
+      if (!(await flush())) { res.status(503).json({ error: '저장소에 쓰지 못했어요.' }); return; }
+      res.status(200).json({ ok: true, saved: Object.keys(write).length - 1, bad });
+      return;
+    }
+    if (body.kind === 'meta') {
+      const meta = body.meta && typeof body.meta === 'object' ? body.meta : null;
+      if (!meta || JSON.stringify(meta).length > 300_000) { res.status(400).json({ error: '메타 값이 이상해요.' }); return; }
+      const hol = body.holidays || {};
+      const dates = Array.isArray(hol.dates) ? hol.dates.filter((d) => /^\d{4}-\d{2}-\d{2}$/.test(d)).slice(0, 60) : [];
+      const ok = await kvMSetJson({
+        [TOSS_META_KEY]: Object.assign({}, meta, { updatedAt: Date.now() }),
+        [KR_HOLIDAYS_KEY]: { updatedAt: Date.now(), from: hol.from || null, to: hol.to || null, dates }
+      });
+      if (!ok) { res.status(503).json({ error: '저장소에 쓰지 못했어요.' }); return; }
+      res.status(200).json({ ok: true, holidays: dates.length });
+      return;
+    }
+    res.status(400).json({ error: 'kind는 min5 또는 meta여야 해요.' });
+  } catch (e) {
+    console.error('backtest.js(toss-upload) error:', e);
+    res.status(500).json({ error: '서버 오류가 발생했습니다.' });
+  }
+}
+
+async function handleTossStatus(req, res) {
+  try {
+    const got = (await kvMGetJson([MIN5_INDEX_KEY, TOSS_META_KEY, KR_HOLIDAYS_KEY])) || {};
+    const index = got[MIN5_INDEX_KEY] || null;
+    const meta = got[TOSS_META_KEY] || null;
+    let first = null, last = null, symbols = 0;
+    if (index && index.ranges) {
+      Object.keys(index.ranges).forEach((s) => {
+        if (s === INDEX_MIN_SYMBOL) return;
+        const r = index.ranges[s];
+        symbols++;
+        if (r.first && (!first || r.first < first)) first = r.first;
+        if (r.last && (!last || r.last > last)) last = r.last;
+      });
+    }
+    res.status(200).json({
+      ok: true,
+      minutes: index ? { updatedAt: index.updatedAt, symbols, first, last, hasIndex: !!(index.ranges && index.ranges[INDEX_MIN_SYMBOL]) } : null,
+      meta: meta ? { updatedAt: meta.updatedAt, ranking1mo: meta.ranking1mo || null, warnings: meta.warnings || {}, sectorOf: meta.sectorOf || {} } : null,
+      holidays: got[KR_HOLIDAYS_KEY] || null
+    });
+  } catch (e) {
+    res.status(500).json({ error: '서버 오류가 발생했습니다.' });
+  }
+}
+
+// 기간에 걸친 달의 분봉만 읽어요(단타 전략을 고른 경우에만). 없으면 null → 하루 가격 4개 방식으로 계산해요.
+async function loadMinuteData(startYmd, endYmd) {
+  const index = await kvGetJson(MIN5_INDEX_KEY, null);
+  if (!index || !index.months) return null;
+  const months = new Set(monthsBetween(startYmd, endYmd));
+  const syms = FIXED_UNIVERSE.map((u) => u.symbol).concat([INDEX_MIN_SYMBOL]);
+  // 지수는 기간 시작 전날 값이 필요해서 한 달 앞도 읽어요.
+  const before = monthsBetween(startYmd, startYmd)[0];
+  const keys = [];
+  syms.forEach((s) => (index.months[s] || []).forEach((m) => {
+    if (months.has(m) || (s === INDEX_MIN_SYMBOL && m < before && monthsBetween(m, before).length === 2)) keys.push(MIN5_PREFIX + s + ':' + m);
+  }));
+  if (!keys.length) return null;
+  const docs = [];
+  for (let i = 0; i < keys.length; i += 15) {
+    const got = await kvMGetJson(keys.slice(i, i + 15));
+    if (!got) return null;
+    Object.values(got).forEach((d) => docs.push(d));
+  }
+  const acc = minuteAccessor(docs);
+  return acc.size ? acc : null;
+}
+
 function simDates(data, startYmd, endYmd) {
   return data.allDates.filter((d) => d >= startYmd && d <= endYmd);
 }
@@ -864,6 +995,7 @@ async function handleStrategySim(req, res) {
     if (input.missing.length > 10) { res.status(409).json({ error: '과거 가격을 먼저 준비해야 해요.', needPrep: true, missing: input.missing.length }); return; }
     const data = prepareData(input.bars, input.indexRows);
     const startYmd = cleanYmd(req.query.start, ymdDaysAgo(180)), endYmd = cleanYmd(req.query.end, ymdDaysAgo(0));
+    if (ids.some((id) => DAY_INTRADAY_IDS.includes(id))) data.minute = await loadMinuteData(startYmd, endYmd);
     const dates = simDates(data, startYmd, endYmd);
     if (dates.length < 5) { res.status(400).json({ error: '고른 기간에 거래일이 너무 적어요(보관 중인 기간: ' + (data.allDates[25] || '') + ' ~ ' + (data.allDates[data.allDates.length - 1] || '') + ').' }); return; }
     const cash = Math.max(1_000_000, Math.min(1_000_000_000, Number(req.query.cash) || 10_000_000));
@@ -879,7 +1011,7 @@ async function handleStrategySim(req, res) {
     res.status(200).json({
       ok: true, period: [dates[0], dates[dates.length - 1]], tradingDays: dates.length, startingCash: cash,
       available: [data.allDates[25] || data.allDates[0], data.allDates[data.allDates.length - 1]],
-      results, benchmark: benchmarks(data, dates), missing: input.missing, notes: SIM_NOTES
+      results, benchmark: benchmarks(data, dates), missing: input.missing, notes: SIM_NOTES, hasMinutes: !!data.minute
     });
   } catch (e) {
     console.error('backtest.js(strategy) error:', e);
@@ -896,6 +1028,7 @@ async function handleMethodSearch(req, res) {
     if (input.missing.length > 10) { res.status(409).json({ error: '과거 가격을 먼저 준비해야 해요.', needPrep: true }); return; }
     const data = prepareData(input.bars, input.indexRows);
     const startYmd = cleanYmd(req.query.start, ymdDaysAgo(365)), endYmd = cleanYmd(req.query.end, ymdDaysAgo(0));
+    if (DAY_INTRADAY_IDS.includes(id)) data.minute = await loadMinuteData(startYmd, endYmd);
     const dates = simDates(data, startYmd, endYmd);
     const out = searchMethods(id, data, dates, input.opts);
     if (out.error) { res.status(400).json(out); return; }
@@ -938,6 +1071,14 @@ export default async function handler(req, res) {
   }
 
   if (mode === 'detail') return handleDetail(req, res);
+
+  if (mode === 'toss-upload' || mode === 'toss-status') {
+    if (!kvReady()) {
+      res.status(500).json({ error: 'KV(Upstash Redis)가 설정되지 않았습니다.' });
+      return;
+    }
+    return mode === 'toss-upload' ? handleTossUpload(req, res) : handleTossStatus(req, res);
+  }
 
   if (mode === 'strategy-prep' || mode === 'strategy' || mode === 'method-search') {
     if (!kvReady()) {

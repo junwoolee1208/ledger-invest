@@ -20,7 +20,7 @@
   - `sync.js` 관심종목/포트폴리오 저장 (Firebase ID 토큰 검증 → Vercel KV)
   - `auto-trade-check.js` 자동매매 실행 (외부 크론이 호출, `key`=`AUTO_TRADE_SECRET` 필요)
   - `auto-trade-status.js` 자동매매 설정/현황 (`action=config|log`)
-  - `backtest.js` 전략연구실 (`mode=presets|evolve|strategy-prep|strategy|method-search`)
+  - `backtest.js` 전략연구실 (`mode=presets|evolve|strategy-prep|strategy|method-search|toss-upload|toss-status`)
 - `api/_*.js` — 공용 코드 (Vercel 함수 개수에 안 잡힘)
   - `_kis.js` KIS 토큰 발급·KV 공유 캐시, `_kv.js` Vercel KV 헬퍼, `_costs.js` 수수료·세금,
     `_sentiment.js` 뉴스 긍정/부정 점수, `_backtest-core.js` / `_evolve-core.js` 백테스트·진화 탐색 로직
@@ -31,6 +31,8 @@
   - `_intraday.js` 새 단타 전략 판단·금액 규칙, `_longterm.js` 장기 분산 전략 규칙
   - `_universe.js` 자동매매 고정 50종목(+하락장 전략용 인버스 ETF), `_methods.js` 사는/파는 방법(나눠 사기·나눠 팔기·따라가는 손절)
   - `_bear.js` 시장 필터·하락장 전략·재매수 규칙, `_strategy-sim.js` 기간 백테스트·방법 찾기(실제 매매와 같은 방법 계산)
+  - `_minute-data.js` 토스 분봉(5분 묶음) 압축·저장 키·휴장일 키
+- `tools/toss-sync.mjs` — **사용자 PC에서 실행**하는 토스증권 데이터 받기·올리기 프로그램(Vercel 함수 아님). 설정은 `tools/toss.env`(GitHub에 안 올라감)
 - 데이터 저장: Vercel KV(Upstash Redis). 로그인: Firebase Authentication.
 
 ## 반드시 지킬 규칙
@@ -43,6 +45,9 @@
 
 ### 외부 API와 키
 - 시세·차트: 한국투자증권(KIS) Open API (토큰은 반드시 `_kis.js`를 통해 받는다 — 1분 1회 발급 제한)
+- 과거 분봉·순위·투자 유의·업종·휴장일: 토스증권 Open API. **허용 IP(사용자 PC)에서만 호출 가능**해서 서버(Vercel)는 토스를 직접 부르지 않는다.
+  `tools/toss-sync.mjs`가 PC에서 받아 `backtest.js?mode=toss-upload`(헤더 `x-ledger-key`=`AUTO_TRADE_SECRET`)로 올리고, 서버는 저장소에서 읽기만 한다.
+  토스 키는 주문 권한이 있으므로 **조회 주소만** 부른다(`READ_ONLY_PATHS`). 주문·정정·취소 코드를 넣지 말 것. 토스 키는 `tools/toss.env`에만 둔다.
 - 뉴스·실적: Finnhub
 - AI: Claude API (Anthropic) — **모든 AI 호출은 `api/_ai.js`의 `askClaude()`를 거친다.** 파일에서 직접 fetch로
   Claude를 부르지 말 것(사용량 기록·월 예산·실패 이유 기록이 빠짐). 공식 SDK `@anthropic-ai/sdk`(package.json)를 쓰고,
@@ -68,6 +73,8 @@
 - 켜진 전략 구성은 `LINEUP_VERSION`/`LINEUP_DEFAULTS`(`_strategies.js`)를 따른다. 켜짐 확인은 `strategyEnabled`/`enabledMapOf`로 한다(`cfg.strategies` 직접 읽지 말 것).
 - 모든 전략 공통 안전장치는 `COMMON_RULES`(하루 손실 1.5%, 스윙 보유 30%, 장 마감 전 위험 줄이기)이고, 시장 필터는 `_bear.js`의 `marketGate`다.
 - "어떻게 사고팔지"는 `_methods.js`에 있고 자동매매와 백테스트가 같이 쓴다. 매매 방식 계산을 한쪽에만 따로 만들지 말 것.
+- 단타의 "살까?" 판단·시간 규칙은 `_intraday.js`의 `intradayBuySignal`/`dayRulesFor`(데이트레이딩은 `_daytrade.js`의 `daytradeSignal`)에 있고, 분봉 백테스트도 같은 함수를 쓴다.
+- 국내 휴장일은 `market:kr-holidays`(토스 장 운영 달력)로 걸러서 자동매매가 쉰다.
 
 ## 작업 방식
 

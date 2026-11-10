@@ -1029,8 +1029,9 @@
       <p class="easy" style="font-size:12.5px;">자동매매 전략을 골라서, 정한 기간에 그 전략을 썼다면 얼마나 벌었을지 과거 가격으로 계산해요. 실제 매매는 일어나지 않아요.</p>
       <details class="more"><summary>자세히 보기</summary><div class="more-body">
         <p><b>무엇으로 계산하나요</b>: 자동매매와 같은 50종목(하락장 전략은 인버스 ETF), 같은 사는/파는 방법, 같은 비용(수수료·세금)으로 계산해요. 과거 가격은 약 14개월치까지 볼 수 있어요.</p>
-        <p><b>숫자가 두 개인 이유</b>: 과거 1분 단위 가격이 없어서 하루 가격 4개(시가·고가·저가·종가)로 장중 흐름을 흉내 내요. 하루 안에서 손절과 익절 중 무엇이 먼저였는지 알 수 없어서 두 가지 순서로 계산하고, <b>나쁜 쪽을 큰 숫자</b>로, 범위를 옆에 보여줘요. 실제는 대개 그 범위 안이에요.</p>
-        <p><b>신뢰도</b>: 단타는 하루 가격으로 흉내 내기 어려워 범위가 아주 넓을 수 있어요(낮음). 며칠씩 들고 가는 스윙은 비교적 믿을 만해요(보통).</p>
+        <p><b>단타는 분봉으로</b>: 토스증권에서 받아 둔 과거 분봉(5분 단위 가격)이 있는 날은, 단타 전략을 실제 자동매매와 같은 판단 규칙으로 5분마다 따라가며 계산해요. 분봉은 이 PC에서 <code>node tools/toss-sync.mjs all</code>을 실행하면 받아서 올려요.</p>
+        <p><b>숫자가 두 개인 이유</b>: 분봉이 없는 날·스윙은 하루 가격 4개(시가·고가·저가·종가)로 장중 흐름을 흉내 내요. 그 안에서 무엇이 먼저였는지 모를 때를 대비해 두 가지 순서로 계산하고, <b>나쁜 쪽을 큰 숫자</b>로, 범위를 옆에 보여줘요. 분봉으로 계산하면 두 숫자가 거의 같아져요.</p>
+        <p><b>신뢰도</b>: 높음 = 단타를 분봉으로 계산(80% 이상의 날). 보통 = 스윙, 또는 단타 일부만 분봉. 낮음 = 단타를 하루 가격으로만 흉내 낸 것(범위가 아주 넓을 수 있어요).</p>
         <p><b>비교 기준</b>: 같은 기간 코스피200(받지 못하면 50종목 평균으로 대신), 그리고 50종목을 똑같이 나눠 사서 그냥 들고 있었을 때의 수익률이에요.</p>
       </div></details>
       <div id="sbStrategies" style="display:flex; flex-wrap:wrap; gap:6px 14px; margin:10px 0; font-size:12.5px;"></div>
@@ -4907,6 +4908,14 @@
   function sbPct(v){ if(v===null || v===undefined) return '—'; return '<span class="'+(v>=0?'up':'down')+'">'+(v>=0?'+':'')+fmt(v,2)+'%</span>'; }
   var SB_SIDE = { TAKE_PROFIT:'익절', STOP_LOSS:'손절', DAY_CLOSE:'장마감 청산', MAX_HOLD:'보유 기한', PARTIAL_TAKE:'나눠 팔기', TRAIL_STOP:'따라가는 손절', RISK_CUT:'위험 줄이기', SIGNAL_EXIT:'흐름 전환' };
   function sbYmdText(s){ return s ? s.slice(0,4)+'-'+s.slice(4,6)+'-'+s.slice(6,8) : ''; }
+  // 신뢰도: 단타를 토스 분봉으로 계산한 비율에 따라 높음/보통/낮음
+  function sbReliability(r){
+    var share = typeof r.minuteShare === 'number' ? '<br><span style="color:var(--muted-2); font-size:11px;">분봉 '+fmt(r.minuteShare,0)+'%</span>' : '';
+    if(r.reliability === 'minute') return '<b>높음</b>'+share;
+    if(r.reliability === 'mixed') return '보통'+share;
+    if(r.reliability === 'low') return '<span style="color:var(--up);">낮음</span>'+share;
+    return '보통';
+  }
 
   document.getElementById('sbRun').addEventListener('click', function(){
     var btn = this, msg = document.getElementById('sbMsg'), out = document.getElementById('sbResult');
@@ -4935,7 +4944,7 @@
           '<td>'+r.buys+' / '+r.sells+'</td>' +
           '<td>'+(r.winRate===null?'—':fmt(r.winRate,1)+'%')+'</td>' +
           '<td>'+fmt(r.fees,0)+'원</td>' +
-          '<td>'+(r.reliability === 'low' ? '<span style="color:var(--up);">낮음</span>' : '보통')+'</td></tr>';
+          '<td>'+sbReliability(r)+'</td></tr>';
       });
       html += '<tr style="background:var(--bg-2, rgba(0,0,0,.03));"><td>'+(bm.kospiIsProxy ? '시장(50종목 평균으로 대신)' : '코스피200')+'</td><td>'+sbPct(bm.kospi200Pct)+'</td><td colspan="6" style="color:var(--muted-2); font-size:11.5px;">같은 기간 시장 전체</td></tr>';
       html += '<tr style="background:var(--bg-2, rgba(0,0,0,.03));"><td>50종목 똑같이 사서 보유</td><td>'+sbPct(bm.equalWeightPct)+'</td><td colspan="6" style="color:var(--muted-2); font-size:11.5px;">아무것도 안 하고 들고만 있었을 때</td></tr>';
@@ -5045,7 +5054,52 @@
           document.getElementById('uniReview').innerHTML = renderUniverseReview(res.review);
         }).catch(function(e){ btn.disabled = false; m.textContent = e.message; });
       });
+      loadTossStatus(d.list);
     }).catch(function(){ box.innerHTML = '<span style="color:var(--muted-2);">목록을 불러오지 못했어요.</span>'; });
+  }
+  // 토스증권 데이터(이 PC의 tools/toss-sync.mjs가 올린 것): 분봉 범위, 1개월 거래대금 순위와 50종목 비교, 투자 유의, 휴장일
+  var TOSS_WARN = { OVERHEATED:'단기과열', INVESTMENT_WARNING:'투자경고', INVESTMENT_RISK:'투자위험', LIQUIDATION_TRADING:'정리매매', STOCK_WARRANTS:'신주인수권' };
+  function loadTossStatus(list){
+    var box = document.getElementById('uniBox');
+    if(!box) return;
+    var div = document.createElement('div');
+    div.style.cssText = 'margin-top:10px; padding-top:8px; border-top:1px dashed var(--line); font-size:12.5px;';
+    box.appendChild(div);
+    fetch('/api/backtest?mode=toss-status').then(function(r){ return r.json(); }).then(function(d){
+      if(d.error) throw new Error(d.error);
+      var when = function(ms){ return ms ? new Date(ms).toLocaleString('ko-KR', { month:'numeric', day:'numeric', hour:'2-digit', minute:'2-digit' }) : ''; };
+      var html = '<b>토스증권 데이터</b> ';
+      if(!d.minutes && !d.meta){
+        div.innerHTML = html + '<span style="color:var(--muted-2);">아직 없어요. 이 PC에서 <code>node tools/toss-sync.mjs all</code>을 실행하면 받아서 올려요.</span>';
+        return;
+      }
+      var m = d.minutes;
+      html += '<div style="margin-top:4px;">분봉: '+(m ? m.symbols+'종목 · '+sbYmdText(m.first)+' ~ '+sbYmdText(m.last)+(m.hasIndex?' · 코스피 포함':'')+' <span style="color:var(--muted-2);">('+when(m.updatedAt)+' 올림)</span>' : '<span style="color:var(--muted-2);">없음</span>')+'</div>';
+      var meta = d.meta;
+      if(meta && meta.ranking1mo && meta.ranking1mo.list && meta.ranking1mo.list.length){
+        var top = meta.ranking1mo.list, ours = {}, rankOf = {};
+        list.forEach(function(u){ ours[u.symbol] = u; });
+        top.forEach(function(x){ rankOf[x.symbol] = x.rank; });
+        var outside = list.filter(function(u){ return !rankOf[u.symbol]; });
+        var newcomers = top.filter(function(x){ return !ours[x.symbol] && x.type === 'STOCK' && x.rank <= 50; });
+        html += '<div style="margin-top:4px;">1개월 거래대금 순위(시장 전체, 상위 100): 50종목 중 <b>'+(list.length - outside.length)+'개</b>가 들어 있어요. <span style="color:var(--muted-2);">('+when(meta.updatedAt)+' 기준)</span></div>';
+        if(outside.length) html += '<div style="margin-top:2px;">100위 밖: '+outside.map(function(u){ return escapeHtml(u.name); }).join(', ')+'</div>';
+        if(newcomers.length) html += '<div style="margin-top:2px;">50종목에 없는 상위 종목(주식만): '+newcomers.slice(0, 10).map(function(x){ return x.rank+'위 '+escapeHtml(x.name)+' '+fmt(x.amountEok/10000,1)+'조'; }).join(', ')+'</div>';
+        html += '<div style="color:var(--muted-2); font-size:11.5px; margin-top:2px;">목록은 자동으로 바꾸지 않아요. 바꿀지는 한 달에 한 번 점검할 때 직접 정해요.</div>';
+      }
+      var warns = meta && meta.warnings ? Object.keys(meta.warnings) : [];
+      if(warns.length){
+        var nameOf = {}; list.forEach(function(u){ nameOf[u.symbol] = u.name; });
+        html += '<div style="margin-top:4px; color:var(--up);">투자 유의: '+warns.map(function(s){
+          return escapeHtml(nameOf[s] || s)+'('+meta.warnings[s].map(function(w){ return TOSS_WARN[w.type] || w.type; }).join('·')+')';
+        }).join(', ')+'</div>';
+      }
+      var h = d.holidays;
+      if(h && h.dates){
+        html += '<div style="margin-top:4px;">다가오는 휴장일(자동매매 쉼): '+(h.dates.length ? h.dates.slice(0, 6).map(escapeHtml).join(', ') : '없음')+'</div>';
+      }
+      div.innerHTML = html;
+    }).catch(function(){ div.innerHTML = '<span style="color:var(--muted-2);">토스 데이터 상태를 불러오지 못했어요.</span>'; });
   }
 
   /* ---------------- Backtest ---------------- */

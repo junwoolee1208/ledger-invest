@@ -20,7 +20,7 @@ import { getKisToken, kisHeaders, num, KIS_BASE } from './_kis.js';
 import { kvGetJson, kvSetJson, kvMGetJson, kvMSetJson, kvReady } from './_kv.js';
 import { fetchSymbolHistory, annotateWithFactors, scoreForStrategy, classifyRegimeByDate } from './_backtest-core.js';
 import { normalizeCosts, COST_CONFIG_KEY, planBuy, planSell, positionCostBasis, fetchUsdKrw, REALIZED_KEY_PREFIX } from './_costs.js';
-import { normalizeDaytrade, hhmmToMin } from './_daytrade.js';
+import { normalizeDaytrade, hhmmToMin, daytradeSignal } from './_daytrade.js';
 import { BASE_RISK, keysFor, STARTING_CASH_US, SWING_MAX_HOLD_DAYS, weekdaysBetween, normalizeHorizon, COMMON_RULES, strategyEnabled } from './_strategies.js';
 import { universeCandidates, INVERSE_ETF } from './_universe.js';
 import { METHODS_KEY, methodOf, normalizeMethod, exitDecision, addDecision, applyAdd, firstBuyShare, newPositionFields } from './_methods.js';
@@ -29,7 +29,7 @@ import {
   reentryAllowed, REENTRY, DIP_NEXTDAY, INVERSE_RULE
 } from './_bear.js';
 import {
-  INTRADAY_STATE_KEY, INTRADAY_RULES, DAY_CLOSE_RULES, sizeByVolatility, updateIntradayState, breakoutSignal, pullbackSignal
+  INTRADAY_STATE_KEY, INTRADAY_RULES, DAY_CLOSE_RULES, sizeByVolatility, updateIntradayState, breakoutSignal, pullbackSignal, dayRulesFor
 } from './_intraday.js';
 import {
   LONGTERM_STATE_KEY, MIN_TARGETS, rebalanceDue, indexUpdateDue, planRebalance, fetchLongTermTargets, fetchKospi200
@@ -42,6 +42,7 @@ import {
   summarize, clampProposal, liftToFloors, judge, readyToJudge, forbiddenDirections, applyForbidden, lessonLine
 } from './_learning.js';
 import { DEEPEVAL_LATEST_KEY } from './_deepeval.js';
+import { KR_HOLIDAYS_KEY } from './_minute-data.js'; // 토스증권 장 운영 달력에서 받아 둔 국내 휴장일(tools/toss-sync.mjs meta)
 
 export const config = { maxDuration: 30 };
 
@@ -205,18 +206,12 @@ const STRATEGY_DEFS = [
     },
     // 전일 종가가 아니라 "오늘 시가 대비" 정해둔 범위만큼 오르고, 오늘 고가에서 많이 밀리지 않은(버티는) 종목만 삽니다.
     // 전일 대비 너무 급등한 종목은 상한가 근처라 변동이 커서 피합니다.
-    shouldBuy: (cand, q, cfg) => {
-      if (!q.open || !q.high || q.changePct === null) return false;
-      const s = normalizeDaytrade(cfg.daytrade);
-      const fromOpenPct = ((q.price - q.open) / q.open) * 100;
-      const offHighPct = ((q.high - q.price) / q.high) * 100;
-      return fromOpenPct >= s.minFromOpenPct && fromOpenPct <= s.maxFromOpenPct &&
-        offHighPct <= s.maxOffHighPct && q.changePct <= s.maxChangePct;
-    }
+    // 판단 함수는 분봉 백테스트와 같이 쓰려고 _daytrade.js(daytradeSignal)로 옮겼어요.
+    shouldBuy: (cand, q, cfg) => daytradeSignal(q, normalizeDaytrade(cfg.daytrade))
   },
   ...[
-    // 장 초반 돌파는 09:45부터 사요. 장 시작 직후 급락하는 종목을 쫓아 사던 문제(11/6 09:34 매수 4건이 15분 안에 모두 손절)를 막으려고요.
-    { id: 'opening-breakout', name: '장 초반 돌파', rules: Object.assign({}, INTRADAY_RULES, { buyStart: '09:45' }), signal: (q, cfg) => breakoutSignal(q, cfg._intraday) },
+    // 시간 규칙(장 초반 돌파는 09:45부터 등)은 분봉 백테스트와 같이 쓰려고 _intraday.js(dayRulesFor)에 모았어요.
+    { id: 'opening-breakout', name: '장 초반 돌파', rules: dayRulesFor('opening-breakout'), signal: (q, cfg) => breakoutSignal(q, cfg._intraday) },
     { id: 'vwap-pullback', name: '강한 종목 눌림', signal: (q, cfg) => pullbackSignal(q, cfg._intraday, Date.now()) }
   ].map((d) => ({
     id: d.id,
@@ -238,7 +233,7 @@ const STRATEGY_DEFS = [
     name: '단계별 저점 매수',
     // 시가보다 -2~-4% 내려온 종목의 첫 1/3을 사고, 더 떨어지면 매매 방식(나눠 사기)이 나머지를 사요. 반등하면 나눠 팔고 당일 정리해요.
     horizon: 'day', ownRules: true, intraday: true, krOnly: true, gate: 'dip', maxPositions: 4,
-    dayRules: () => ({ buyStart: '09:15', buyEnd: '14:30', closeAt: '15:10', dailyLossLimitPct: 1.5, cooldownMin: 10 }),
+    dayRules: () => dayRulesFor('staged-dip'),
     getRisk: () => BASE_RISK['staged-dip'],
     shouldBuy: (cand, q, cfg) => stagedDipSignal(q, cfg._minutes)
   },
@@ -247,7 +242,7 @@ const STRATEGY_DEFS = [
     name: '급락 반등 단타',
     // 하락장 전략: 크게 빠진 종목이 바닥에서 반등하는 걸 확인하고 사서, 작은 이익에 팔고 당일 정리해요.
     horizon: 'day', ownRules: true, intraday: true, krOnly: true, gate: 'bear', maxPositions: 3,
-    dayRules: () => ({ buyStart: '10:00', buyEnd: '14:30', closeAt: '15:10', dailyLossLimitPct: 1.5, cooldownMin: 10 }),
+    dayRules: () => dayRulesFor('dip-rebound'),
     getRisk: () => ({ positionPct: 10, stopLossPct: 2, takeProfitPct: 3, maxTradesPerDay: 4 }),
     sizeFor: sizeByVolatility,
     shouldBuy: (cand, q, cfg) => dipReboundSignal(q, cfg._minutes)
@@ -290,7 +285,7 @@ function todayKST() {
 // 장이 닫혀 있을 때 받은 시세는 "마지막 체결가"라 실제로는 그 가격에 사고팔 수 없어요. 예전엔 스케줄러가 밤에 불러도
 // 그대로 가상매매가 일어나 결과가 부풀려질 수 있었기 때문에, 이제 모든 전략이 장중에만 매매합니다.
 // 국내는 15:20부터 동시호가(한 번에 체결되는 마감 경매)라 그 전까지만, 미국은 정규장(뉴욕 09:30~16:00)만 봅니다.
-// 공휴일 달력은 따로 없어서, 평일 공휴일엔 시세가 안 움직여 사실상 매수 조건에 잘 안 걸리는 정도로만 걸러져요.
+// 국내 휴장일은 토스증권 장 운영 달력에서 받아 둔 목록(KR_HOLIDAYS_KEY)으로 걸러요. 목록이 없거나 오래되면 평일은 연 것으로 봐요.
 const KR_OPEN_MIN = 9 * 60;
 const KR_CLOSE_MIN = 15 * 60 + 20;
 const US_OPEN_MIN = 9 * 60 + 30; // 뉴욕 현지 시각 — 서머타임은 Intl이 알아서 반영
@@ -650,7 +645,8 @@ function makeQuoteFetcher(token, marketKey, cache) {
 async function processStrategyMarket(strategyDef, marketKey, fetchQuote, cfg, candidates, today, risk, apiKey, log, costs, accounts) {
   // 장이 닫혀 있으면 아무것도 하지 않습니다(손절·익절도 — 닫힌 장의 가격으론 실제로 팔 수 없으니까요).
   const clock = marketClock(marketKey);
-  if (!clock.open) return { actions: [], cash: null, positions: null };
+  // 휴장일엔 시계로는 '장중'이어도 국내 계좌를 읽지 않았으니 절대 손대지 않아요(빈 계좌로 덮어쓰는 일 방지).
+  if (!clock.open || (marketKey === 'KR' && cfg._krHoliday)) return { actions: [], cash: null, positions: null };
 
   const keys = keysFor(strategyDef.id, marketKey);
   const positions = accounts[keys.positionsKey] || {};
@@ -1005,7 +1001,8 @@ export default async function handler(req, res) {
   }
 
   // 국내·미국 둘 다 장이 닫혀 있으면 저장소도 안 읽고 바로 끝냅니다(스케줄러가 1분마다 불러도 낭비 없음).
-  const krOpen = marketClock('KR').open, usOpen = marketClock('US').open;
+  let krOpen = marketClock('KR').open;
+  const usOpen = marketClock('US').open;
   if (!krOpen && !usOpen) {
     res.status(200).json({ skipped: true, reason: 'market-closed' });
     return;
@@ -1015,18 +1012,29 @@ export default async function handler(req, res) {
   // 읽기에 실패하면 이번 실행을 통째로 건너뜁니다. 그대로 진행하면 계좌가 빈 것으로 보여서 덮어쓸 수 있어요.
   // 진화형·커스텀·시장적응형은 국내 전용이라, 국내장이 닫혀 있으면 읽지 않아요.
   const snap = await kvMGetJson([
-    CONFIG_KEY, LOG_KEY, OVERRIDES_KEY, ADJUST_LASTRUN_KEY, COST_CONFIG_KEY, REGIME_CACHE_KEY, METHODS_KEY,
+    CONFIG_KEY, LOG_KEY, OVERRIDES_KEY, ADJUST_LASTRUN_KEY, COST_CONFIG_KEY, REGIME_CACHE_KEY, METHODS_KEY, KR_HOLIDAYS_KEY,
     ...(krOpen ? [CUSTOM_STRATEGIES_KEY, EVOLVE_KEY, REGIME_LASTUSED_KEY, EVOLVED_FACTORS_KEY, INTRADAY_STATE_KEY, LONGTERM_STATE_KEY] : [])
   ]);
   if (!snap) {
     res.status(503).json({ error: '저장소를 읽지 못해 이번 실행을 건너뛰었어요.' });
     return;
   }
+  // 국내 휴장일(설날·추석·대체공휴일 등)엔 시세가 어제 그대로라 국내 매매를 하지 않아요.
+  const holidays = snap[KR_HOLIDAYS_KEY];
+  const krHoliday = !!(krOpen && holidays && Array.isArray(holidays.dates) && holidays.dates.includes(todayKST()));
+  if (krHoliday) {
+    krOpen = false;
+    if (!usOpen) {
+      res.status(200).json({ skipped: true, reason: 'kr-holiday' });
+      return;
+    }
+  }
   const cfg = snap[CONFIG_KEY];
   if (!cfg || !cfg.enabled) {
     res.status(200).json({ skipped: true, reason: 'disabled' });
     return;
   }
+  cfg._krHoliday = krHoliday; // 이번 실행 동안만 쓰는 값(저장되지 않음)
 
   try {
     const token = await getKisToken();

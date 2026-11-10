@@ -82,3 +82,14 @@ export function describeDaytrade(s) {
     `매수 ${s.buyStart}~${s.buyEnd}, 청산 ${s.closeAt} · 손절 ${s.stopLossPct}%/익절 ${s.takeProfitPct}%, 비중 ${s.positionPct}% · ` +
     `하루 손실한도 ${s.dailyLossLimitPct}%, 매수 최대 ${s.maxBuysPerDay}회, 재매수 대기 ${s.cooldownMin}분`;
 }
+
+// 데이트레이딩의 "살까?" 판단. 자동매매(auto-trade-check.js)와 분봉 백테스트(_strategy-sim.js)가 같이 써요.
+// 전일 종가가 아니라 "오늘 시가 대비" 정해둔 범위만큼 오르고, 오늘 고가에서 많이 밀리지 않은(버티는) 종목만 삽니다.
+// 전일 대비 너무 급등한 종목은 상한가 근처라 변동이 커서 피합니다. s: normalizeDaytrade 결과
+export function daytradeSignal(q, s) {
+  if (!q.open || !q.high || q.changePct === null) return false;
+  const fromOpenPct = ((q.price - q.open) / q.open) * 100;
+  const offHighPct = ((q.high - q.price) / q.high) * 100;
+  return fromOpenPct >= s.minFromOpenPct && fromOpenPct <= s.maxFromOpenPct &&
+    offHighPct <= s.maxOffHighPct && q.changePct <= s.maxChangePct;
+}

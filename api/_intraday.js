@@ -5,6 +5,9 @@
 // 왜 손절폭을 종목마다 다르게 하나: 등락이 큰 종목에 좁은 손절을 쓰면 평범한 흔들림에도 바로 팔려요.
 // 그래서 오늘 변동폭에 맞춰 손절을 넓히되, 그만큼 사는 금액을 줄여서 한 번 손절로 잃는 돈은 비슷하게 맞춰요.
 
+import { normalizeDaytrade, daytradeSignal } from './_daytrade.js';
+import { stagedDipSignal, dipReboundSignal } from './_bear.js';
+
 export const INTRADAY_STATE_KEY = 'autotrade:intraday-state'; // { date, ranges: {종목:{high,low}}, touches: {종목:시각} }
 
 // 새 단타 전략 2개의 규칙. 14:30 뒤에 사면 목표가까지 갈 시간이 짧아서 그때부터는 안 사요.
@@ -90,4 +93,31 @@ export function pullbackSignal(q, state, nowMs) {
   if (nowMs - touchedAt > TOUCH_VALID_MS) return false;
   return q.changePct >= PULLBACK_MIN_CHANGE_PCT && q.changePct <= PULLBACK_MAX_CHANGE_PCT &&
     q.price >= q.vwap * VWAP_RECLAIM && q.price <= q.vwap * VWAP_MAX_CHASE;
+}
+
+// ---- 단타 전략별 시간 규칙과 "살까?" 판단을 한 곳에 ----
+// 자동매매(auto-trade-check.js)와 분봉 백테스트(_strategy-sim.js)가 같은 값을 쓰게 여기 모아 뒀어요.
+// 장 초반 돌파는 09:45부터 사요. 장 시작 직후 급락하는 종목을 쫓아 사던 문제(11/6 09:34 매수 4건이 15분 안에 모두 손절)를 막으려고요.
+export function dayRulesFor(id, daytradeCfg) {
+  if (id === 'daytrade') return normalizeDaytrade(daytradeCfg);
+  if (id === 'scalp') return DAY_CLOSE_RULES;
+  if (id === 'opening-breakout') return Object.assign({}, INTRADAY_RULES, { buyStart: '09:45' });
+  if (id === 'vwap-pullback') return INTRADAY_RULES;
+  if (id === 'staged-dip') return { buyStart: '09:15', buyEnd: '14:30', closeAt: '15:10', dailyLossLimitPct: 1.5, cooldownMin: 10 };
+  if (id === 'dip-rebound') return { buyStart: '10:00', buyEnd: '14:30', closeAt: '15:10', dailyLossLimitPct: 1.5, cooldownMin: 10 };
+  return null;
+}
+
+// 분봉 백테스트용 "살까?" 판단(실제 매매와 같은 함수). state: { ranges, touches } (updateIntradayState로 갱신), nowMs: 그날 0시 기준 ms
+// 초단타는 고정 50종목이 모두 "거래대금 상위" 후보라 문턱이 +0.5%예요(auto-trade-check.js isRankCand).
+export function intradayBuySignal(id, q, minutes, state, nowMs, daytradeCfg) {
+  switch (id) {
+    case 'daytrade': return daytradeSignal(q, normalizeDaytrade(daytradeCfg));
+    case 'scalp': return q.changePct !== null && q.changePct >= 0.5;
+    case 'opening-breakout': return breakoutSignal(q, state);
+    case 'vwap-pullback': return pullbackSignal(q, state, nowMs);
+    case 'staged-dip': return stagedDipSignal(q, minutes);
+    case 'dip-rebound': return dipReboundSignal(q, minutes);
+    default: return false;
+  }
 }

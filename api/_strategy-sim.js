@@ -2,8 +2,14 @@
 // 기간 백테스트: "이 전략을 그 기간에 썼다면 얼마나 벌었을까?"를 과거 일봉으로 계산해요. _로 시작해서 Vercel 함수 개수에 안 잡혀요.
 // backtest.js의 mode=strategy(기간 백테스트)와 mode=method-search(방법 찾기)가 써요. 계산만 하고 저장소·시세 조회는 하지 않아요.
 //
-// 한계(화면에도 "추정치"로 표시해요):
-//  - 과거 1분 단위 가격은 없어서, 하루 가격 4개(시가·고가·저가·종가)로 장중 흐름을 흉내 내요.
+// 분봉이 있으면(토스증권에서 받아 올린 5분 묶음, _minute-data.js) 단타 전략은 실제 장중 흐름대로 계산해요:
+//  - 5분마다 실제 매매(auto-trade-check.js)와 같은 "살까?" 함수(_intraday.js intradayBuySignal)·시간 규칙(dayRulesFor)·
+//    시장 필터(코스피 분봉으로 marketGate)·재매수 규칙(reentryAllowed)·금액 규칙(sizeByVolatility)을 그대로 써요.
+//  - 5분 안의 가격 4개 순서만 모르는 거라, 두 계산(보수적·낙관적)의 차이가 아주 작아져요.
+//  - 분봉이 없는 날(토스가 주지 않는 옛날 등)은 아래의 하루 가격 4개 방식으로 계산하고, 결과에 분봉 비율을 표시해요.
+//
+// 분봉이 없을 때의 한계(화면에도 "추정치"로 표시해요):
+//  - 하루 가격 4개(시가·고가·저가·종가)로 장중 흐름을 흉내 내요.
 //    하루 안에서 무엇이 먼저였는지 알 수 없어서 두 가지로 계산해 범위로 보여줘요(pathMode).
 //    - 보수적(conservative, 기본): 산 날은 산 뒤에 그날 저가를 한 번 더 찍었다고 봐요 → 같은 날 손절·익절이 둘 다 가능하면 손절 먼저.
 //      다른 날은 시가→저가→고가→종가. 반등을 확인하고 사는 전략은 바닥을 미리 알 수 없으니 내려오는 길에 산 것으로 계산해요.
@@ -20,7 +26,10 @@ import { BASE_RISK, COMMON_RULES, SWING_MAX_HOLD_DAYS, STRATEGY_NAMES } from './
 import { normalizeDaytrade } from './_daytrade.js';
 import { methodOf, levelsOf, firstBuyShare, newPositionFields, applyAdd, describeMethod, methodGrid } from './_methods.js';
 import { FIXED_UNIVERSE, INVERSE_ETF } from './_universe.js';
-import { isBearRegime, DIP_NEXTDAY, INVERSE_RULE } from './_bear.js';
+import { isBearRegime, DIP_NEXTDAY, INVERSE_RULE, marketGate, reentryAllowed, REENTRY } from './_bear.js';
+import { dayRulesFor, intradayBuySignal, sizeByVolatility, updateIntradayState } from './_intraday.js';
+import { hhmmToMin } from './_daytrade.js';
+import { DAY_START_MIN, DAY_END_MIN, BAR_MIN, INDEX_MIN_SYMBOL } from './_minute-data.js';
 
 export const SIM_STRATEGY_IDS = ['daytrade', 'scalp', 'vwap-pullback', 'opening-breakout', 'staged-dip', 'momentum', 'evolved',
   'dip-rebound', 'dip-nextday', 'inverse', 'baseline', 'pullback', 'breakout', 'reversal', 'selective', 'wideswing'];
@@ -252,6 +261,89 @@ function walk(st, from, to, gap) {
   if (st.pos && to > (st.pos.peak || 0)) st.pos.peak = to;
 }
 
+// ---- 분봉(5분 묶음)으로 단타 하루 계산 ----
+const PT_MIN = [0, 1, 3, 4]; // 5분 묶음 안의 가격 4개(시가→…→종가)가 묶음 시작에서 몇 분째에 나왔다고 볼지
+// 5분 묶음의 가격 순서(pathOf와 같은 규칙: 보수적은 시가→저가→고가→종가, 낙관적 음봉은 시가→고가→저가→종가)
+function barPts(bar, mode) {
+  return mode === 'optimistic' && bar.c < bar.o ? [bar.o, bar.h, bar.l, bar.c] : [bar.o, bar.l, bar.h, bar.c];
+}
+const INTRADAY_IDS = ['daytrade', 'scalp', 'vwap-pullback', 'opening-breakout', 'staged-dip', 'dip-rebound'];
+
+// 그날 후보의 80% 이상에 분봉이 있어야 분봉으로 계산해요(일부만 있으면 그 종목들만 사는 쏠림이 생겨서).
+function minuteDayOk(data, date, candidates) {
+  if (!data.minute) return false;
+  let n = 0;
+  for (const s of candidates) if (data.minute.has(s, date)) n++;
+  return n >= Math.max(1, candidates.length * 0.8);
+}
+
+// 코스피 분봉 → 그 시각의 지수 {price, open, changePct}. 전날 분봉이 없으면 null(일봉 기준 필터로 대신해요).
+function indexQuoteAt(data, date, prevDate) {
+  const bars = data.minute.get(INDEX_MIN_SYMBOL, date);
+  const prev = prevDate ? data.minute.get(INDEX_MIN_SYMBOL, prevDate) : null;
+  if (!bars || !bars.length || !prev || !prev.length) return null;
+  const prevClose = prev[prev.length - 1].c, open = bars[0].o;
+  const byT = new Map(bars.map((b) => [b.t, b]));
+  let last = bars[0];
+  return (t) => {
+    const b = byT.get(t);
+    if (b) last = b;
+    return { price: last.o, open, changePct: (last.o / prevClose - 1) * 100 };
+  };
+}
+
+// 하루 동안 "살 만한 순간" 목록. 계좌 상태와 상관없는 부분(가격·신호·시간·시장 필터)이라 한 번 계산해 두고
+// 방법 찾기처럼 같은 전략을 여러 번 돌릴 때 다시 써요. 같은 종목은 5분에 한 번만 남겨요(계산량 줄이기).
+function daySignals(id, data, date, c) {
+  const key = id + '|' + c.pathMode + '|' + JSON.stringify(c.daytrade || null);
+  if (!data._sig) data._sig = new Map();
+  let cache = data._sig.get(key);
+  if (!cache) { cache = new Map(); data._sig.set(key, cache); }
+  if (cache.has(date)) return cache.get(date);
+  const rules = dayRulesFor(id, c.daytrade);
+  const startMin = hhmmToMin(rules.buyStart), endMin = hhmmToMin(rules.buyEnd);
+  const idxAt = indexQuoteAt(data, date, c.prevDate);
+  const gateMemo = new Map();
+  const gateAt = (t) => {
+    if (!gateMemo.has(t)) gateMemo.set(t, idxAt ? marketGate(c.gateKind, idxAt(t), c.regimePrev).ok : gateOk(c.gateKind, c.idxDaily, c.regimePrev));
+    return gateMemo.get(t);
+  };
+  const iState = { date, ranges: {}, touches: {} };
+  const events = [], syms = {};
+  c.candidates.forEach((sym, ci) => {
+    const bars = data.minute.get(sym, date);
+    const b = data.maps[sym] && data.maps[sym].get(date);
+    if (!bars || !bars.length || !b || !b.prevClose) return;
+    if (Math.abs(bars[0].o / b.open - 1) > 0.03) return; // 분봉과 일봉 시가가 크게 다르면(수정주가 차이 등) 그 종목은 빼요
+    syms[sym] = { byT: new Map(bars.map((x) => [x.t, x])), lastClose: bars[bars.length - 1].c };
+    const open = bars[0].o, pc = b.prevClose;
+    let hi = -Infinity, lo = Infinity, pv = 0, vol = 0, lastEvT = -1;
+    for (const bar of bars) {
+      const pts = barPts(bar, c.pathMode);
+      const typ = (bar.o + bar.h + bar.l + bar.c) / 4;
+      for (let k = 0; k < 4; k++) {
+        const price = pts[k], minute = bar.t + PT_MIN[k];
+        if (price > hi) hi = price;
+        if (price < lo) lo = price;
+        const fv = bar.v * (k + 1) / 4; // 평균 체결가는 이 5분의 거래량도 지나온 만큼만 넣어요
+        const vwap = vol + fv > 0 ? (pv + typ * fv) / (vol + fv) : price;
+        const q = { symbol: sym, price, open, high: hi, low: lo, vwap, changePct: (price / pc - 1) * 100 };
+        if (id === 'opening-breakout' || id === 'vwap-pullback') updateIntradayState(iState, [q], minute, date, minute * 60000);
+        if (minute < startMin || minute >= endMin || bar.t === lastEvT) continue;
+        if (!intradayBuySignal(id, q, minute, iState, minute * 60000, c.daytrade)) continue;
+        if (!gateAt(bar.t)) continue;
+        events.push({ t: bar.t, k, ci, sym, minute, price, q });
+        lastEvT = bar.t;
+      }
+      pv += typ * bar.v; vol += bar.v;
+    }
+  });
+  events.sort((a, b) => a.t - b.t || a.ci - b.ci || a.k - b.k);
+  const out = { events, syms };
+  cache.set(date, out);
+  return out;
+}
+
 // ---- 한 전략을 기간 동안 돌려요 ----
 // data: prepareData 결과, dates: 시뮬레이션할 날짜(오름차순), opts: { costs, startingCash, method, daytrade, evolved, riskOverrides, keepTrades }
 export function simulateStrategy(id, data, dates, opts) {
@@ -268,7 +360,7 @@ export function simulateStrategy(id, data, dates, opts) {
   const positions = {};
   const trades = [];
   const equity = [];
-  let fees = 0, buysCount = 0;
+  let fees = 0, buysCount = 0, minuteDays = 0;
   const allIdx = new Map(data.allDates.map((d, i) => [d, i]));
 
   if (id === 'evolved' && !opts.evolved) return { id, skipped: '진화형 탐색 결과가 아직 없어서 계산할 수 없어요.' };
@@ -327,10 +419,73 @@ export function simulateStrategy(id, data, dates, opts) {
       }
     }
 
+    // B') 단타 + 분봉이 있는 날: 5분마다 실제 매매와 같은 순서(보유 종목 점검 → 새로 사기)로 계산해요.
+    const useMinutes = prof.intraday && minuteDayOk(data, date, candidates);
+    if (useMinutes) {
+      minuteDays++;
+      const sig = daySignals(id, data, date, { pathMode, daytrade: opts.daytrade, candidates, prevDate, regimePrev, idxDaily: idx, gateKind: prof.gate });
+      const rules = dayRulesFor(id, opts.daytrade);
+      const closeMin = hhmmToMin(rules.closeAt);
+      const ownLimit = typeof rules.dailyLossLimitPct === 'number' ? rules.dailyLossLimitPct : COMMON_RULES.dailyLossLimitPct;
+      const lossLimitM = startCash * (Math.min(ownLimit, COMMON_RULES.dailyLossLimitPct) / 100);
+      const gapMin = rules.cooldownMin || REENTRY.minGapMin;
+      const lastSell = {}, lastPx = {};
+      let buysM = 0, ei = 0;
+      const ev = sig.events;
+      // 보유 종목을 5분 묶음의 가격 4개를 따라 움직여요. 청산 시각(15:10)이 되면 그 가격에 정리해요.
+      const stepHeld = (sym, bar, fromK) => {
+        const pts = barPts(bar, pathMode);
+        for (let k = fromK; k < 4 && positions[sym]; k++) {
+          const price = pts[k], minute = bar.t + PT_MIN[k];
+          const before = trades.length;
+          if (minute >= closeMin) sellPos(sym, positions[sym], 'DAY_CLOSE', price, 1);
+          else walk(makeState(sym, positions[sym]), lastPx[sym], price, false);
+          lastPx[sym] = price;
+          if (!positions[sym] && trades.length > before) {
+            const tr = trades[trades.length - 1];
+            lastSell[sym] = { ts: minute * 60000, side: tr.side, price: tr.exitPrice, pnlPct: tr.pnlPct };
+          }
+        }
+      };
+      for (let t = DAY_START_MIN; t < DAY_END_MIN; t += BAR_MIN) {
+        for (const sym of Object.keys(positions)) {
+          const s = sig.syms[sym], bar = s && s.byT.get(t);
+          if (bar) stepHeld(sym, bar, 0);
+        }
+        while (ei < ev.length && ev[ei].t === t) {
+          const e = ev[ei++];
+          if (positions[e.sym] || realized <= -lossLimitM || buysM >= risk.maxTradesPerDay) continue;
+          if (prof.maxPositions && Object.keys(positions).length >= prof.maxPositions) continue;
+          // 오늘 판 종목을 다시 살 때는 "다른 근거"가 있어야 해요(실제 매매와 같은 규칙).
+          if (!reentryAllowed(lastSell[e.sym] || null, e.q, e.minute * 60000, gapMin).ok) continue;
+          const exposure = Object.values(positions).reduce((s, p) => s + p.costBasis, 0);
+          let budget, stopPct = null, takePct = null;
+          if (prof.sizeVol) {
+            const sz = sizeByVolatility(e.q, cash + exposure, cash);
+            if (!sz) continue;
+            budget = sz.budget; stopPct = sz.stopPct; takePct = sz.takePct;
+          } else budget = cash * (risk.positionPct / 100);
+          budget = Math.min(budget, cash);
+          const buy = planBuy(costs, 'KR', budget * firstBuyShare(m), e.price);
+          if (buy.qty < 1) continue;
+          cash -= buy.total; fees += buy.fee; buysM++; buysCount++;
+          positions[e.sym] = Object.assign({ qty: buy.qty, avgPrice: e.price, costBasis: buy.total, entryDate: date, heldDays: 0 },
+            newPositionFields(m, e.price, budget), stopPct ? { stopPct, takePct } : {});
+          lastPx[e.sym] = e.price;
+          stepHeld(e.sym, sig.syms[e.sym].byT.get(t), e.k + 1);
+        }
+      }
+      // 분봉이 일찍 끝난 종목 등 남은 건 마지막 가격으로 정리해요.
+      Object.keys(positions).forEach((sym) => {
+        const px = lastPx[sym] || (sig.syms[sym] && sig.syms[sym].lastClose) || positions[sym].avgPrice;
+        sellPos(sym, positions[sym], 'DAY_CLOSE', px, 1);
+      });
+    }
+
     // B) 새로 사기
     const lossLimit = startCash * (COMMON_RULES.dailyLossLimitPct / 100);
     let buysToday = 0;
-    if (gateOk(prof.gate, idx, regimePrev)) {
+    if (!useMinutes && gateOk(prof.gate, idx, regimePrev)) {
       for (const sym of candidates) {
         if (realized <= -lossLimit) break;
         if (positions[sym]) continue;
@@ -379,7 +534,15 @@ export function simulateStrategy(id, data, dates, opts) {
     });
     equity.push({ date, equity: Math.round(value) });
   }
-  return summarizeRun(id, m, startCash, equity, trades, fees, buysCount, opts.keepTrades);
+  const out = summarizeRun(id, m, startCash, equity, trades, fees, buysCount, opts.keepTrades);
+  // 신뢰도: 단타는 분봉으로 계산한 날의 비율로 정해요(80% 이상 'minute', 일부 'mixed', 없으면 'low').
+  if (prof.intraday) {
+    const share = dates.length ? minuteDays / dates.length : 0;
+    out.minuteDays = minuteDays;
+    out.minuteShare = r2(share * 100);
+    out.reliability = share >= 0.8 ? 'minute' : share > 0 ? 'mixed' : 'low';
+  }
+  return out;
 }
 
 function summarizeRun(id, m, startCash, equity, trades, fees, buys, keepTrades) {
@@ -397,7 +560,7 @@ function summarizeRun(id, m, startCash, equity, trades, fees, buys, keepTrades) 
     maxDrawdownPct: r2(mdd), sells: trades.length, buys, winRate: trades.length ? r2((wins.length / trades.length) * 100) : null,
     avgWinPct: avg(wins), avgLossPct: avg(losses), fees: Math.round(fees), bySide,
     equity: equity.filter((_, i) => i % step === 0 || i === equity.length - 1),
-    reliability: ['daytrade', 'scalp', 'vwap-pullback', 'opening-breakout', 'staged-dip', 'dip-rebound'].includes(id) ? 'low' : 'mid',
+    reliability: INTRADAY_IDS.includes(id) ? 'low' : 'mid',
     ...(keepTrades ? { trades: trades.slice(-300).reverse() } : {})
   };
 }
@@ -466,7 +629,8 @@ export function searchMethods(id, data, dates, opts) {
 }
 
 export const SIM_NOTES = [
-  '하루 가격 4개(시가·고가·저가·종가)로 장중 흐름을 흉내 낸 추정치예요. 특히 단타는 실제와 차이가 클 수 있어요.',
+  '단타는 토스증권에서 받아 둔 분봉(5분 묶음)이 있는 날엔 실제 장중 흐름대로, 실제 매매와 같은 판단 규칙으로 계산해요(신뢰도 "분봉").',
+  '분봉이 없는 날·스윙은 하루 가격 4개(시가·고가·저가·종가)로 장중 흐름을 흉내 낸 추정치예요.',
   '하루 안에서 무엇이 먼저였는지 알 수 없어서 두 가지 순서로 계산해요. 큰 숫자는 둘 중 나쁜 쪽이고, 옆에 범위를 함께 보여줘요. 실제는 대개 그 범위 안이에요.',
   '단타는 하루 가격만으로 흉내 내기 어려워 범위가 아주 넓을 수 있어요(신뢰도 낮음). 스윙은 비교적 믿을 만해요.',
   '보수적 계산에서 반등을 확인하고 사는 전략은 그날 바닥을 미리 알 수 없어서, 바닥 전 내려오는 길에 산 것으로 계산해요.',
