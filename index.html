@@ -18,8 +18,8 @@
     --panel-2:#F8F9FA;
     --line:#E5E8EB;
     --ink:#191F28;
-    --muted:#6B7684;
-    --muted-2:#8B95A1;
+    --muted:#4E5968;
+    --muted-2:#6B7684;
     --up:#F04452;
     --down:#3182F6;
     --brand:#3182F6;
@@ -41,6 +41,71 @@
     letter-spacing:-0.02em;
   }
   .mono{ font-variant-numeric:tabular-nums; font-feature-settings:"tnum"; }
+  /* ---- 읽기 쉽게(2026-11 개편): 기본 글씨를 키우고, 화면 곳곳의 아주 작은 글씨를 한 단계씩 키워요 ---- */
+  body{ font-size:15px; line-height:1.55; }
+  [style*="font-size:10.5px"]{ font-size:12px !important; }
+  [style*="font-size:11px"]{ font-size:12.5px !important; }
+  [style*="font-size:11.5px"]{ font-size:13px !important; }
+  [style*="font-size:12px"]{ font-size:13.5px !important; }
+  [style*="font-size:12.5px"]{ font-size:14px !important; }
+  h3[style*="font-size:15px"]{ font-size:17px !important; }
+  table{ font-variant-numeric:tabular-nums; }
+  details.more > summary{ font-size:13.5px; }
+
+  /* ---- 큰 탭 4개 + 작은 탭 ---- */
+  nav.main-tabs{ display:flex; gap:4px; background:var(--panel-2); border-radius:999px; padding:4px; }
+  nav.main-tabs button{
+    background:transparent; border:none; color:var(--muted); font-family:inherit; font-size:15.5px; font-weight:700;
+    padding:10px 22px; border-radius:999px; cursor:pointer; transition:background .15s,color .15s; display:flex; align-items:center; gap:6px;
+  }
+  nav.main-tabs button .ic{ font-size:15px; }
+  nav.main-tabs button:hover{ color:var(--ink); }
+  nav.main-tabs button.active{ background:var(--brand); color:#fff; }
+  .header-right{ display:flex; align-items:center; gap:10px; }
+  .gear-btn{ width:38px; height:38px; border-radius:999px; border:1px solid var(--line); background:var(--panel); font-size:18px; cursor:pointer; color:var(--muted); }
+  .gear-btn:hover, .gear-btn.active{ color:var(--brand); border-color:var(--brand); background:var(--brand-dim); }
+  .sub-tabs-wrap{ background:var(--panel); border-bottom:1px solid var(--line); position:sticky; top:71px; z-index:49; }
+  .sub-tabs-wrap nav.tabs{ max-width:1180px; margin:0 auto; background:transparent; border-radius:0; padding:0 32px; gap:6px; overflow-x:auto; white-space:nowrap; }
+  .sub-tabs-wrap nav.tabs button{ border-radius:0; padding:12px 6px; margin-right:14px; font-size:14.5px; border-bottom:2.5px solid transparent; }
+  .sub-tabs-wrap nav.tabs button.active{ background:transparent; color:var(--brand); border-bottom-color:var(--brand); }
+
+  /* ---- 전략연구실 작은 탭(칩) ---- */
+  .lab-chips{ display:flex; flex-wrap:wrap; gap:8px; margin:0 0 18px; }
+  .lab-chips button{ border:1px solid var(--line); background:var(--panel); color:var(--muted); font-family:inherit; font-size:14px; font-weight:600; padding:8px 16px; border-radius:999px; cursor:pointer; }
+  .lab-chips button.active{ background:var(--ink); color:#fff; border-color:var(--ink); }
+
+  /* ---- 결론 카드(결과 맨 위 한 줄 판정) ---- */
+  .verdicts{ display:grid; grid-template-columns:repeat(auto-fit,minmax(260px,1fr)); gap:10px; margin:0 0 14px; }
+  .verdict{ border-radius:12px; padding:12px 14px; border:1px solid var(--line); background:var(--panel-2); }
+  .verdict .v-head{ display:flex; justify-content:space-between; gap:8px; align-items:baseline; font-weight:700; font-size:15px; }
+  .verdict .v-num{ font-size:20px; font-weight:800; }
+  .verdict .v-text{ margin-top:4px; font-size:14px; color:var(--ink); }
+  .verdict.v-good{ background:#EEF8F1; border-color:#B7E4C7; }
+  .verdict.v-mid{ background:#FFF8E6; border-color:#FFE1A3; }
+  .verdict.v-bad{ background:#FFF0F1; border-color:#FFC9CE; }
+
+  /* ---- 홈 "지금 할 일" ---- */
+  .todo-panel{ margin-bottom:18px; }
+  .todo-item{ display:flex; gap:10px; align-items:flex-start; padding:8px 0; border-top:1px dashed var(--line); font-size:14.5px; }
+  .todo-item:first-child{ border-top:none; }
+  .todo-item .t-ic{ font-size:18px; line-height:1.3; }
+  .todo-item button{ margin-left:auto; flex-shrink:0; }
+
+  /* ---- 휴대폰: 큰 탭은 아래 막대로, 위는 간단하게 ---- */
+  @media (max-width:760px){
+    header.top{ padding:10px 16px; }
+    .brand .sub, #userEmail{ display:none; }
+    nav.main-tabs{ position:fixed; left:0; right:0; bottom:0; z-index:60; border-radius:0; background:var(--panel); border-top:1px solid var(--line); padding:4px 4px calc(4px + env(safe-area-inset-bottom)); justify-content:space-around; }
+    nav.main-tabs button{ flex:1; flex-direction:column; gap:2px; font-size:12px; padding:6px 2px; border-radius:10px; }
+    nav.main-tabs button .ic{ font-size:20px; }
+    nav.main-tabs button.active{ background:var(--brand-dim); color:var(--brand); }
+    body{ padding-bottom:70px; }
+    .chat-fab{ bottom:84px !important; right:12px !important; padding:10px 14px; }
+    .sub-tabs-wrap{ top:58px; }
+    .sub-tabs-wrap nav.tabs{ padding:0 16px; }
+    main{ padding:18px 14px 40px; }
+  }
+
   a{color:inherit;}
   ::selection{ background:var(--brand-dim); color:var(--brand); }
 
@@ -456,30 +521,45 @@
     <span class="mark">LEDGER<em>.</em></span>
     <span class="sub">개인 투자 데스크</span>
   </div>
-  <nav class="tabs" id="tabs">
-    <button data-view="dashboard" class="active">대시보드</button>
-    <button data-view="issues">이슈</button>
-    <button data-view="analysis">종목분석</button>
-    <button data-view="rankings">랭킹</button>
-    <button data-view="portfolio">포트폴리오</button>
-    <button data-view="autotrade">자동매매</button>
-    <button data-view="scorecard">채점표</button>
-    <button data-view="strategychanges">전략 변경 이력</button>
-    <button data-view="strategylab">전략연구실</button>
-    <button data-view="calendar">캘린더</button>
-    <button data-view="calc">계산기</button>
-    <button data-view="settings">설정</button>
+  <nav class="main-tabs" id="mainTabs">
+    <button data-group="home" class="active"><span class="ic">🏠</span>홈</button>
+    <button data-group="auto"><span class="ic">🤖</span>자동매매</button>
+    <button data-group="lab"><span class="ic">🧪</span>전략연구실</button>
+    <button data-group="market"><span class="ic">📈</span>시장</button>
   </nav>
-  <div class="user-badge" id="userBadge" style="display:none;">
-    <span id="userEmail"></span>
-    <button id="logoutBtn">로그아웃</button>
+  <div class="header-right">
+    <div class="user-badge" id="userBadge" style="display:none;">
+      <span id="userEmail"></span>
+      <button id="logoutBtn">로그아웃</button>
+    </div>
+    <button type="button" class="gear-btn" id="gearBtn" title="설정" aria-label="설정">⚙</button>
   </div>
 </header>
+<div class="sub-tabs-wrap" id="subTabsWrap" style="display:none;">
+  <nav class="tabs" id="tabs">
+    <button data-view="dashboard" data-group="home" class="active">오늘</button>
+    <button data-view="autotrade" data-group="auto">전략 현황</button>
+    <button data-view="scorecard" data-group="auto">채점표</button>
+    <button data-view="strategychanges" data-group="auto">변경 이력</button>
+    <button data-view="strategylab" data-group="lab">전략연구실</button>
+    <button data-view="analysis" data-group="market">종목분석</button>
+    <button data-view="rankings" data-group="market">랭킹</button>
+    <button data-view="issues" data-group="market">이슈</button>
+    <button data-view="calendar" data-group="market">캘린더</button>
+    <button data-view="portfolio" data-group="market">포트폴리오</button>
+    <button data-view="calc" data-group="market">계산기</button>
+    <button data-view="settings" data-group="settings">설정</button>
+  </nav>
+</div>
 
 <main>
 
   <!-- DASHBOARD -->
   <section class="view active" id="view-dashboard">
+    <div class="panel pad todo-panel" id="homeTodoPanel">
+      <h3 style="margin:0 0 6px;">지금 할 일</h3>
+      <div id="homeTodo" style="color:var(--muted);">확인하는 중…</div>
+    </div>
     <div class="section-head">
       <div>
         <span class="eyebrow">관심종목</span>
@@ -1021,7 +1101,7 @@
 
     <div class="banner">
       <b>여기서는 실제/모의 매매가 일어나지 않아요</b><br>
-      과거 데이터로만 전략을 실험하는 공간이에요. 맨 위 "전략 기간 백테스트"와 "방법 찾기"는 자동매매와 같은 고정 50종목·같은 규칙으로 계산해요. 그 아래 기존 도구들은 관심종목으로 실험해요.
+      과거 데이터로만 전략을 실험하는 공간이에요. 아래 작은 탭에서 하고 싶은 일을 고르세요. "예전 실험 도구"만 관심종목으로 실험하고, 나머지는 자동매매와 같은 고정 50종목·같은 규칙으로 계산해요.
     </div>
 
     <div class="panel pad" style="margin-bottom:20px;">
@@ -2052,6 +2132,137 @@
     }
     if(btn.dataset.view === 'autotrade') loadPickConfig();
   });
+
+  /* ---------------- 큰 탭 4개(홈·자동매매·전략연구실·시장) + 작은 탭 + 설정 톱니 ---------------- */
+  // 기존 화면 버튼(#tabs button[data-view])은 그대로 두고, 큰 탭에 속한 것만 작은 탭 줄에 보여줘요.
+  // 다른 코드가 부르는 document.querySelector('button[data-view="analysis"]').click()도 그대로 동작해요.
+  var mainTabs = document.getElementById('mainTabs');
+  var lastSubOf = {};
+  function syncGroup(group){
+    Array.prototype.forEach.call(mainTabs.querySelectorAll('button[data-group]'), function(b){ b.classList.toggle('active', b.dataset.group === group); });
+    document.getElementById('gearBtn').classList.toggle('active', group === 'settings');
+    var n = 0;
+    Array.prototype.forEach.call(tabs.querySelectorAll('button[data-view]'), function(b){
+      var show = b.dataset.group === group;
+      b.style.display = show ? '' : 'none';
+      if(show) n++;
+    });
+    document.getElementById('subTabsWrap').style.display = n > 1 ? '' : 'none';
+  }
+  function openGroup(group){
+    var view = lastSubOf[group];
+    var btn = view ? tabs.querySelector('button[data-view="'+view+'"]') : tabs.querySelector('button[data-group="'+group+'"]');
+    if(btn) btn.click();
+    window.scrollTo(0, 0);
+  }
+  tabs.addEventListener('click', function(e){
+    var btn = e.target.closest('button[data-view]');
+    if(!btn) return;
+    lastSubOf[btn.dataset.group] = btn.dataset.view;
+    syncGroup(btn.dataset.group);
+  });
+  mainTabs.addEventListener('click', function(e){
+    var b = e.target.closest('button[data-group]');
+    if(b) openGroup(b.dataset.group);
+  });
+  document.getElementById('gearBtn').addEventListener('click', function(){ openGroup('settings'); });
+  syncGroup('home');
+
+  /* ---------------- 전략연구실 작은 탭: 한 번에 한 가지 일만 보이게 ---------------- */
+  var LAB_TABS = [
+    ['test', '백테스트'], ['verify', '검증·방법 찾기'], ['build', '전략 조립'], ['check', '실제와 맞춰보기'], ['data', '데이터 점검'], ['legacy', '예전 실험 도구']
+  ];
+  var labShow = function(){};
+  (function initLabTabs(){
+    var view = document.getElementById('view-strategylab');
+    if(!view) return;
+    var keyOf = function(el){
+      if(el.classList.contains('section-head') || el.classList.contains('banner') || el.tagName !== 'DIV') return null;
+      if(el.querySelector('#sbRun')) return 'test';
+      if(el.querySelector('#msRun')) return 'verify';
+      if(el.id === 'rbPanel') return 'build';
+      if(el.querySelector('#rcRun')) return 'check';
+      if(el.querySelector('#dcRun')) return 'data';
+      return 'legacy';
+    };
+    var kids = Array.prototype.slice.call(view.children);
+    kids.forEach(function(el){ var k = keyOf(el); if(k) el.setAttribute('data-lab', k); });
+    var bar = document.createElement('div');
+    bar.className = 'lab-chips';
+    bar.innerHTML = LAB_TABS.map(function(t){ return '<button type="button" data-lab-tab="'+t[0]+'">'+t[1]+'</button>'; }).join('');
+    var banner = view.querySelector('.banner');
+    (banner || view.firstElementChild).insertAdjacentElement('afterend', bar);
+    labShow = function(key){
+      Array.prototype.forEach.call(view.querySelectorAll('[data-lab]'), function(el){ el.style.display = el.getAttribute('data-lab') === key ? '' : 'none'; });
+      Array.prototype.forEach.call(bar.querySelectorAll('button'), function(b){ b.classList.toggle('active', b.getAttribute('data-lab-tab') === key); });
+      try { localStorage.setItem('ledger.labTab', key); } catch(e){}
+    };
+    bar.addEventListener('click', function(e){ var b = e.target.closest('[data-lab-tab]'); if(b) labShow(b.getAttribute('data-lab-tab')); });
+    var saved = null;
+    try { saved = localStorage.getItem('ledger.labTab'); } catch(e){}
+    labShow(LAB_TABS.some(function(t){ return t[0] === saved; }) ? saved : 'test');
+  })();
+  function goLab(key){ openGroup('lab'); labShow(key); }
+
+  /* ---------------- 결론 카드: 결과 표를 다 읽지 않아도 "그래서 좋은 거야?"가 보이게 ---------------- */
+  function sbVerdict(r, bm){
+    var st = r.stats || {}, ew = bm && typeof bm.equalWeightPct === 'number' ? bm.equalWeightPct : null;
+    var lvl, icon, text;
+    if(!r.sells){ lvl = 'mid'; icon = 'ℹ️'; text = '매매가 없었어요. 조건이 너무 까다롭거나, 그 기간에 맞는 날이 없었어요.'; }
+    else if(r.totalReturnPct > 0 && st.verdict === 'solid' && st.meanPct > 0){ lvl = 'good'; icon = '✅'; text = '벌었고, 우연이 아닐 가능성이 커요.'; }
+    else if(r.totalReturnPct > 0){ lvl = 'mid'; icon = '🤔'; text = st.verdict === 'few' ? '벌었지만 거래가 '+st.n+'건뿐이라 아직 판단하기 일러요.' : '벌었지만 우연일 수 있어요. "검증" 탭의 여러 구간 검증으로 확인해 보세요.'; }
+    else { lvl = 'bad'; icon = '⚠️'; text = st.verdict === 'solid' ? '꾸준히 잃었어요. 끄거나 규칙을 고치는 걸 추천해요.' : '손해였어요. 기간을 바꿔 다시 보거나 규칙을 고쳐 보세요.'; }
+    if(ew !== null && r.sells) text += ' 50종목을 그냥 들고 있던 것('+(ew>=0?'+':'')+fmt(ew,1)+'%)보다 '+(r.totalReturnPct > ew ? '나아요.' : '못해요.');
+    if(r.reliability === 'low') text += ' (단타를 하루 가격으로 흉내 낸 결과라 참고만 하세요.)';
+    return { lvl: lvl, icon: icon, text: text };
+  }
+  function sbVerdictCards(rows, bm){
+    var list = (rows || []).filter(function(r){ return r && !r.skipped; });
+    if(!list.length) return '';
+    return '<div class="verdicts">' + list.map(function(r){
+      var v = sbVerdict(r, bm);
+      return '<div class="verdict v-'+v.lvl+'"><div class="v-head"><span>'+v.icon+' '+escapeHtml(AT_STRATEGY_NAMES[r.id] || r.name)+'</span><span class="v-num '+(r.totalReturnPct>=0?'up':'down')+'">'+(r.totalReturnPct>=0?'+':'')+fmt(r.totalReturnPct,1)+'%</span></div><div class="v-text">'+escapeHtml(v.text)+'</div></div>';
+    }).join('') + '</div>';
+  }
+
+  /* ---------------- 홈 "지금 할 일": 데이터가 끊겼는지, 점검할 때인지, 곧 휴장인지 ---------------- */
+  function loadHomeTodo(){
+    var box = document.getElementById('homeTodo');
+    if(!box) return;
+    Promise.all([
+      fetch('/api/backtest?mode=toss-status').then(function(r){ return r.json(); }).catch(function(){ return null; }),
+      fetch('/api/auto-trade-status?action=universe').then(function(r){ return r.json(); }).catch(function(){ return null; })
+    ]).then(function(res){
+      var toss = res[0], uni = res[1], items = [];
+      var today = todayKST();
+      var m = toss && toss.minutes;
+      if(!m || !m.updatedAt) items.push({ ic:'📥', text:'토스 분봉이 아직 없어요. 이 PC에서 <code>node tools/toss-sync.mjs all</code>을 실행해 주세요.', go:'data' });
+      else {
+        var days = Math.floor((Date.now() - m.updatedAt) / 86400000);
+        if(days >= 3) items.push({ ic:'📥', text:'토스 분봉이 <b>'+days+'일째</b> 안 올라왔어요. PC를 켜 두면 평일 오후 4시 10분에 저절로 올라가요.', go:'data' });
+      }
+      if(uni && uni.reviewDue) items.push({ ic:'🗓️', text:'고정 50종목을 <b>한 달에 한 번 점검</b>할 때예요.', go:'universe' });
+      var hol = toss && toss.holidays && toss.holidays.dates ? toss.holidays.dates.filter(function(d){ return d >= today && (Date.parse(d) - Date.parse(today)) <= 7 * 86400000; }) : [];
+      if(hol.length) items.push({ ic:'🏖️', text:'<b>'+hol.join(', ')+'</b>은 휴장일이라 자동매매가 쉬어요.' });
+      var warns = toss && toss.meta && toss.meta.warnings ? Object.keys(toss.meta.warnings) : [];
+      if(warns.length && uni && uni.list){
+        var nm = {}; uni.list.forEach(function(u){ nm[u.symbol] = u.name; });
+        items.push({ ic:'🚨', text:'투자 유의 종목: '+warns.map(function(s){ return escapeHtml(nm[s] || s); }).join(', ') });
+      }
+      if(!items.length){ box.innerHTML = '<div class="todo-item"><span class="t-ic">👍</span><span>지금은 할 일이 없어요. 데이터도 잘 올라오고 있어요.</span></div>'; return; }
+      box.innerHTML = items.map(function(it, i){
+        return '<div class="todo-item"><span class="t-ic">'+it.ic+'</span><span>'+it.text+'</span>'+(it.go ? '<button type="button" class="btn ghost" data-todo-go="'+it.go+'" style="font-size:13px; padding:5px 12px;">바로 가기</button>' : '')+'</div>';
+      }).join('');
+    });
+  }
+  document.getElementById('homeTodo').addEventListener('click', function(e){
+    var b = e.target.closest('[data-todo-go]');
+    if(!b) return;
+    var go = b.getAttribute('data-todo-go');
+    if(go === 'data') goLab('data');
+    if(go === 'universe'){ openGroup('auto'); setTimeout(function(){ var u = document.getElementById('uniBox'); if(u) u.scrollIntoView({ block:'center' }); }, 400); }
+  });
+  loadHomeTodo();
 
   /* ---------------- Ticker Tape ---------------- */
   var tapeTrack = document.getElementById('tapeTrack');
@@ -5015,7 +5226,7 @@
       msg.innerHTML = '기간 '+sbYmdText(d.period[0])+' ~ '+sbYmdText(d.period[1])+' ('+d.tradingDays+'거래일) · 시작 금액 '+fmt(d.startingCash,0)+'원 · 볼 수 있는 기간 '+sbYmdText(d.available[0])+' ~ '+sbYmdText(d.available[1]);
       var bm = d.benchmark || {};
       var rows = d.results.slice().sort(function(a,b){ return (b.totalReturnPct||-999) - (a.totalReturnPct||-999); });
-      var html = '<div style="overflow-x:auto;"><table><thead><tr><th>전략</th><th>수익률(나쁜 쪽)</th><th>범위</th><th>최대 손실 폭</th><th>매수/매도</th><th>승률</th><th>비용</th><th>신뢰도</th></tr></thead><tbody>';
+      var html = sbVerdictCards(rows, bm) + '<div style="overflow-x:auto;"><table><thead><tr><th>전략</th><th>수익률(나쁜 쪽)</th><th>범위</th><th>최대 손실 폭</th><th>매수/매도</th><th>승률</th><th>비용</th><th>신뢰도</th></tr></thead><tbody>';
       rows.forEach(function(r){
         if(r.skipped){ html += '<tr><td>'+escapeHtml(AT_STRATEGY_NAMES[r.id] || r.id)+'</td><td colspan="7" style="color:var(--muted-2);">'+escapeHtml(r.skipped)+'</td></tr>'; return; }
         html += '<tr><td><b>'+escapeHtml(AT_STRATEGY_NAMES[r.id] || r.name)+'</b><br><span style="color:var(--muted-2); font-size:11px;">'+escapeHtml(r.isRule ? (r.ruleText || '') : (r.methodText || ''))+'</span>'+(r.note ? '<br><span style="color:var(--up); font-size:11px;">'+escapeHtml(r.note)+'</span>' : '')+'</td>' +
@@ -5374,7 +5585,7 @@
         m.innerHTML = '기간 '+sbYmdText(d.period[0])+' ~ '+sbYmdText(d.period[1])+' ('+d.tradingDays+'거래일)'+(d.hasMinutes ? '' : ' · <b style="color:var(--up);">분봉이 없어서 매매가 없어요</b>');
         AT_STRATEGY_NAMES.draft = rule.name;
         sbLastRows = [r];
-        out.innerHTML = '<div style="overflow-x:auto;"><table><thead><tr><th>수익률(나쁜 쪽)</th><th>범위</th><th>최대 손실 폭</th><th>매수/매도</th><th>승률</th><th>신뢰도</th><th>같은 기간 50종목 보유</th></tr></thead><tbody><tr>' +
+        out.innerHTML = sbVerdictCards([r], d.benchmark || {}) + '<div style="overflow-x:auto;"><table><thead><tr><th>수익률(나쁜 쪽)</th><th>범위</th><th>최대 손실 폭</th><th>매수/매도</th><th>승률</th><th>신뢰도</th><th>같은 기간 50종목 보유</th></tr></thead><tbody><tr>' +
           '<td style="font-size:15px; font-weight:700;">'+sbPct(r.totalReturnPct)+'</td><td style="font-size:12px;">'+sbPct(r.range.low)+' ~ '+sbPct(r.range.high)+'</td><td class="down">'+fmt(r.maxDrawdownPct,2)+'%</td><td>'+r.buys+' / '+r.sells+'</td>' +
           '<td>'+(r.winRate === null ? '—' : fmt(r.winRate,1)+'%')+'</td><td>'+sbReliability(r)+'</td><td>'+sbPct((d.benchmark || {}).equalWeightPct)+'</td></tr></tbody></table></div>' +
           '<p style="font-size:11.5px; color:var(--muted-2); margin:6px 0 0;">'+escapeHtml(r.ruleText || '')+(r.note ? ' · '+escapeHtml(r.note) : '')+'</p>' +
