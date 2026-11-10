@@ -27,11 +27,14 @@ import { DEFAULT_LINEAGES, describeStrategy, advanceGeneration, MAX_HISTORY } fr
 import { kvGetJson, kvSetJson, kvReady, kvMGetJson, kvMSetJson } from './_kv.js';
 import { FIXED_UNIVERSE, INVERSE_ETF } from './_universe.js';
 import { METHODS_KEY } from './_methods.js';
-import { prepareData, simulateStrategy, searchMethods, benchmarks, SIM_STRATEGY_IDS, SIM_NOTES } from './_strategy-sim.js';
+import { prepareData, simulateStrategy, searchMethods, walkForward, benchmarks, SIM_STRATEGY_IDS, SIM_NOTES } from './_strategy-sim.js';
+import { normalizeRule, describeRule } from './_rules.js';
+import { strategyEnabled } from './_strategies.js';
 import {
   MIN5_PREFIX, MIN5_INDEX_KEY, TOSS_META_KEY, KR_HOLIDAYS_KEY, INDEX_MIN_SYMBOL,
-  validPacked, validMonth, validYmd, monthsBetween, minuteAccessor
+  validPacked, validMonth, validYmd, monthsBetween, minuteAccessor, unpackDay, MIN5_SUM_PREFIX, daySummary
 } from './_minute-data.js';
+const CUSTOM_KEY = 'autotrade:custom-strategies'; // auto-trade-status.js와 같은 키 — 조립한 전략(type:'rule')도 여기 있어요
 import { loadCosts, buyCostPct, sellCostPct } from './_costs.js';
 import { askClaude } from './_ai.js'; // AI 호출 공용 창구(사용량·예산·실패 이유 기록)
 
@@ -832,8 +835,9 @@ async function loadSimInputs() {
       if (s === INDEX_BARS_SYMBOL) indexRows = rows; else bars[s] = rows;
     });
   }
-  const [cfg, methods, evolve, costs, overrides] = await Promise.all([
-    kvGetJson(CONFIG_KEY, null), kvGetJson(METHODS_KEY, {}), kvGetJson(EVOLVE_KEY, null), loadCosts(), kvGetJson('autotrade:strategy-overrides', {})
+  const [cfg, methods, evolve, costs, overrides, customs] = await Promise.all([
+    kvGetJson(CONFIG_KEY, null), kvGetJson(METHODS_KEY, {}), kvGetJson(EVOLVE_KEY, null), loadCosts(), kvGetJson('autotrade:strategy-overrides', {}),
+    kvGetJson(CUSTOM_KEY, [])
   ]);
   // 실제 매매와 같은 숫자: 모멘텀은 설정의 손절/익절, 자동조정 값이 있으면 그 위에 덮어써요.
   const riskOverrides = {};
@@ -844,7 +848,7 @@ async function loadSimInputs() {
   });
   if (cfg && cfg.risk) riskOverrides.momentum = Object.assign({}, cfg.risk, riskOverrides.momentum || {});
   return {
-    bars, indexRows, missing,
+    bars, indexRows, missing, customs: Array.isArray(customs) ? customs : [],
     opts: {
       costs, methods: methods || {}, daytrade: cfg && cfg.daytrade, riskOverrides,
       evolved: evolve && evolve.globalBest && evolve.globalBest.strategy ? evolve.globalBest.strategy : null
@@ -890,6 +894,14 @@ async function handleTossUpload(req, res) {
         index.ranges[it.sym] = { first: !r.first || keys[0] < r.first ? keys[0] : r.first, last: !r.last || keys[keys.length - 1] > r.last ? keys[keys.length - 1] : r.last };
       }
       if (!Object.keys(write).length) { res.status(400).json({ error: '올릴 수 있는 값이 없어요.', bad }); return; }
+      // 데이터 점검표용 하루 요약(시가·고가·저가·종가·묶음 수)을 종목별로 합쳐 둬요.
+      const touched = Array.from(new Set(Object.values(write).map((d) => d.sym)));
+      const oldSums = (await kvMGetJson(touched.map((s) => MIN5_SUM_PREFIX + s))) || {};
+      touched.forEach((s) => {
+        const sum = Object.assign({}, oldSums[MIN5_SUM_PREFIX + s] || {});
+        Object.values(write).filter((d) => d.sym === s).forEach((d) => Object.keys(d.days).forEach((ymd) => { const x = daySummary(d.days[ymd]); if (x) sum[ymd] = x; }));
+        write[MIN5_SUM_PREFIX + s] = sum;
+      });
       index.updatedAt = Date.now();
       write[MIN5_INDEX_KEY] = index;
       // 저장소 한 번 쓰기 크기를 넘지 않게 약 700KB씩 나눠 써요.
@@ -906,7 +918,7 @@ async function handleTossUpload(req, res) {
         chunk[k] = write[k]; size += s;
       }
       if (!(await flush())) { res.status(503).json({ error: '저장소에 쓰지 못했어요.' }); return; }
-      res.status(200).json({ ok: true, saved: Object.keys(write).length - 1, bad });
+      res.status(200).json({ ok: true, saved: Object.keys(write).filter((k) => k.startsWith(MIN5_PREFIX) && !k.startsWith(MIN5_SUM_PREFIX) && k !== MIN5_INDEX_KEY).length, bad });
       return;
     }
     if (body.kind === 'meta') {
@@ -960,7 +972,7 @@ async function loadMinuteData(startYmd, endYmd) {
   const index = await kvGetJson(MIN5_INDEX_KEY, null);
   if (!index || !index.months) return null;
   const months = new Set(monthsBetween(startYmd, endYmd));
-  const syms = FIXED_UNIVERSE.map((u) => u.symbol).concat([INDEX_MIN_SYMBOL]);
+  const syms = FIXED_UNIVERSE.map((u) => u.symbol).concat([INVERSE_ETF.symbol, INDEX_MIN_SYMBOL]);
   // 지수는 기간 시작 전날 값이 필요해서 한 달 앞도 읽어요.
   const before = monthsBetween(startYmd, startYmd)[0];
   const keys = [];
@@ -968,11 +980,14 @@ async function loadMinuteData(startYmd, endYmd) {
     if (months.has(m) || (s === INDEX_MIN_SYMBOL && m < before && monthsBetween(m, before).length === 2)) keys.push(MIN5_PREFIX + s + ':' + m);
   }));
   if (!keys.length) return null;
+  // 15개씩 묶어 4묶음을 동시에 읽어요(긴 기간도 몇 초 안에 끝나게).
   const docs = [];
-  for (let i = 0; i < keys.length; i += 15) {
-    const got = await kvMGetJson(keys.slice(i, i + 15));
-    if (!got) return null;
-    Object.values(got).forEach((d) => docs.push(d));
+  const chunks = [];
+  for (let i = 0; i < keys.length; i += 15) chunks.push(keys.slice(i, i + 15));
+  for (let i = 0; i < chunks.length; i += 4) {
+    const got = await Promise.all(chunks.slice(i, i + 4).map((c) => kvMGetJson(c)));
+    if (got.some((g) => !g)) return null;
+    got.forEach((g) => Object.values(g).forEach((d) => docs.push(d)));
   }
   const acc = minuteAccessor(docs);
   return acc.size ? acc : null;
@@ -986,30 +1001,58 @@ function cleanYmd(v, fb) {
   return /^\d{8}$/.test(s) ? s : fb;
 }
 
+// 조립한 전략: 저장된 것(custom-…, type:'rule')이나 아직 저장 안 한 초안(?rule=JSON)
+function ruleOptsFor(id, input, query) {
+  if (id === 'draft' && query && query.rule) {
+    let raw = null;
+    try { raw = JSON.parse(String(query.rule)); } catch (e) { return { error: '초안 전략 모양이 이상해요.' }; }
+    const nr = normalizeRule(raw);
+    return nr.error ? { error: nr.error } : { rule: nr.rule };
+  }
+  const saved = (input.customs || []).find((c) => c.id === id && c.type === 'rule');
+  if (!saved) return null;
+  const nr = normalizeRule(saved);
+  return nr.error ? { error: nr.error } : { rule: nr.rule };
+}
+function isKnownId(id, input) {
+  return SIM_STRATEGY_IDS.includes(id) || id === 'draft' || (input.customs || []).some((c) => c.id === id && c.type === 'rule');
+}
+// 기간 안의 분봉을 읽어요(스윙도 분봉으로 계산하므로 항상). ?minutes=0이면 하루 가격만으로 빠르게 계산해요.
+async function attachMinutes(data, req, startYmd, endYmd) {
+  if (String(req.query.minutes || '1') === '0') return;
+  data.minute = await loadMinuteData(startYmd, endYmd);
+}
+const fillOf = (req) => (req.query.fill === 'tick' ? 'tick' : 'pct');
+
 async function handleStrategySim(req, res) {
   try {
-    const ids = String(req.query.ids || '').split(',').map((s) => s.trim()).filter((s) => SIM_STRATEGY_IDS.includes(s)).slice(0, 8);
-    if (!ids.length) { res.status(400).json({ error: '전략을 하나 이상 골라 주세요.' }); return; }
     const input = await loadSimInputs();
     if (input.error) { res.status(503).json({ error: input.error }); return; }
+    const ids = String(req.query.ids || '').split(',').map((s) => s.trim()).filter((s) => isKnownId(s, input)).slice(0, 8);
+    if (!ids.length) { res.status(400).json({ error: '전략을 하나 이상 골라 주세요.' }); return; }
     if (input.missing.length > 10) { res.status(409).json({ error: '과거 가격을 먼저 준비해야 해요.', needPrep: true, missing: input.missing.length }); return; }
     const data = prepareData(input.bars, input.indexRows);
     const startYmd = cleanYmd(req.query.start, ymdDaysAgo(180)), endYmd = cleanYmd(req.query.end, ymdDaysAgo(0));
-    if (ids.some((id) => DAY_INTRADAY_IDS.includes(id))) data.minute = await loadMinuteData(startYmd, endYmd);
+    await attachMinutes(data, req, startYmd, endYmd);
     const dates = simDates(data, startYmd, endYmd);
     if (dates.length < 5) { res.status(400).json({ error: '고른 기간에 거래일이 너무 적어요(보관 중인 기간: ' + (data.allDates[25] || '') + ' ~ ' + (data.allDates[data.allDates.length - 1] || '') + ').' }); return; }
     const cash = Math.max(1_000_000, Math.min(1_000_000_000, Number(req.query.cash) || 10_000_000));
+    const fill = fillOf(req);
     // 하루 안의 가격 순서를 두 가지로 계산해서, 나쁜 쪽을 대표 결과로 쓰고 범위(range)를 같이 보여줘요.
     const results = ids.map((id) => {
-      const a = simulateStrategy(id, data, dates, Object.assign({}, input.opts, { startingCash: cash, keepTrades: true }));
+      const ro = ruleOptsFor(id, input, req.query);
+      if (ro && ro.error) return { id, skipped: ro.error };
+      const base = Object.assign({}, input.opts, { startingCash: cash, keepTrades: true, fill }, ro || {});
+      const a = simulateStrategy(id, data, dates, base);
       if (a.skipped) return a;
-      const b = simulateStrategy(id, data, dates, Object.assign({}, input.opts, { startingCash: cash, keepTrades: true, pathMode: 'optimistic' }));
+      const b = simulateStrategy(id, data, dates, Object.assign({}, base, { pathMode: 'optimistic' }));
       const main = b.totalReturnPct < a.totalReturnPct ? b : a;
       main.range = { low: Math.min(a.totalReturnPct, b.totalReturnPct), high: Math.max(a.totalReturnPct, b.totalReturnPct) };
+      if (ro && ro.rule) { main.isRule = true; main.ruleText = describeRule(ro.rule); }
       return main;
     });
     res.status(200).json({
-      ok: true, period: [dates[0], dates[dates.length - 1]], tradingDays: dates.length, startingCash: cash,
+      ok: true, period: [dates[0], dates[dates.length - 1]], tradingDays: dates.length, startingCash: cash, fill,
       available: [data.allDates[25] || data.allDates[0], data.allDates[data.allDates.length - 1]],
       results, benchmark: benchmarks(data, dates), missing: input.missing, notes: SIM_NOTES, hasMinutes: !!data.minute
     });
@@ -1019,22 +1062,152 @@ async function handleStrategySim(req, res) {
   }
 }
 
+// 방법 찾기 / 여러 구간 검증(워크포워드) — 같은 준비 과정을 써요.
+async function prepareOne(req, res, defaultDays) {
+  const id = String(req.query.id || '');
+  const input = await loadSimInputs();
+  if (input.error) { res.status(503).json({ error: input.error }); return null; }
+  if (!isKnownId(id, input)) { res.status(400).json({ error: '알 수 없는 전략입니다.' }); return null; }
+  if (input.missing.length > 10) { res.status(409).json({ error: '과거 가격을 먼저 준비해야 해요.', needPrep: true }); return null; }
+  const ro = ruleOptsFor(id, input, req.query);
+  if (ro && ro.error) { res.status(400).json({ error: ro.error }); return null; }
+  const data = prepareData(input.bars, input.indexRows);
+  const startYmd = cleanYmd(req.query.start, ymdDaysAgo(defaultDays)), endYmd = cleanYmd(req.query.end, ymdDaysAgo(0));
+  await attachMinutes(data, req, startYmd, endYmd);
+  const dates = simDates(data, startYmd, endYmd);
+  return { id, data, dates, opts: Object.assign({}, input.opts, { fill: fillOf(req) }, ro || {}) };
+}
+
 async function handleMethodSearch(req, res) {
   try {
-    const id = String(req.query.id || '');
-    if (!SIM_STRATEGY_IDS.includes(id)) { res.status(400).json({ error: '알 수 없는 전략입니다.' }); return; }
-    const input = await loadSimInputs();
-    if (input.error) { res.status(503).json({ error: input.error }); return; }
-    if (input.missing.length > 10) { res.status(409).json({ error: '과거 가격을 먼저 준비해야 해요.', needPrep: true }); return; }
-    const data = prepareData(input.bars, input.indexRows);
-    const startYmd = cleanYmd(req.query.start, ymdDaysAgo(365)), endYmd = cleanYmd(req.query.end, ymdDaysAgo(0));
-    if (DAY_INTRADAY_IDS.includes(id)) data.minute = await loadMinuteData(startYmd, endYmd);
-    const dates = simDates(data, startYmd, endYmd);
-    const out = searchMethods(id, data, dates, input.opts);
+    const p = await prepareOne(req, res, 365);
+    if (!p) return;
+    const out = searchMethods(p.id, p.data, p.dates, p.opts);
     if (out.error) { res.status(400).json(out); return; }
-    res.status(200).json(Object.assign({ ok: true, notes: SIM_NOTES }, out));
+    res.status(200).json(Object.assign({ ok: true, notes: SIM_NOTES, hasMinutes: !!p.data.minute }, out));
   } catch (e) {
     console.error('backtest.js(method-search) error:', e);
+    res.status(500).json({ error: '서버 오류가 발생했습니다.' });
+  }
+}
+
+async function handleWalkForward(req, res) {
+  try {
+    const p = await prepareOne(req, res, 365);
+    if (!p) return;
+    const out = walkForward(p.id, p.data, p.dates, p.opts, Number(req.query.folds) || 4);
+    if (out.error) { res.status(400).json(out); return; }
+    res.status(200).json(Object.assign({ ok: true, hasMinutes: !!p.data.minute }, out));
+  } catch (e) {
+    console.error('backtest.js(walk-forward) error:', e);
+    res.status(500).json({ error: '서버 오류가 발생했습니다.' });
+  }
+}
+
+// 매매 기록 한 줄을 눌렀을 때 그날 5분 차트를 그리려고 하루치 분봉을 돌려줘요.
+async function handleMinuteDay(req, res) {
+  try {
+    const sym = String(req.query.sym || '');
+    const ymd = cleanYmd(req.query.date, '');
+    if (!minuteSymbols().includes(sym) || !ymd) { res.status(400).json({ error: '종목·날짜가 올바르지 않아요.' }); return; }
+    const doc = await kvGetJson(MIN5_PREFIX + sym + ':' + ymd.slice(0, 4) + '-' + ymd.slice(4, 6), null);
+    const packed = doc && doc.days && doc.days[ymd];
+    if (!packed) { res.status(404).json({ error: '그날 분봉이 없어요.' }); return; }
+    res.status(200).json({ ok: true, sym, date: ymd, bars: unpackDay(packed) });
+  } catch (e) {
+    res.status(500).json({ error: '서버 오류가 발생했습니다.' });
+  }
+}
+
+// 데이터 점검표: 종목별로 일봉 날짜 중 분봉이 빠진 날, 분봉이 덜 찬 날, 일봉과 값이 크게 다른 날을 찾아요.
+async function handleDataCheck(req, res) {
+  try {
+    const index = await kvGetJson(MIN5_INDEX_KEY, null);
+    if (!index || !index.ranges) { res.status(200).json({ ok: true, empty: true }); return; }
+    const syms = FIXED_UNIVERSE.map((u) => u.symbol).concat([INVERSE_ETF.symbol]);
+    const sums = {}, daily = {};
+    for (let i = 0; i < syms.length; i += 13) {
+      const part = syms.slice(i, i + 13);
+      const got = await kvMGetJson(part.map((s) => MIN5_SUM_PREFIX + s).concat(part.map((s) => BARS_PREFIX + s)));
+      if (!got) { res.status(503).json({ error: '저장소를 읽지 못했어요.' }); return; }
+      part.forEach((s) => { sums[s] = got[MIN5_SUM_PREFIX + s] || null; daily[s] = got[BARS_PREFIX + s] ? unpackRows(got[BARS_PREFIX + s].rows) : []; });
+    }
+    let first = null, last = null;
+    syms.forEach((s) => { const r = index.ranges[s]; if (r) { if (!first || r.first < first) first = r.first; if (!last || r.last > last) last = r.last; } });
+    const rows = syms.map((s) => {
+      const u = FIXED_UNIVERSE.find((x) => x.symbol === s) || INVERSE_ETF;
+      const sum = sums[s];
+      const days = daily[s].filter((d) => d.date >= first && d.date <= last);
+      if (!sum) return { symbol: s, name: u.name, noSummary: true, expected: days.length, have: index.ranges[s] ? null : 0 };
+      const missing = [], partial = [], mismatch = [];
+      days.forEach((d) => {
+        const x = sum[d.date];
+        if (!x) { missing.push(d.date); return; }
+        const [o, h, l, , n] = x;
+        if (n < 70) partial.push(d.date);
+        if (Math.abs(o / d.open - 1) > 0.01 || Math.abs(h / d.high - 1) > 0.02 || Math.abs(l / d.low - 1) > 0.02) mismatch.push(d.date);
+      });
+      return { symbol: s, name: u.name, expected: days.length, have: days.length - missing.length, missing: missing.length, partial: partial.length, mismatch: mismatch.length,
+        examples: missing.slice(0, 3).map((d) => '빠짐 ' + d).concat(partial.slice(0, 2).map((d) => '덜 참 ' + d), mismatch.slice(0, 2).map((d) => '값 다름 ' + d)) };
+    });
+    const sumUp = (k) => rows.reduce((t, r) => t + (r[k] || 0), 0);
+    res.status(200).json({
+      ok: true, first, last, updatedAt: index.updatedAt || null, hasIndex: !!index.ranges[INDEX_MIN_SYMBOL],
+      totals: { expected: sumUp('expected'), have: sumUp('have'), missing: sumUp('missing'), partial: sumUp('partial'), mismatch: sumUp('mismatch'), noSummary: rows.filter((r) => r.noSummary).length },
+      rows
+    });
+  } catch (e) {
+    console.error('backtest.js(data-check) error:', e);
+    res.status(500).json({ error: '서버 오류가 발생했습니다.' });
+  }
+}
+
+// 실제 매매와 맞춰보기: 그날 가상계좌가 실제로 한 매매와, 같은 날을 백테스트로 돌린 결과를 나란히 놓아요.
+// 둘이 크게 다르면 백테스트나 매매 엔진 어딘가가 실제와 다르게 계산한다는 신호예요.
+const toHm = (min) => (typeof min === 'number' ? String(Math.floor(min / 60)).padStart(2, '0') + ':' + String(min % 60).padStart(2, '0') : null);
+async function handleReconcile(req, res) {
+  try {
+    const date = /^\d{4}-\d{2}-\d{2}$/.test(String(req.query.date || '')) ? String(req.query.date) : kstToday();
+    const ymd = date.replace(/-/g, '');
+    const input = await loadSimInputs();
+    if (input.error) { res.status(503).json({ error: input.error }); return; }
+    const data = prepareData(input.bars, input.indexRows);
+    if (!data.allDates.includes(ymd)) { res.status(400).json({ error: '그날 일봉이 아직 없어요(장이 끝난 뒤 과거 가격 준비를 다시 하면 생겨요).' }); return; }
+    data.minute = await loadMinuteData(ymd, ymd);
+    const [log, cfg] = await Promise.all([kvGetJson('autotrade:log', []), kvGetJson(CONFIG_KEY, null)]);
+    const dayLog = (log || []).filter((e) => e.date === date && e.market === 'KR');
+    const ids = new Set(dayLog.map((e) => e.strategy).filter((id) => isKnownId(id, input)));
+    if (cfg) SIM_STRATEGY_IDS.forEach((id) => { if (strategyEnabled(cfg, id) && id !== 'evolved') ids.add(id); });
+    const kstHm = (ts) => { const d = new Date(ts + 9 * 3600 * 1000); return String(d.getUTCHours()).padStart(2, '0') + ':' + String(d.getUTCMinutes()).padStart(2, '0'); };
+    const rows = Array.from(ids).map((id) => {
+      const ro = ruleOptsFor(id, input, null);
+      if (ro && ro.error) return null;
+      const sim = simulateStrategy(id, data, [ymd], Object.assign({}, input.opts, { keepTrades: true, recordBuys: true }, ro || {}));
+      if (sim.skipped) return null;
+      const mine = dayLog.filter((e) => e.strategy === id);
+      const aBuys = mine.filter((e) => e.side === 'BUY' && !e.add).map((e) => ({ symbol: e.symbol, name: e.name, time: kstHm(e.ts), price: e.price }));
+      const aSells = mine.filter((e) => e.side !== 'BUY');
+      const sBuys = (sim.buyLog || []).map((b) => ({ symbol: b.symbol, time: toHm(b.t), price: b.price }));
+      const sSells = (sim.trades || []).filter((t) => t.exitDate === ymd);
+      const aSet = new Set(aBuys.map((b) => b.symbol)), sSet = new Set(sBuys.map((b) => b.symbol));
+      return {
+        id, name: ro && ro.rule ? ro.rule.name : (sim.name || id), usedMinutes: sim.reliability === 'minute' || (sim.reliability === 'mid' && !!data.minute),
+        actual: { buys: aBuys, sells: aSells.length, pnl: Math.round(aSells.reduce((s, e) => s + (e.pnlAmount || 0), 0)) },
+        sim: { buys: sBuys, sells: sSells.length, pnl: Math.round(sSells.reduce((s, t) => s + t.pnlAmount, 0)) },
+        matched: Array.from(aSet).filter((s) => sSet.has(s)), onlyActual: Array.from(aSet).filter((s) => !sSet.has(s)), onlySim: Array.from(sSet).filter((s) => !aSet.has(s))
+      };
+    }).filter(Boolean).sort((a, b) => (b.actual.buys.length + b.sim.buys.length) - (a.actual.buys.length + a.sim.buys.length));
+    res.status(200).json({
+      ok: true, date, hasMinutes: !!(data.minute && data.minute.size), rows,
+      names: Object.fromEntries(FIXED_UNIVERSE.map((u) => [u.symbol, u.name]).concat([[INVERSE_ETF.symbol, INVERSE_ETF.name]])),
+      notes: [
+        '백테스트는 그날 아침 빈 계좌에서 시작해요. 스윙은 실제 계좌에 이미 들고 있던 종목 수·현금 때문에 산 종목이 다를 수 있어요.',
+        '실제 매매는 1분마다 코스피200을 보고, 백테스트는 5분 묶음 분봉과 코스피 분봉으로 판단해서 시각이 몇 분 다를 수 있어요.',
+        '그날 분봉은 이 PC의 toss-sync가 장 마감 뒤 올린 다음부터 볼 수 있어요.'
+      ]
+    });
+  } catch (e) {
+    console.error('backtest.js(reconcile) error:', e);
     res.status(500).json({ error: '서버 오류가 발생했습니다.' });
   }
 }
@@ -1072,12 +1245,17 @@ export default async function handler(req, res) {
 
   if (mode === 'detail') return handleDetail(req, res);
 
-  if (mode === 'toss-upload' || mode === 'toss-status') {
+  if (['toss-upload', 'toss-status', 'walk-forward', 'minute-day', 'data-check', 'reconcile'].includes(mode)) {
     if (!kvReady()) {
       res.status(500).json({ error: 'KV(Upstash Redis)가 설정되지 않았습니다.' });
       return;
     }
-    return mode === 'toss-upload' ? handleTossUpload(req, res) : handleTossStatus(req, res);
+    if (mode === 'toss-upload') return handleTossUpload(req, res);
+    if (mode === 'toss-status') return handleTossStatus(req, res);
+    if (mode === 'walk-forward') return handleWalkForward(req, res);
+    if (mode === 'minute-day') return handleMinuteDay(req, res);
+    if (mode === 'data-check') return handleDataCheck(req, res);
+    return handleReconcile(req, res);
   }
 
   if (mode === 'strategy-prep' || mode === 'strategy' || mode === 'method-search') {

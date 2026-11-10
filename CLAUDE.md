@@ -20,7 +20,7 @@
   - `sync.js` 관심종목/포트폴리오 저장 (Firebase ID 토큰 검증 → Vercel KV)
   - `auto-trade-check.js` 자동매매 실행 (외부 크론이 호출, `key`=`AUTO_TRADE_SECRET` 필요)
   - `auto-trade-status.js` 자동매매 설정/현황 (`action=config|log`)
-  - `backtest.js` 전략연구실 (`mode=presets|evolve|strategy-prep|strategy|method-search|toss-upload|toss-status`)
+  - `backtest.js` 전략연구실 (`mode=presets|evolve|strategy-prep|strategy|method-search|walk-forward|reconcile|data-check|minute-day|toss-upload|toss-status`)
 - `api/_*.js` — 공용 코드 (Vercel 함수 개수에 안 잡힘)
   - `_kis.js` KIS 토큰 발급·KV 공유 캐시, `_kv.js` Vercel KV 헬퍼, `_costs.js` 수수료·세금,
     `_sentiment.js` 뉴스 긍정/부정 점수, `_backtest-core.js` / `_evolve-core.js` 백테스트·진화 탐색 로직
@@ -31,7 +31,9 @@
   - `_intraday.js` 새 단타 전략 판단·금액 규칙, `_longterm.js` 장기 분산 전략 규칙
   - `_universe.js` 자동매매 고정 50종목(+하락장 전략용 인버스 ETF), `_methods.js` 사는/파는 방법(나눠 사기·나눠 팔기·따라가는 손절)
   - `_bear.js` 시장 필터·하락장 전략·재매수 규칙, `_strategy-sim.js` 기간 백테스트·방법 찾기(실제 매매와 같은 방법 계산)
-  - `_minute-data.js` 토스 분봉(5분 묶음) 압축·저장 키·휴장일 키
+  - `_minute-data.js` 토스 분봉(5분 묶음) 압축·저장 키·휴장일 키·데이터 점검용 하루 요약
+  - `_rules.js` 코드 없이 조립한 전략(조건 블록)의 검사·판단(`ruleSignal`)·설명 — 커스텀 전략 목록에 `type:'rule'`로 저장
+- `tools/install-daily-task.ps1` — 평일 16:10에 `toss-sync all`을 돌리는 윈도우 예약 작업 등록(작업 이름 `LEDGER Toss data`)
 - `tools/toss-sync.mjs` — **사용자 PC에서 실행**하는 토스증권 데이터 받기·올리기 프로그램(Vercel 함수 아님). 설정은 `tools/toss.env`(GitHub에 안 올라감)
 - 데이터 저장: Vercel KV(Upstash Redis). 로그인: Firebase Authentication.
 
@@ -75,6 +77,8 @@
 - "어떻게 사고팔지"는 `_methods.js`에 있고 자동매매와 백테스트가 같이 쓴다. 매매 방식 계산을 한쪽에만 따로 만들지 말 것.
 - 단타의 "살까?" 판단·시간 규칙은 `_intraday.js`의 `intradayBuySignal`/`dayRulesFor`(데이트레이딩은 `_daytrade.js`의 `daytradeSignal`)에 있고, 분봉 백테스트도 같은 함수를 쓴다.
 - 국내 휴장일은 `market:kr-holidays`(토스 장 운영 달력)로 걸러서 자동매매가 쉰다.
+- 조립한 전략(`_rules.js`)은 자동매매(`ruleDefOf` → `processStrategyMarket`)와 백테스트가 같은 `ruleSignal`을 쓴다. 조건 종류를 늘릴 땐 `RULE_CONDITIONS`와 화면 `RB_CONDS`를 같이 고칠 것.
+- 백테스트는 분봉이 있으면 단타·스윙 모두 분봉으로 계산한다(체결: 5분 거래량의 10%까지, 상한가 근처 매수 불가, `fill=tick`이면 호가 1칸). 결과에 `breakdown`(상황별)·`stats`(우연 판단)가 붙는다.
 
 ## 작업 방식
 

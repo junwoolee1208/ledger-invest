@@ -107,3 +107,13 @@ export function minuteAccessor(docs) {
     }
   };
 }
+
+// 데이터 점검용 하루 요약: + 종목 → { YYYYMMDD: [시가, 고가, 저가, 종가, 5분 묶음 수] } (올릴 때 서버가 계산해 둬요)
+export const MIN5_SUM_PREFIX = 'bt:min5:v1:sum:';
+export function daySummary(packed) {
+  const bars = unpackDay(packed);
+  if (!bars.length) return null;
+  let h = -Infinity, l = Infinity;
+  bars.forEach((b) => { if (b.h > h) h = b.h; if (b.l < l) l = b.l; });
+  return [bars[0].o, h, l, bars[bars.length - 1].c, bars.length];
+}

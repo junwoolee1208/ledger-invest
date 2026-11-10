@@ -1025,6 +1025,19 @@
     </div>
 
     <div class="panel pad" style="margin-bottom:20px;">
+      <h3 style="margin:0 0 4px; font-size:15px;">데이터 점검 (토스 분봉)</h3>
+      <p class="easy" style="font-size:12.5px;">백테스트 재료인 분봉에 빠진 날·덜 찬 날·하루 가격과 안 맞는 날이 있는지 확인해요. 재료가 틀리면 시험 결과도 틀려요.</p>
+      <details class="more"><summary>자세히 보기</summary><div class="more-body">
+        <p><b>빠짐</b>: 하루 가격(일봉)은 있는데 그날 분봉이 없어요. 이 PC에서 <code>node tools/toss-sync.mjs all</code>을 다시 실행하면 채워져요.</p>
+        <p><b>덜 참</b>: 그날 5분 묶음이 70개보다 적어요(보통 78개). 거래정지·늦은 개장 같은 날일 수 있어요.</p>
+        <p><b>값 다름</b>: 분봉의 시가가 1% 넘게, 고가·저가가 2% 넘게 일봉과 달라요. 액면분할 같은 수정주가 차이일 수 있어요. 시가가 3% 넘게 다른 날은 백테스트가 알아서 분봉 대신 하루 가격을 써요.</p>
+        <p><b>자동 업데이트</b>: 이 PC의 예약 작업이 평일 오후 4시 10분에 새 분봉·순위·휴장일을 받아 올려요(PC가 꺼져 있으면 다음에 켰을 때).</p>
+      </div></details>
+      <button class="btn ghost" type="button" id="dcRun" style="margin-top:8px; font-size:12.5px;">점검하기</button> <span id="dcMsg" class="st-msg"></span>
+      <div id="dcResult" style="margin-top:10px; font-size:12.5px;"></div>
+    </div>
+
+    <div class="panel pad" style="margin-bottom:20px;">
       <h3 style="margin:0 0 4px; font-size:15px;">전략 기간 백테스트 (고정 50종목)</h3>
       <p class="easy" style="font-size:12.5px;">자동매매 전략을 골라서, 정한 기간에 그 전략을 썼다면 얼마나 벌었을지 과거 가격으로 계산해요. 실제 매매는 일어나지 않아요.</p>
       <details class="more"><summary>자세히 보기</summary><div class="more-body">
@@ -1039,6 +1052,7 @@
         <div><label style="font-size:11.5px; color:var(--muted-2); display:block; margin-bottom:4px;">시작일</label><input type="date" id="sbStart" style="width:100%"></div>
         <div><label style="font-size:11.5px; color:var(--muted-2); display:block; margin-bottom:4px;">종료일</label><input type="date" id="sbEnd" style="width:100%"></div>
         <div><label style="font-size:11.5px; color:var(--muted-2); display:block; margin-bottom:4px;">시작 금액(원)</label><input type="number" id="sbCash" style="width:100%" value="10000000" step="1000000" min="1000000"></div>
+        <div><label style="font-size:11.5px; color:var(--muted-2); display:block; margin-bottom:4px;">체결 계산</label><select id="sbFill" style="width:100%"><option value="pct">비율 0.05% (자동매매와 같음)</option><option value="tick">호가 1칸 (더 엄격)</option></select></div>
         <div><button class="btn" id="sbRun" type="button" style="width:100%;">백테스트 실행</button></div>
       </div>
       <div id="sbMsg" style="font-size:12.5px; color:var(--muted);"></div>
@@ -1052,6 +1066,7 @@
         <p><b>사는 방법</b>: 한 번에 사기 / 떨어질 때 나눠 사기(첫 매수가보다 싸지면 더 사기) / 오를 때 더 사기(더 사면 손절선을 본전으로)</p>
         <p><b>파는 방법</b>: 한 번에 팔기 / 나눠 팔기(목표 절반에서 반 팔고 나머지는 본전 지키기) / 따라가는 손절(가장 높았던 가격에서 일정 % 밀리면 팔기)</p>
         <p><b>왜 기간을 나누나요</b>: 고른 기간의 앞 2/3에서 가장 좋았던 방법이 뒤 1/3에서도 벌었는지 확인해요. 과거에 우연히 딱 맞은 방법을 고르는 실수를 막으려는 거예요. 순위는 두 가지 계산 중 나쁜 쪽으로 매겨요.</p>
+        <p><b>여러 구간 검증</b>: 기간을 5조각으로 나눠 "그때까지의 과거"로 고른 방법이 "바로 다음 조각"에서도 벌었는지 4번 반복해요. 한 번만 나누면 우연히 맞을 수 있어서, 매번 벌어야 믿을 만한 방법이에요.</p>
         <p><b>적용</b>: [이 방법 적용]을 누르면(로그인 필요) 그 전략이 <b>새로 사는 종목부터</b> 그 방법을 써요. 이미 들고 있는 종목은 산 때의 방법을 끝까지 따라요. 바꾼 내용은 "전략 변경 이력"에 남아요.</p>
       </div></details>
       <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(140px,1fr)); gap:10px; align-items:end; margin:10px 0;">
@@ -1059,9 +1074,69 @@
         <div><label style="font-size:11.5px; color:var(--muted-2); display:block; margin-bottom:4px;">시작일</label><input type="date" id="msStart" style="width:100%"></div>
         <div><label style="font-size:11.5px; color:var(--muted-2); display:block; margin-bottom:4px;">종료일</label><input type="date" id="msEnd" style="width:100%"></div>
         <div><button class="btn" id="msRun" type="button" style="width:100%;">방법 찾기</button></div>
+        <div><button class="btn ghost" id="msWf" type="button" style="width:100%;">여러 구간 검증</button></div>
       </div>
       <div id="msMsg" style="font-size:12.5px; color:var(--muted);"></div>
       <div id="msResult" style="margin-top:12px;"></div>
+    </div>
+
+    <style>.rb-l{ font-size:11.5px; color:var(--muted-2); display:block; margin-bottom:4px; } .rb-cond{ display:flex; flex-wrap:wrap; gap:6px; align-items:center; margin:4px 0; font-size:12.5px; } .rb-cond select{ min-width:190px; } .rb-cond input{ width:80px; } .sb-mini th, .sb-mini td{ padding:4px 6px; white-space:nowrap; } .sb-trade{ cursor:pointer; } .sb-trade:hover{ background:rgba(62,99,221,.06); }</style>
+    <div class="panel pad" style="margin-bottom:20px;">
+      <h3 style="margin:0 0 4px; font-size:15px;">실제 매매와 맞춰보기</h3>
+      <p class="easy" style="font-size:12.5px;">가상계좌가 그날 실제로 한 매매와, 같은 날을 백테스트로 돌린 결과를 나란히 놓아요. 둘이 크게 다르면 백테스트나 자동매매 어딘가가 실제와 다르게 계산하고 있다는 신호예요.</p>
+      <details class="more"><summary>자세히 보기</summary><div class="more-body">
+        <p><b>왜 필요한가요</b>: 백테스트를 믿으려면 "같은 날, 같은 규칙이면 같은 종목을 비슷한 시각에 산다"가 맞아야 해요. 매일 이걸 확인하면 숨은 계산 차이를 일찍 찾아요.</p>
+        <p><b>다를 수 있는 이유</b>: 실제 매매는 1분마다 코스피200을 보고, 백테스트는 5분 묶음 분봉과 코스피 분봉으로 판단해요. 스윙은 실제 계좌에 이미 들고 있던 종목·현금 때문에 산 종목이 다를 수 있어요.</p>
+        <p><b>언제 볼 수 있나요</b>: 그날 분봉이 올라간 뒤(평일 오후 4시 10분 자동 업데이트 이후)예요.</p>
+      </div></details>
+      <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(140px,1fr)); gap:10px; align-items:end; margin:10px 0;">
+        <div><label style="font-size:11.5px; color:var(--muted-2); display:block; margin-bottom:4px;">날짜</label><input type="date" id="rcDate" style="width:100%"></div>
+        <div><button class="btn" id="rcRun" type="button" style="width:100%;">맞춰보기</button></div>
+      </div>
+      <div id="rcMsg" style="font-size:12.5px; color:var(--muted);"></div>
+      <div id="rcResult" style="margin-top:12px;"></div>
+    </div>
+
+    <div class="panel pad" style="margin-bottom:20px;" id="rbPanel">
+      <h3 style="margin:0 0 4px; font-size:15px;">전략 조립 (코드 없이 새 전략 만들기)</h3>
+      <p class="easy" style="font-size:12.5px;">조건 블록을 골라 새 전략을 만들고, 바로 과거로 시험해 본 뒤 마음에 들면 가상계좌 자동매매에 올려요. 백테스트와 자동매매가 같은 조건 계산을 써서 결과가 어긋나지 않아요.</p>
+      <details class="more"><summary>자세히 보기</summary><div class="more-body">
+        <p><b>조건</b>: 모든 조건을 동시에 만족하는 순간에 사요. 각 조건은 최소·최대 중 하나만 적어도 돼요(예: "오늘 시가 대비" 최소 1 → 시가보다 1% 이상 오른 순간).</p>
+        <p><b>단타 / 스윙</b>: 단타는 정한 시각에 모두 팔고, 스윙은 손절·익절·최대 보유일까지 들고 가요(스윙은 계좌의 30%까지만, 공통 안전장치 동일).</p>
+        <p><b>시장 조건</b>: "오르는 장에서만"은 코스피가 -1% 아래거나 시가 아래면 쉬어요. "하락장에서만"은 하락장이거나 시장이 -1% 넘게 빠진 날만 움직여요.</p>
+        <p><b>시험 범위</b>: 분봉이 있는 날만 계산해요(하루 가격 4개로는 조건을 판단할 수 없어서). 대상은 고정 50종목이에요.</p>
+        <p><b>올리기</b>: [자동매매에 올리기]를 누르면(로그인 필요) 켜진 상태로 저장되고, 자동매매 탭에 "내가 만든 전략" 카드로 생겨요. 끄기·삭제도 거기서 해요.</p>
+      </div></details>
+      <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(130px,1fr)); gap:10px; align-items:end; margin:10px 0;">
+        <div style="grid-column:span 2;"><label class="rb-l">이름</label><input type="text" id="rbName" maxlength="40" style="width:100%" placeholder="예: 시가 돌파 단타"></div>
+        <div><label class="rb-l">갈래</label><select id="rbHorizon" style="width:100%"><option value="day">단타(당일 정리)</option><option value="swing">스윙(며칠 보유)</option></select></div>
+        <div><label class="rb-l">시장 조건</label><select id="rbGate" style="width:100%"><option value="up">오르는 장에서만</option><option value="dip">급락일(-2%)만 피하기</option><option value="bear">하락장에서만</option><option value="none">시장 상관없이</option></select></div>
+        <div><label class="rb-l">매수 시작</label><input type="time" id="rbStart" value="09:30" style="width:100%"></div>
+        <div><label class="rb-l">매수 끝</label><input type="time" id="rbEnd" value="14:30" style="width:100%"></div>
+        <div id="rbCloseBox"><label class="rb-l">모두 파는 시각</label><input type="time" id="rbClose" value="15:10" style="width:100%"></div>
+        <div id="rbHoldBox" style="display:none;"><label class="rb-l">최대 보유(거래일)</label><input type="number" id="rbHold" value="10" min="1" max="20" style="width:100%"></div>
+      </div>
+      <div style="font-size:12.5px; font-weight:600; margin:6px 0 4px;">사는 조건 (모두 만족할 때)</div>
+      <div id="rbConds"></div>
+      <button class="btn ghost" type="button" id="rbAddCond" style="font-size:12px; padding:4px 10px; margin-top:4px;">+ 조건 추가</button>
+      <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(110px,1fr)); gap:10px; align-items:end; margin:12px 0 10px;">
+        <div><label class="rb-l">손절(%)</label><input type="number" id="rbStop" value="2" step="0.1" min="0.3" max="20" style="width:100%"></div>
+        <div><label class="rb-l">익절(%)</label><input type="number" id="rbTake" value="3" step="0.1" min="0.3" max="50" style="width:100%"></div>
+        <div><label class="rb-l">한 번 비중(%)</label><input type="number" id="rbPos" value="10" step="1" min="1" max="30" style="width:100%"></div>
+        <div><label class="rb-l">하루 최대 매수</label><input type="number" id="rbTrades" value="5" step="1" min="1" max="20" style="width:100%"></div>
+        <div><label class="rb-l">동시 보유 최대</label><input type="number" id="rbMaxPos" value="4" step="1" min="1" max="10" style="width:100%"></div>
+        <div><label class="rb-l">사는 방법</label><select id="rbBuy" style="width:100%"></select></div>
+        <div><label class="rb-l">파는 방법</label><select id="rbSell" style="width:100%"></select></div>
+      </div>
+      <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(140px,1fr)); gap:10px; align-items:end; margin-bottom:10px;">
+        <div><label class="rb-l">시험 시작일</label><input type="date" id="rbFrom" style="width:100%"></div>
+        <div><label class="rb-l">시험 종료일</label><input type="date" id="rbTo" style="width:100%"></div>
+        <div><button class="btn" id="rbTest" type="button" style="width:100%;">백테스트</button></div>
+        <div><button class="btn ghost" id="rbSave" type="button" style="width:100%;">자동매매에 올리기</button></div>
+      </div>
+      <div id="rbMsg" style="font-size:12.5px; color:var(--muted);"></div>
+      <div id="rbResult" style="margin-top:10px;"></div>
+      <div id="rbSaved" style="margin-top:14px; font-size:12.5px;"></div>
     </div>
 
 
@@ -3108,7 +3183,7 @@
   function atCardHtml(s){
     var def = AT_STRATEGY_DEF[s.id];
     var tag = s.kind === 'custom' ? '내가 만든 전략' : (def ? def.tag : '');
-    var easy = s.kind === 'custom' ? '전략연구실에서 찾은 조합을 저장해 둔 전략이에요.' : (def ? def.easy : '');
+    var easy = s.isRule ? '전략연구실 "전략 조립"으로 직접 만든 전략이에요.' : s.kind === 'custom' ? '전략연구실에서 찾은 조합을 저장해 둔 전략이에요.' : (def ? def.easy : '');
     // 가장 중요한 수익률은 크게, 숫자 규칙은 작은 회색 한 줄로
     var p = atPerf[s.id];
     var big = p
@@ -3254,7 +3329,8 @@
     var el = card.querySelector('.st-panel');
     var def = AT_STRATEGY_DEF[id];
     if(panel === 'detail'){
-      var text = s.kind === 'custom'
+      var text = s.isRule ? '조립한 규칙: ' + (s.ruleText || '') + ' (고치려면 전략연구실 "전략 조립"에서 불러와 저장하세요.)'
+        : s.kind === 'custom'
         ? '전략연구실의 "진화형 탐색" 결과를 이름 붙여 저장한 전략이에요. 여러 지표에 점수를 매겨서 점수가 기준을 넘으면 사요. 저장한 순간의 규칙을 그대로 써서, 탐색 결과가 바뀌어도 이 전략은 안 바뀌어요. 국내 주식만 해요.'
         : (def ? def.detail : '');
       el.innerHTML = '<p style="margin:0 0 6px;">'+escapeHtml(text)+'</p>' + (s.risk ? '<p style="margin:0;">지금 규칙: '+atRiskWords(s.risk)+'</p>' : '') +
@@ -4911,10 +4987,15 @@
   // 신뢰도: 단타를 토스 분봉으로 계산한 비율에 따라 높음/보통/낮음
   function sbReliability(r){
     var share = typeof r.minuteShare === 'number' ? '<br><span style="color:var(--muted-2); font-size:11px;">분봉 '+fmt(r.minuteShare,0)+'%</span>' : '';
-    if(r.reliability === 'minute') return '<b>높음</b>'+share;
-    if(r.reliability === 'mixed') return '보통'+share;
-    if(r.reliability === 'low') return '<span style="color:var(--up);">낮음</span>'+share;
-    return '보통';
+    var head = r.reliability === 'minute' ? '<b>높음</b>' : r.reliability === 'mixed' ? '보통' : r.reliability === 'low' ? '<span style="color:var(--up);">낮음</span>' : '보통';
+    return head + share + sbStatsLine(r.stats);
+  }
+  // 거래 결과가 우연인지: 거래 수가 적으면 "판단 일러요", 평균이 흔들림보다 확실히 크면 "꾸준함"
+  function sbStatsLine(st){
+    if(!st) return '';
+    var t = st.verdict === 'few' ? '<span style="color:var(--muted-2);">거래 적어 판단 일러요</span>'
+      : st.verdict === 'solid' ? (st.meanPct >= 0 ? '<span style="color:var(--down);">꾸준히 벌었어요(우연 아님)</span>' : '<span style="color:var(--up);">꾸준히 잃었어요(우연 아님)</span>') : '<span style="color:var(--up);">우연일 수 있어요</span>';
+    return '<br><span style="font-size:11px;" title="거래 '+st.n+'건, 거래당 평균 '+st.meanPct+'%, t='+st.tStat+'">'+t+'</span>';
   }
 
   document.getElementById('sbRun').addEventListener('click', function(){
@@ -4927,7 +5008,7 @@
     btn.disabled = true; out.innerHTML = '';
     sbPrepare(msg).then(function(){
       msg.innerHTML = '<span class="spinner"></span>&nbsp; 계산 중…';
-      return fetch('/api/backtest?mode=strategy&ids='+encodeURIComponent(ids.join(','))+'&start='+start+'&end='+end+'&cash='+cash)
+      return fetch('/api/backtest?mode=strategy&ids='+encodeURIComponent(ids.join(','))+'&start='+start+'&end='+end+'&cash='+cash+'&fill='+sbFillVal())
         .then(function(r){ return r.json().then(function(d){ if(!r.ok) throw new Error(d.error || '계산하지 못했어요.'); return d; }); });
     }).then(function(d){
       btn.disabled = false;
@@ -4937,7 +5018,7 @@
       var html = '<div style="overflow-x:auto;"><table><thead><tr><th>전략</th><th>수익률(나쁜 쪽)</th><th>범위</th><th>최대 손실 폭</th><th>매수/매도</th><th>승률</th><th>비용</th><th>신뢰도</th></tr></thead><tbody>';
       rows.forEach(function(r){
         if(r.skipped){ html += '<tr><td>'+escapeHtml(AT_STRATEGY_NAMES[r.id] || r.id)+'</td><td colspan="7" style="color:var(--muted-2);">'+escapeHtml(r.skipped)+'</td></tr>'; return; }
-        html += '<tr><td><b>'+escapeHtml(AT_STRATEGY_NAMES[r.id] || r.name)+'</b><br><span style="color:var(--muted-2); font-size:11px;">'+escapeHtml(r.methodText || '')+'</span></td>' +
+        html += '<tr><td><b>'+escapeHtml(AT_STRATEGY_NAMES[r.id] || r.name)+'</b><br><span style="color:var(--muted-2); font-size:11px;">'+escapeHtml(r.isRule ? (r.ruleText || '') : (r.methodText || ''))+'</span>'+(r.note ? '<br><span style="color:var(--up); font-size:11px;">'+escapeHtml(r.note)+'</span>' : '')+'</td>' +
           '<td style="font-size:15px; font-weight:700;">'+sbPct(r.totalReturnPct)+'</td>' +
           '<td style="font-size:12px;">'+(r.range ? sbPct(r.range.low)+' ~ '+sbPct(r.range.high) : '—')+'</td>' +
           '<td class="down">'+fmt(r.maxDrawdownPct,2)+'%</td>' +
@@ -4950,13 +5031,12 @@
       html += '<tr style="background:var(--bg-2, rgba(0,0,0,.03));"><td>50종목 똑같이 사서 보유</td><td>'+sbPct(bm.equalWeightPct)+'</td><td colspan="6" style="color:var(--muted-2); font-size:11.5px;">아무것도 안 하고 들고만 있었을 때</td></tr>';
       html += '</tbody></table></div>';
       html += '<div style="position:relative; height:260px; margin-top:14px;"><canvas id="sbChart"></canvas></div>';
-      rows.forEach(function(r){
-        if(r.skipped || !r.trades || !r.trades.length) return;
-        var sides = Object.keys(r.bySide || {}).map(function(k){ return (SB_SIDE[k]||k)+' '+r.bySide[k]; }).join(' · ');
-        html += '<details class="more" style="margin-top:8px;"><summary>'+escapeHtml(AT_STRATEGY_NAMES[r.id] || r.name)+' 매매 기록 (최근 '+Math.min(40, r.trades.length)+'건) — '+escapeHtml(sides)+'</summary><div class="more-body" style="overflow-x:auto;"><table><thead><tr><th>판 날</th><th>종목</th><th>종류</th><th>산 날</th><th>손익</th></tr></thead><tbody>' +
-          r.trades.slice(0, 40).map(function(t){
-            return '<tr><td>'+sbYmdText(t.exitDate)+'</td><td>'+escapeHtml(t.symbol)+'</td><td>'+escapeHtml(SB_SIDE[t.side]||t.side)+'</td><td>'+sbYmdText(t.entryDate)+'</td><td>'+sbPct(t.pnlPct)+' ('+fmt(t.pnlAmount,0)+'원)</td></tr>';
-          }).join('') + '</tbody></table></div></details>';
+      sbLastRows = rows;
+      rows.forEach(function(r, ri){
+        if(r.skipped) return;
+        html += sbBreakdownHtml(r);
+        if(!r.trades || !r.trades.length) return;
+        html += sbTradesHtml(r, ri);
       });
       html += '<ul style="color:var(--muted-2); font-size:11.5px; margin:10px 0 0; padding-left:18px;">'+(d.notes||[]).map(function(n){ return '<li>'+escapeHtml(n)+'</li>'; }).join('')+'</ul>';
       out.innerHTML = html;
@@ -4991,7 +5071,7 @@
     btn.disabled = true; out.innerHTML = '';
     sbPrepare(msg).then(function(){
       msg.innerHTML = '<span class="spinner"></span>&nbsp; 여러 방법으로 계산 중…';
-      return fetch('/api/backtest?mode=method-search&id='+encodeURIComponent(id)+'&start='+start+'&end='+end)
+      return fetch('/api/backtest?mode=method-search&id='+encodeURIComponent(id)+'&start='+start+'&end='+end+'&fill='+sbFillVal())
         .then(function(r){ return r.json().then(function(d){ if(!r.ok) throw new Error(d.error || '계산하지 못했어요.'); return d; }); });
     }).then(function(d){
       btn.disabled = false;
@@ -5027,6 +5107,321 @@
       .then(function(){ b.textContent = '적용됨'; if(typeof loadStrategyCards === 'function') loadStrategyCards(); })
       .catch(function(e){ b.disabled = false; window.alert(e.message); });
   });
+
+  /* ---------------- 시험 환경: 체결 계산·매매 기록 차트·상황별 성적·여러 구간 검증·데이터 점검·맞춰보기·전략 조립 ---------------- */
+  var sbLastRows = [];
+  function sbFillVal(){ var el = document.getElementById('sbFill'); return el && el.value === 'tick' ? 'tick' : 'pct'; }
+  function sbHm(min){ return typeof min === 'number' ? String(Math.floor(min/60)).padStart(2,'0')+':'+String(min%60).padStart(2,'0') : ''; }
+  var REGIME_KO = { bull:'상승장', bear:'하락장', sideways:'횡보장', calm:'평온', turbulent:'고변동' };
+  function sbRegimeText(k){ var p = String(k||'').split('-'); return (REGIME_KO[p[0]]||p[0]) + (p[1] ? '·'+(REGIME_KO[p[1]]||p[1]) : ''); }
+
+  // 상황별 성적(시장 상황·달·요일·시간대) — 어떤 때 벌고 어떤 때 잃는지
+  function sbBreakdownHtml(r){
+    var b = r.breakdown;
+    if(!b) return '';
+    function table(title, list, keyFn){
+      if(!list || !list.length) return '';
+      return '<div style="flex:1 1 240px; min-width:240px;"><div style="font-weight:600; font-size:12px; margin-bottom:4px;">'+title+'</div><table class="sb-mini" style="font-size:12px; width:100%;"><thead><tr><th></th><th>거래</th><th>손익</th><th>승률</th></tr></thead><tbody>' +
+        list.map(function(x){ return '<tr><td>'+escapeHtml(keyFn ? keyFn(x.key) : x.key)+'</td><td>'+x.n+'</td><td class="'+(x.pnl>=0?'up':'down')+'">'+fmt(x.pnl,0)+'원</td><td>'+fmt(x.winRate,0)+'%</td></tr>'; }).join('') + '</tbody></table></div>';
+    }
+    var head = (AT_STRATEGY_NAMES[r.id] || r.name) + ' 상황별 성적' + (b.monthsPositive !== null && b.monthsPositive !== undefined ? ' — 이익 난 달 '+fmt(b.monthsPositive,0)+'%' : '');
+    return '<details class="more" style="margin-top:8px;"><summary>'+escapeHtml(head)+'</summary><div class="more-body"><div style="display:flex; flex-wrap:wrap; gap:14px;">' +
+      table('시장 상황(산 날)', b.byRegime, sbRegimeText) + table('달(판 날)', b.byMonth) + table('요일(산 날)', b.byWeekday) + table('시간대(산 때)', b.byHour) +
+      '</div><p style="color:var(--muted-2); font-size:11.5px; margin:6px 0 0;">한 상황에서만 벌고 나머지에선 잃는다면, 그 상황이 다시 올 때만 쓰는 게 나을 수 있어요.</p></div></details>';
+  }
+  // 매매 기록: 누르면 그날 5분 차트에 산 곳·판 곳을 보여줘요
+  function sbTradesHtml(r, ri){
+    var sides = Object.keys(r.bySide || {}).map(function(k){ return (SB_SIDE[k]||k)+' '+r.bySide[k]; }).join(' · ');
+    var list = r.trades.slice(0, 60);
+    return '<details class="more" style="margin-top:8px;"><summary>'+escapeHtml(AT_STRATEGY_NAMES[r.id] || r.name)+' 매매 기록 (최근 '+list.length+'건) — '+escapeHtml(sides)+'</summary><div class="more-body" style="overflow-x:auto;">' +
+      '<p style="color:var(--muted-2); font-size:11.5px; margin:0 0 6px;">줄을 누르면 그날 5분 차트에 산 곳(빨강)·판 곳(파랑)이 보여요(분봉이 있는 날만).</p>' +
+      '<table><thead><tr><th>판 날</th><th>종목</th><th>종류</th><th>산 날·시각</th><th>판 시각</th><th>손익</th></tr></thead><tbody>' +
+      list.map(function(t, ti){
+        return '<tr class="sb-trade" data-sb-trade="'+ri+':'+ti+'"><td>'+sbYmdText(t.exitDate)+'</td><td>'+escapeHtml(t.symbol)+'</td><td>'+escapeHtml(SB_SIDE[t.side]||t.side)+'</td><td>'+sbYmdText(t.entryDate)+' '+sbHm(t.entryT)+'</td><td>'+sbHm(t.exitT)+'</td><td>'+sbPct(t.pnlPct)+' ('+fmt(t.pnlAmount,0)+'원)</td></tr>';
+      }).join('') + '</tbody></table><div class="sb-chart-box"></div></div></details>';
+  }
+  var sbTradeCharts = [];
+  function sbDrawDay(box, sym, ymd, marks){
+    var wrap = document.createElement('div');
+    wrap.style.cssText = 'margin-top:8px;';
+    wrap.innerHTML = '<div style="font-size:12px; color:var(--muted);">'+escapeHtml(sym)+' · '+sbYmdText(ymd)+' 5분 차트 불러오는 중…</div>';
+    box.appendChild(wrap);
+    return fetch('/api/backtest?mode=minute-day&sym='+encodeURIComponent(sym)+'&date='+ymd).then(function(r){ return r.json().then(function(d){ if(!r.ok) throw new Error(d.error || '분봉이 없어요.'); return d; }); }).then(function(d){
+      wrap.innerHTML = '<div style="font-size:12px; color:var(--muted);">'+escapeHtml(sym)+' · '+sbYmdText(ymd)+'</div><div style="position:relative; height:200px;"><canvas></canvas></div>';
+      var bars = d.bars;
+      var idxOf = function(min){ for(var i=0;i<bars.length;i++){ if(min >= bars[i].t && min < bars[i].t + 5) return i; } return -1; };
+      var buy = bars.map(function(){ return null; }), sell = bars.map(function(){ return null; });
+      marks.forEach(function(mk){ var i = idxOf(mk.t); if(i >= 0) (mk.kind === 'buy' ? buy : sell)[i] = mk.price; });
+      if(!window.Chart) return;
+      sbTradeCharts.push(new Chart(wrap.querySelector('canvas').getContext('2d'), {
+        type: 'line',
+        data: { labels: bars.map(function(b){ return sbHm(b.t); }), datasets: [
+          { label: '가격(5분 종가)', data: bars.map(function(b){ return b.c; }), borderColor: '#8b8d98', pointRadius: 0, borderWidth: 1.5, tension: 0.1 },
+          { label: '산 곳', data: buy, borderColor: '#e5484d', backgroundColor: '#e5484d', pointRadius: 6, showLine: false },
+          { label: '판 곳', data: sell, borderColor: '#3e63dd', backgroundColor: '#3e63dd', pointRadius: 6, showLine: false }
+        ] },
+        options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { labels: { boxWidth: 10, font: { size: 11 } } } }, scales: { x: { ticks: { maxTicksLimit: 8 } } } }
+      }));
+    }).catch(function(e){ wrap.innerHTML = '<div style="font-size:12px; color:var(--muted-2);">'+escapeHtml(sbYmdText(ymd))+': '+escapeHtml(e.message)+'</div>'; });
+  }
+  document.getElementById('sbResult').addEventListener('click', function(ev){
+    var row = ev.target.closest('[data-sb-trade]');
+    if(!row) return;
+    var p = row.getAttribute('data-sb-trade').split(':');
+    var r = sbLastRows[Number(p[0])], t = r && r.trades && r.trades[Number(p[1])];
+    if(!t) return;
+    var box = row.closest('.more-body').querySelector('.sb-chart-box');
+    sbTradeCharts.forEach(function(c){ c.destroy(); }); sbTradeCharts = [];
+    box.innerHTML = '';
+    if(t.entryDate === t.exitDate) sbDrawDay(box, t.symbol, t.entryDate, [{ kind:'buy', t:t.entryT, price:t.entryPrice }, { kind:'sell', t:t.exitT, price:t.exitPrice }]);
+    else {
+      sbDrawDay(box, t.symbol, t.entryDate, [{ kind:'buy', t:t.entryT, price:t.entryPrice }]);
+      sbDrawDay(box, t.symbol, t.exitDate, [{ kind:'sell', t:t.exitT, price:t.exitPrice }]);
+    }
+  });
+
+  // 여러 구간 검증(워크포워드)
+  document.getElementById('msWf').addEventListener('click', function(){
+    var btn = this, msg = document.getElementById('msMsg'), out = document.getElementById('msResult');
+    var id = document.getElementById('msStrategy').value;
+    var start = document.getElementById('msStart').value.split('-').join(''), end = document.getElementById('msEnd').value.split('-').join('');
+    btn.disabled = true; out.innerHTML = '';
+    sbPrepare(msg).then(function(){
+      msg.innerHTML = '<span class="spinner"></span>&nbsp; 기간을 5조각으로 나눠 4번 검증하는 중… (최대 1분)';
+      return fetch('/api/backtest?mode=walk-forward&folds=4&id='+encodeURIComponent(id)+'&start='+start+'&end='+end+'&fill='+sbFillVal())
+        .then(function(r){ return r.json().then(function(d){ if(!r.ok) throw new Error(d.error || '계산하지 못했어요.'); return d; }); });
+    }).then(function(d){
+      btn.disabled = false;
+      var verdict = d.positiveFolds >= d.folds - 1 && d.avgTestReturnPct > 0 ? '<b style="color:var(--down);">꾸준히 벌었어요</b> — 고른 방법이 다음 구간에서도 대부분 이익이라 믿을 만한 편이에요.'
+        : d.avgTestReturnPct > 0 ? '<b>벌긴 했지만 들쭉날쭉해요</b> — 구간에 따라 손해도 났어요. 거래 수와 상황별 성적을 같이 보세요.'
+        : '<b style="color:var(--up);">다음 구간에서 손해였어요</b> — 과거에 맞춘 결과일 가능성이 커요. 이 전략은 지금 모양으로는 믿기 어려워요.';
+      msg.innerHTML = escapeHtml(AT_STRATEGY_NAMES[d.id] || d.name) + ' · 여러 구간 검증 '+d.folds+'번';
+      var html = '<p style="margin:0 0 8px;">'+verdict+'</p>' +
+        '<p style="margin:0 0 8px; font-size:12.5px;">다음 구간 평균 수익률: 고른 방법 '+sbPct(d.avgTestReturnPct)+' · 지금 방법('+escapeHtml(d.currentText)+') '+sbPct(d.avgCurrentTestReturnPct)+' · 이익 낸 구간 '+d.positiveFolds+'/'+d.folds+(d.sameChoice ? ' · 매번 같은 방법이 뽑혔어요(안정적)' : ' · 구간마다 뽑힌 방법이 달라요')+'</p>';
+      html += '<div style="overflow-x:auto;"><table><thead><tr><th>구간</th><th>고르는 기간</th><th>확인 기간</th><th>고른 방법</th><th>고른 기간 수익률</th><th>확인 기간 수익률</th><th>지금 방법이었다면</th></tr></thead><tbody>' +
+        d.rows.map(function(r){
+          return '<tr><td>'+r.fold+'</td><td style="font-size:11.5px;">'+sbYmdText(r.trainPeriod[0])+' ~ '+sbYmdText(r.trainPeriod[1])+'</td><td style="font-size:11.5px;">'+sbYmdText(r.testPeriod[0])+' ~ '+sbYmdText(r.testPeriod[1])+'</td>' +
+            '<td style="font-size:11.5px;">'+escapeHtml(r.chosenText)+(r.isCurrent ? ' (지금 방법)' : '')+'</td><td>'+sbPct(r.trainReturnPct)+'</td><td><b>'+sbPct(r.testReturnPct)+'</b> <span style="color:var(--muted-2); font-size:11px;">'+r.testSells+'건</span></td><td>'+sbPct(r.currentTestReturnPct)+'</td></tr>';
+        }).join('') + '</tbody></table></div>';
+      out.innerHTML = html;
+    }).catch(function(e){ btn.disabled = false; msg.innerHTML = '<span style="color:var(--down);">'+escapeHtml(e.message || '실패했어요.')+'</span>'; });
+  });
+
+  // 데이터 점검표
+  document.getElementById('dcRun').addEventListener('click', function(){
+    var btn = this, m = document.getElementById('dcMsg'), out = document.getElementById('dcResult');
+    btn.disabled = true; m.innerHTML = '<span class="spinner"></span>&nbsp; 확인하는 중…'; out.innerHTML = '';
+    fetch('/api/backtest?mode=data-check').then(function(r){ return r.json().then(function(d){ if(!r.ok) throw new Error(d.error || '점검하지 못했어요.'); return d; }); }).then(function(d){
+      btn.disabled = false; m.textContent = '';
+      if(d.empty){ out.innerHTML = '<span style="color:var(--muted-2);">아직 올라온 분봉이 없어요. 이 PC에서 <code>node tools/toss-sync.mjs all</code>을 실행해 주세요.</span>'; return; }
+      var t = d.totals;
+      var html = '<div>기간 '+sbYmdText(d.first)+' ~ '+sbYmdText(d.last)+' · 51종목 · 코스피 분봉 '+(d.hasIndex ? '있음' : '<b style="color:var(--up);">없음</b>')+'</div>' +
+        '<div style="margin-top:4px;">있어야 할 날 '+fmt(t.expected,0)+'일 중 <b>'+fmt(t.have,0)+'일</b> 있음 ('+(t.expected ? fmt(t.have / t.expected * 100, 1) : '0')+'%) · 빠짐 '+t.missing+' · 덜 참 '+t.partial+' · 값 다름 '+t.mismatch+(t.noSummary ? ' · <b style="color:var(--up);">요약 없음 '+t.noSummary+'종목(다시 올리기 필요)</b>' : '')+'</div>';
+      var bad = d.rows.filter(function(r){ return r.noSummary || r.missing || r.partial || r.mismatch; });
+      if(!bad.length) html += '<div style="margin-top:6px; color:var(--down);">모든 종목 깨끗해요.</div>';
+      else html += '<div style="overflow-x:auto; margin-top:6px;"><table><thead><tr><th>종목</th><th>있음/필요</th><th>빠짐</th><th>덜 참</th><th>값 다름</th><th>예</th></tr></thead><tbody>' +
+        bad.map(function(r){
+          return r.noSummary ? '<tr><td>'+escapeHtml(r.name)+'</td><td colspan="5" style="color:var(--up);">요약이 없어요 — 이 PC에서 <code>node tools/toss-sync.mjs minutes --reupload</code></td></tr>'
+            : '<tr><td>'+escapeHtml(r.name)+'</td><td>'+r.have+'/'+r.expected+'</td><td>'+(r.missing||'')+'</td><td>'+(r.partial||'')+'</td><td>'+(r.mismatch||'')+'</td><td style="font-size:11.5px; color:var(--muted-2);">'+escapeHtml((r.examples||[]).join(', '))+'</td></tr>';
+        }).join('') + '</tbody></table></div>';
+      out.innerHTML = html;
+    }).catch(function(e){ btn.disabled = false; m.textContent = e.message; });
+  });
+
+  // 실제 매매와 맞춰보기
+  (function(){ var el = document.getElementById('rcDate'); if(el) el.value = sbDaysAgo(0); })();
+  document.getElementById('rcRun').addEventListener('click', function(){
+    var btn = this, m = document.getElementById('rcMsg'), out = document.getElementById('rcResult');
+    var date = document.getElementById('rcDate').value;
+    btn.disabled = true; out.innerHTML = '';
+    sbPrepare(m).then(function(){
+      m.innerHTML = '<span class="spinner"></span>&nbsp; 그날을 백테스트로 다시 돌리는 중…';
+      return fetch('/api/backtest?mode=reconcile&date='+encodeURIComponent(date)).then(function(r){ return r.json().then(function(d){ if(!r.ok) throw new Error(d.error || '맞춰보지 못했어요.'); return d; }); });
+    }).then(function(d){
+      btn.disabled = false;
+      m.innerHTML = escapeHtml(d.date)+(d.hasMinutes ? '' : ' · <b style="color:var(--up);">그날 분봉이 아직 없어서 단타는 하루 가격으로 흉내 냈어요(정확한 비교는 분봉이 올라온 뒤에)</b>');
+      if(!d.rows.length){ out.innerHTML = '<span style="color:var(--muted-2);">그날 비교할 전략이 없어요.</span>'; return; }
+      var names = Object.assign({}, d.names || {});
+      d.rows.forEach(function(r){ r.actual.buys.forEach(function(b){ if(b.name) names[b.symbol] = b.name; }); });
+      var nm = function(s){ return escapeHtml(names[s] || s); };
+      var buysText = function(list){ return list.length ? list.slice(0, 8).map(function(b){ return nm(b.symbol)+' '+escapeHtml(b.time || ''); }).join(', ') + (list.length > 8 ? ' 외 '+(list.length-8) : '') : '—'; };
+      var html = '<div style="overflow-x:auto;"><table><thead><tr><th>전략</th><th>실제 매수</th><th>백테스트 매수</th><th>겹침</th><th>실제만</th><th>백테스트만</th><th>실현 손익(실제/백테스트)</th></tr></thead><tbody>' +
+        d.rows.map(function(r){
+          var a = r.actual.buys.length, s = r.sim.buys.length, both = r.matched.length;
+          var ok = (a === 0 && s === 0) || (both >= Math.max(a, s) * 0.6);
+          return '<tr><td><b>'+escapeHtml(AT_STRATEGY_NAMES[r.id] || r.name)+'</b><br><span style="font-size:11px; color:'+(ok ? 'var(--down)' : 'var(--up)')+';">'+(ok ? '대체로 같아요' : '차이가 커요')+'</span></td>' +
+            '<td style="font-size:11.5px;">'+a+'건<br>'+buysText(r.actual.buys)+'</td><td style="font-size:11.5px;">'+s+'건<br>'+buysText(r.sim.buys)+'</td>' +
+            '<td>'+both+'</td><td style="font-size:11.5px;">'+(r.onlyActual.map(nm).join(', ') || '—')+'</td><td style="font-size:11.5px;">'+(r.onlySim.map(nm).join(', ') || '—')+'</td>' +
+            '<td>'+fmt(r.actual.pnl,0)+' / '+fmt(r.sim.pnl,0)+'원</td></tr>';
+        }).join('') + '</tbody></table></div>';
+      html += '<ul style="color:var(--muted-2); font-size:11.5px; margin:10px 0 0; padding-left:18px;">'+(d.notes||[]).map(function(n){ return '<li>'+escapeHtml(n)+'</li>'; }).join('')+'</ul>';
+      out.innerHTML = html;
+    }).catch(function(e){ btn.disabled = false; m.innerHTML = '<span style="color:var(--down);">'+escapeHtml(e.message || '실패했어요.')+'</span>'; });
+  });
+
+  // ---- 전략 조립 ----
+  var RB_CONDS = [
+    ['fromOpen','오늘 시가 대비(%)'], ['change','어제 종가 대비 등락률(%)'], ['offHigh','오늘 고가에서 밀린 폭(%, 0 이상)'], ['fromLow','오늘 저가에서 오른 폭(%, 0 이상)'],
+    ['vsVwap','평균 체결가 대비(%)'], ['gap','시가 갭(어제 종가→오늘 시가, %)'], ['d1','어제 하루 등락률(%)'], ['index','코스피 등락률(%)'], ['indexVsOpen','코스피 오늘 시가 대비(%)']
+  ];
+  var RB_BUYS = [
+    ['{"type":"single"}','한 번에 사기'], ['{"type":"ladder","steps":[2,4]}','떨어지면 나눠 사기(-2%/-4%)'], ['{"type":"ladder","steps":[3,6]}','떨어지면 나눠 사기(-3%/-6%)'], ['{"type":"pyramid","addAtPct":3,"times":1}','오르면 더 사기(+3%)']
+  ];
+  var RB_SELLS = [
+    ['{"type":"single"}','한 번에 팔기'], ['{"type":"split","rest":"take"}','나눠 팔기(목표 절반에서 반)'], ['{"type":"split","rest":"trail","trailPct":3}','나눠 팔기 + 나머지 따라가는 손절 3%'],
+    ['{"type":"trail","trailPct":3,"activatePct":1}','따라가는 손절 3%(+1%부터)'], ['{"type":"trail","trailPct":5,"activatePct":3}','따라가는 손절 5%(+3%부터)']
+  ];
+  var rbEditingId = null, rbSavedList = [];
+  function rbOpts(list, val){ return list.map(function(o){ return '<option value="'+escapeHtml(o[0])+'"'+(o[0] === val ? ' selected' : '')+'>'+escapeHtml(o[1])+'</option>'; }).join(''); }
+  function rbAddCond(k, min, max){
+    var row = document.createElement('div');
+    row.className = 'rb-cond';
+    row.innerHTML = '<select class="rb-k">'+rbOpts(RB_CONDS, k || 'fromOpen')+'</select> 최소 <input type="number" step="0.1" class="rb-min" value="'+(min === null || min === undefined ? '' : min)+'"> 최대 <input type="number" step="0.1" class="rb-max" value="'+(max === null || max === undefined ? '' : max)+'"> <button type="button" class="btn ghost rb-del" style="font-size:11px; padding:2px 8px;">빼기</button>';
+    row.querySelector('.rb-del').addEventListener('click', function(){ row.remove(); });
+    document.getElementById('rbConds').appendChild(row);
+  }
+  function rbSyncHorizon(){
+    var day = document.getElementById('rbHorizon').value === 'day';
+    document.getElementById('rbCloseBox').style.display = day ? '' : 'none';
+    document.getElementById('rbHoldBox').style.display = day ? 'none' : '';
+  }
+  function rbJson(s){ try { return JSON.parse(s); } catch(e){ return { type: 'single' }; } }
+  function rbCollect(){
+    var conds = Array.prototype.slice.call(document.querySelectorAll('#rbConds .rb-cond')).map(function(row){
+      var mn = row.querySelector('.rb-min').value, mx = row.querySelector('.rb-max').value;
+      return { k: row.querySelector('.rb-k').value, min: mn === '' ? null : Number(mn), max: mx === '' ? null : Number(mx) };
+    });
+    var v = function(id){ return document.getElementById(id).value; };
+    return {
+      name: v('rbName').trim() || '이름 없는 전략', horizon: v('rbHorizon'), gate: v('rbGate'), window: { start: v('rbStart'), end: v('rbEnd') }, closeAt: v('rbClose'), maxHoldDays: Number(v('rbHold')),
+      conditions: conds,
+      risk: { stopLossPct: Number(v('rbStop')), takeProfitPct: Number(v('rbTake')), positionPct: Number(v('rbPos')), maxTradesPerDay: Number(v('rbTrades')), maxPositions: Number(v('rbMaxPos')) },
+      method: { buy: rbJson(v('rbBuy')), sell: rbJson(v('rbSell')) }
+    };
+  }
+  function rbFill(s){
+    var set = function(id, val){ if(val !== undefined && val !== null) document.getElementById(id).value = val; };
+    set('rbName', s.name); set('rbHorizon', s.horizon); set('rbGate', s.gate);
+    set('rbStart', s.window && s.window.start); set('rbEnd', s.window && s.window.end); set('rbClose', s.closeAt); set('rbHold', s.maxHoldDays);
+    set('rbStop', s.risk.stopLossPct); set('rbTake', s.risk.takeProfitPct); set('rbPos', s.risk.positionPct); set('rbTrades', s.risk.maxTradesPerDay); set('rbMaxPos', s.risk.maxPositions);
+    // 사는/파는 방법은 목록에서 가장 비슷한 것을 골라요
+    var pick = function(list, m){ var t = JSON.stringify(m); var hit = list.filter(function(o){ var x = JSON.parse(o[0]); return Object.keys(x).every(function(k){ return JSON.stringify(x[k]) === JSON.stringify(m[k]); }); }); return hit.length ? hit[0][0] : list[0][0]; };
+    if(s.method){ set('rbBuy', pick(RB_BUYS, s.method.buy)); set('rbSell', pick(RB_SELLS, s.method.sell)); }
+    document.getElementById('rbConds').innerHTML = '';
+    (s.conditions || []).forEach(function(c){ rbAddCond(c.k, c.min, c.max); });
+    rbSyncHorizon();
+  }
+  function renderRbSaved(){
+    var box = document.getElementById('rbSaved');
+    if(!box) return;
+    if(!rbSavedList.length){ box.innerHTML = '<span style="color:var(--muted-2);">아직 올린 조립 전략이 없어요.</span>'; return; }
+    box.innerHTML = '<div style="font-weight:600; margin-bottom:4px;">올린 조립 전략</div>' + rbSavedList.map(function(s){
+      return '<div style="border-top:1px dashed var(--line); padding:6px 0;"><b>'+escapeHtml(s.name)+'</b> '+(s.enabled === false ? '<span style="color:var(--muted-2);">(꺼짐)</span>' : '<span style="color:var(--down);">(켜짐)</span>') +
+        ' <button type="button" class="btn ghost" data-rb-load="'+escapeHtml(s.id)+'" style="font-size:11px; padding:2px 8px;">불러와 고치기</button>' +
+        ' <button type="button" class="btn ghost" data-rb-del="'+escapeHtml(s.id)+'" style="font-size:11px; padding:2px 8px;">삭제</button></div>';
+    }).join('');
+  }
+  // 저장된 조립 전략을 백테스트·방법 찾기 선택 칸에도 넣어요
+  function loadRuleStrategies(){
+    return fetch('/api/auto-trade-status?action=custom').then(function(r){ return r.json(); }).then(function(d){
+      rbSavedList = (d.strategies || []).filter(function(s){ return s.type === 'rule'; });
+      var box = document.getElementById('sbStrategies'), sel = document.getElementById('msStrategy');
+      Array.prototype.slice.call(box.querySelectorAll('[data-rule-cb]')).forEach(function(x){ x.remove(); });
+      Array.prototype.slice.call(sel.querySelectorAll('[data-rule-opt]')).forEach(function(x){ x.remove(); });
+      rbSavedList.forEach(function(s){
+        AT_STRATEGY_NAMES[s.id] = s.name;
+        var lab = document.createElement('label');
+        lab.setAttribute('data-rule-cb', '1');
+        lab.style.cssText = 'display:inline-flex; gap:4px; align-items:center; cursor:pointer;';
+        lab.innerHTML = '<input type="checkbox" value="'+escapeHtml(s.id)+'"> '+escapeHtml(s.name)+' <span style="color:var(--muted-2); font-size:11px;">(조립)</span>';
+        box.appendChild(lab);
+        var o = document.createElement('option');
+        o.setAttribute('data-rule-opt', '1'); o.value = s.id; o.textContent = s.name + ' (조립)';
+        sel.appendChild(o);
+      });
+      renderRbSaved();
+    }).catch(function(){});
+  }
+  (function initRuleBuilder(){
+    if(!document.getElementById('rbPanel')) return;
+    document.getElementById('rbBuy').innerHTML = rbOpts(RB_BUYS, RB_BUYS[0][0]);
+    document.getElementById('rbSell').innerHTML = rbOpts(RB_SELLS, RB_SELLS[1][0]);
+    document.getElementById('rbFrom').value = sbDaysAgo(365);
+    document.getElementById('rbTo').value = sbDaysAgo(0);
+    rbAddCond('fromOpen', 1, 4);
+    rbAddCond('vsVwap', 0, null);
+    document.getElementById('rbAddCond').addEventListener('click', function(){ if(document.querySelectorAll('#rbConds .rb-cond').length < 8) rbAddCond(); });
+    document.getElementById('rbHorizon').addEventListener('change', function(){
+      rbSyncHorizon();
+      if(this.value === 'swing'){ document.getElementById('rbStop').value = 5; document.getElementById('rbTake').value = 10; document.getElementById('rbEnd').value = '15:15'; }
+      else { document.getElementById('rbStop').value = 2; document.getElementById('rbTake').value = 3; document.getElementById('rbEnd').value = '14:30'; }
+    });
+    rbSyncHorizon();
+    loadRuleStrategies();
+    document.getElementById('rbTest').addEventListener('click', function(){
+      var btn = this, m = document.getElementById('rbMsg'), out = document.getElementById('rbResult');
+      var rule = rbCollect();
+      var start = document.getElementById('rbFrom').value.split('-').join(''), end = document.getElementById('rbTo').value.split('-').join('');
+      btn.disabled = true; out.innerHTML = '';
+      sbPrepare(m).then(function(){
+        m.innerHTML = '<span class="spinner"></span>&nbsp; 조립한 전략을 분봉으로 시험하는 중…';
+        return fetch('/api/backtest?mode=strategy&ids=draft&rule='+encodeURIComponent(JSON.stringify(rule))+'&start='+start+'&end='+end+'&fill='+sbFillVal())
+          .then(function(r){ return r.json().then(function(d){ if(!r.ok) throw new Error(d.error || '계산하지 못했어요.'); return d; }); });
+      }).then(function(d){
+        btn.disabled = false;
+        var r = d.results[0];
+        if(!r || r.skipped){ m.innerHTML = '<span style="color:var(--down);">'+escapeHtml((r && r.skipped) || '계산하지 못했어요.')+'</span>'; return; }
+        m.innerHTML = '기간 '+sbYmdText(d.period[0])+' ~ '+sbYmdText(d.period[1])+' ('+d.tradingDays+'거래일)'+(d.hasMinutes ? '' : ' · <b style="color:var(--up);">분봉이 없어서 매매가 없어요</b>');
+        AT_STRATEGY_NAMES.draft = rule.name;
+        sbLastRows = [r];
+        out.innerHTML = '<div style="overflow-x:auto;"><table><thead><tr><th>수익률(나쁜 쪽)</th><th>범위</th><th>최대 손실 폭</th><th>매수/매도</th><th>승률</th><th>신뢰도</th><th>같은 기간 50종목 보유</th></tr></thead><tbody><tr>' +
+          '<td style="font-size:15px; font-weight:700;">'+sbPct(r.totalReturnPct)+'</td><td style="font-size:12px;">'+sbPct(r.range.low)+' ~ '+sbPct(r.range.high)+'</td><td class="down">'+fmt(r.maxDrawdownPct,2)+'%</td><td>'+r.buys+' / '+r.sells+'</td>' +
+          '<td>'+(r.winRate === null ? '—' : fmt(r.winRate,1)+'%')+'</td><td>'+sbReliability(r)+'</td><td>'+sbPct((d.benchmark || {}).equalWeightPct)+'</td></tr></tbody></table></div>' +
+          '<p style="font-size:11.5px; color:var(--muted-2); margin:6px 0 0;">'+escapeHtml(r.ruleText || '')+(r.note ? ' · '+escapeHtml(r.note) : '')+'</p>' +
+          sbBreakdownHtml(r) + (r.trades && r.trades.length ? sbTradesHtml(r, 0) : '');
+      }).catch(function(e){ btn.disabled = false; m.innerHTML = '<span style="color:var(--down);">'+escapeHtml(e.message || '실패했어요.')+'</span>'; });
+    });
+    // 조립 결과의 매매 기록도 누르면 차트가 나와요
+    document.getElementById('rbResult').addEventListener('click', function(ev){
+      var row = ev.target.closest('[data-sb-trade]');
+      if(!row) return;
+      var t = sbLastRows[0] && sbLastRows[0].trades[Number(row.getAttribute('data-sb-trade').split(':')[1])];
+      if(!t) return;
+      var box = row.closest('.more-body').querySelector('.sb-chart-box');
+      sbTradeCharts.forEach(function(c){ c.destroy(); }); sbTradeCharts = []; box.innerHTML = '';
+      sbDrawDay(box, t.symbol, t.entryDate, [{ kind:'buy', t:t.entryT, price:t.entryPrice }].concat(t.entryDate === t.exitDate ? [{ kind:'sell', t:t.exitT, price:t.exitPrice }] : []));
+      if(t.entryDate !== t.exitDate) sbDrawDay(box, t.symbol, t.exitDate, [{ kind:'sell', t:t.exitT, price:t.exitPrice }]);
+    });
+    document.getElementById('rbSave').addEventListener('click', function(){
+      var btn = this, m = document.getElementById('rbMsg');
+      var rule = rbCollect();
+      if(!window.confirm('"'+rule.name+'" 전략을 '+(rbEditingId ? '고쳐서 저장할까요?' : '가상계좌 자동매매에 올릴까요? 켜진 상태로 저장돼요.'))) return;
+      btn.disabled = true;
+      atPost('custom', { op: 'save-rule', rule: rule, id: rbEditingId }).then(function(d){
+        btn.disabled = false;
+        rbEditingId = d.strategy.id;
+        m.innerHTML = '<span style="color:var(--down);">저장했어요. 자동매매 탭에 "내가 만든 전략" 카드로 보여요.</span>';
+        loadRuleStrategies();
+        if(typeof loadStrategyCards === 'function') loadStrategyCards();
+      }).catch(function(e){ btn.disabled = false; m.innerHTML = '<span style="color:var(--down);">'+escapeHtml(e.message)+'</span>'; });
+    });
+    document.getElementById('rbSaved').addEventListener('click', function(ev){
+      var ld = ev.target.closest('[data-rb-load]'), del = ev.target.closest('[data-rb-del]');
+      if(ld){
+        var s = rbSavedList.filter(function(x){ return x.id === ld.getAttribute('data-rb-load'); })[0];
+        if(s){ rbFill(s); rbEditingId = s.id; document.getElementById('rbMsg').textContent = '"'+s.name+'"을 불러왔어요. 고친 뒤 [자동매매에 올리기]를 누르면 덮어써요.'; }
+      }
+      if(del){
+        var id = del.getAttribute('data-rb-del');
+        if(!window.confirm('이 조립 전략과 그 가상계좌 기록을 지울까요? 되돌릴 수 없어요.')) return;
+        atPost('custom', { op: 'delete', id: id }).then(function(){
+          if(rbEditingId === id) rbEditingId = null;
+          loadRuleStrategies();
+          if(typeof loadStrategyCards === 'function') loadStrategyCards();
+        }).catch(function(e){ window.alert(e.message); });
+      }
+    });
+  })();
 
   /* ---------------- 고정 50종목 목록 · 점검 (auto-trade-status.js action=universe) ---------------- */
   function renderUniverseReview(review){

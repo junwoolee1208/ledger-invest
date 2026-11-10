@@ -42,7 +42,8 @@ import {
   summarize, clampProposal, liftToFloors, judge, readyToJudge, forbiddenDirections, applyForbidden, lessonLine
 } from './_learning.js';
 import { DEEPEVAL_LATEST_KEY } from './_deepeval.js';
-import { KR_HOLIDAYS_KEY } from './_minute-data.js'; // 토스증권 장 운영 달력에서 받아 둔 국내 휴장일(tools/toss-sync.mjs meta)
+import { KR_HOLIDAYS_KEY } from './_minute-data.js';
+import { normalizeRule, ruleSignal, ruleDayRules } from './_rules.js'; // 화면에서 조립한 전략(전략연구실 "전략 조립") // 토스증권 장 운영 달력에서 받아 둔 국내 휴장일(tools/toss-sync.mjs meta)
 
 export const config = { maxDuration: 30 };
 
@@ -268,6 +269,24 @@ const STRATEGY_DEFS = [
     exitSignal: (cfg) => inverseShouldExit(cfg._regime)
   }
 ];
+
+// 화면에서 조립한 전략(type:'rule')을 실제 매매 정의로 바꿔요. 백테스트(_strategy-sim.js)와 같은 ruleSignal로 판단해요.
+// 커스텀 전략 목록에 함께 저장돼서 켜기/끄기·삭제·계좌 키는 기존 커스텀 전략과 같아요. 자동조정 대상은 아니에요(규칙은 사용자가 정해요).
+function ruleDefOf(c) {
+  const nr = normalizeRule(c);
+  if (nr.error) return null;
+  const r = nr.rule;
+  return {
+    id: c.id, name: r.name, horizon: r.horizon, ownRules: true, krOnly: true, gate: r.gate, maxPositions: r.risk.maxPositions,
+    ...(r.horizon === 'day' ? { intraday: true, dayRules: () => ruleDayRules(r) } : { maxHoldDays: r.maxHoldDays }),
+    getRisk: () => ({ positionPct: r.risk.positionPct, stopLossPct: r.risk.stopLossPct, takeProfitPct: r.risk.takeProfitPct, maxTradesPerDay: r.risk.maxTradesPerDay }),
+    shouldBuy: (cand, q, cfg) => ruleSignal(r, q, cfg._minutes, {
+      d1: cfg._daily && cfg._daily[cand.symbol] ? cfg._daily[cand.symbol].d1 : null,
+      index: cfg._index
+    }),
+    method: r.method
+  };
+}
 
 // 시장 필터 종류(_bear.js marketGate): 오르는 장 단타는 'up', 며칠 들고 가는 전략은 'swing'(하락장이면 쉼),
 // 떨어진 종목을 사는 전략은 'dip', 기준선은 비교를 위해 'none'(조건 없음). 새 전략은 위 정의에 직접 적었어요.
@@ -1081,6 +1100,9 @@ export default async function handler(req, res) {
 
     // 가중치 전략(진화형·커스텀·시장적응형)은 국내 전용이에요. 국내장이 닫혀 있으면 아래 목록이 비어서 건너뛰어요.
     const customList = krOpen ? (snap[CUSTOM_STRATEGIES_KEY] || []).filter((c) => c.enabled !== false) : [];
+    // 조립한 전략은 아래 일반 전략과 같은 길(processStrategyMarket)로, 나머지 커스텀은 가중치 점수 길로 돌아요.
+    const ruleDefs = customList.filter((c) => c.type === 'rule').map(ruleDefOf).filter(Boolean);
+    ruleDefs.forEach((d) => { cfg._methods[d.id] = d.method; });
     const evolveState = krOpen && isOn('evolved') ? snap[EVOLVE_KEY] : null;
     const evolvedStrategy = evolveState && evolveState.globalBest && evolveState.globalBest.strategy;
     const regimeLabel = krOpen && isOn('regime-adaptive')
@@ -1147,7 +1169,7 @@ export default async function handler(req, res) {
 
     // 전략끼리는 서로 다른 KV 키(현금/보유종목)를 쓰기 때문에 서로 영향을 주지 않아, 동시에(병렬로)
     // 처리해도 안전합니다 — 순서대로 하나씩 기다리던 것보다 전체 실행 시간이 훨씬 짧아집니다.
-    await Promise.all(activeDefs.map(async (def) => {
+    await Promise.all(activeDefs.concat(ruleDefs).map(async (def) => {
       // 전략별로 AI가 자동 조정한 값(오버라이드)이 있으면 하드코딩된 기본값/사용자 설정 위에 덮어씁니다.
       // (규칙이 따로 정해진 전략은 오버라이드를 적용하지 않음)
       const risk = def.ownRules ? def.getRisk(cfg) : Object.assign({}, def.getRisk(cfg), overrides[def.id] || {});
@@ -1200,7 +1222,7 @@ export default async function handler(req, res) {
       // 가중치 기반 전략(진화형 1개 + 커스텀 여러 개)을 돌릴 목록으로 모읍니다 — 서로 다른 KV 키를 쓰니 병렬 처리 가능.
       const weightDefs = [];
       if (evolvedStrategy) weightDefs.push({ id: 'evolved', name: '진화형(자동탐색)', strategy: evolvedStrategy, horizon: 'swing' });
-      customList.forEach((c) => weightDefs.push({ id: c.id, name: c.name, strategy: c, horizon: normalizeHorizon(c.horizon) }));
+      customList.filter((c) => c.type !== 'rule').forEach((c) => weightDefs.push({ id: c.id, name: c.name, strategy: c, horizon: normalizeHorizon(c.horizon) }));
       if (regimeStrategy) weightDefs.push({ id: 'regime-adaptive', name: '시장적응형(' + regimeLabelKo(regimeLabel) + ')', strategy: regimeStrategy, horizon: 'swing' });
 
       await Promise.all(weightDefs.map(async (wd) => {

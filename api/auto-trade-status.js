@@ -39,6 +39,7 @@ import {
   BEAR_IDS, LINEUP_VERSION, LINEUP_DEFAULTS, enabledMapOf
 } from './_strategies.js';
 import { METHODS_KEY, DEFAULT_METHODS, methodOf, normalizeMethod, describeMethod } from './_methods.js';
+import { normalizeRule, describeRule } from './_rules.js'; // 전략연구실 "전략 조립"으로 만든 전략
 import {
   FIXED_UNIVERSE, INVERSE_ETF, UNIVERSE_CHOSEN_AT, UNIVERSE_RULE, UNIVERSE_REVIEW_KEY, UNIVERSE_REVIEW_DAYS, fetchUniverseStats
 } from './_universe.js';
@@ -300,9 +301,14 @@ async function buildStrategyList() {
         method, methodText: method ? describeMethod(method) : null,
         ...(id === 'longterm' ? { longterm } : {}) };
     });
-    customList.forEach((c) => list.push({
-      id: c.id, name: c.name, kind: 'custom', horizon: normalizeHorizon(c.horizon), enabled: c.enabled !== false, hidden: false, risk: null, createdAt: c.createdAt || null
-    }));
+    customList.forEach((c) => {
+      const nr = c.type === 'rule' ? normalizeRule(c) : null;
+      list.push({
+        id: c.id, name: c.name, kind: 'custom', horizon: normalizeHorizon(c.horizon), enabled: c.enabled !== false, hidden: false, createdAt: c.createdAt || null,
+        risk: nr && nr.rule ? { positionPct: nr.rule.risk.positionPct, stopLossPct: nr.rule.risk.stopLossPct, takeProfitPct: nr.rule.risk.takeProfitPct, maxTradesPerDay: nr.rule.risk.maxTradesPerDay } : null,
+        ...(nr && nr.rule ? { isRule: true, ruleText: describeRule(nr.rule), methodText: describeMethod(nr.rule.method) } : {})
+      });
+    });
     return list;
   }
 }
@@ -1184,6 +1190,28 @@ async function handleCustom(req, res) {
 
   try {
     const list = await kvGetJson(CUSTOM_KEY, []);
+
+    // 조립한 전략 저장(새로 만들기 / id가 있으면 고치기). 백테스트와 실제 매매가 같은 규칙(_rules.js)을 써요.
+    if (op === 'save-rule') {
+      const nr = normalizeRule(body.rule);
+      if (nr.error) { res.status(400).json({ error: nr.error }); return; }
+      const existing = body.id ? list.find((s) => s.id === body.id && s.type === 'rule') : null;
+      const id = existing ? existing.id : 'custom-rule-' + Date.now();
+      const entry = Object.assign({ id, enabled: true, createdAt: Date.now() }, existing ? { enabled: existing.enabled, createdAt: existing.createdAt } : {}, nr.rule, { updatedAt: Date.now() });
+      const next = existing ? list.map((s) => (s.id === id ? entry : s)) : [entry].concat(list);
+      if (next.length > 20) { res.status(400).json({ error: '커스텀 전략은 20개까지예요. 안 쓰는 전략을 지워 주세요.' }); return; }
+      await kvSetJson(CUSTOM_KEY, next);
+      const changes = await kvGetJson(CHANGES_KEY, []);
+      changes.unshift({
+        id: Date.now() + '-rule-' + id, ts: Date.now(), date: todayKST(), strategyId: id, strategyName: entry.name, source: 'manual',
+        diagnosis: existing ? '조립한 전략의 규칙을 고쳤어요. 이미 들고 있는 종목은 산 때의 방법을 따라요.' : '전략연구실 "전략 조립"으로 새 전략을 만들어 가상계좌 자동매매에 올렸어요.',
+        statsAtChange: null, beforeDescription: existing ? describeRule(normalizeRule(existing).rule || nr.rule) : null, afterDescription: describeRule(nr.rule)
+      });
+      if (changes.length > MAX_CHANGES) changes.length = MAX_CHANGES;
+      await kvSetJson(CHANGES_KEY, changes);
+      res.status(200).json({ ok: true, strategy: entry, strategies: next });
+      return;
+    }
 
     if (op === 'save') {
       const name = String(body.name || '').trim().slice(0, 40);

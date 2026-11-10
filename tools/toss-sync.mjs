@@ -370,6 +370,8 @@ async function cmdMeta() {
 
 async function main() {
   ENV = loadEnv();
+  // 예약 작업 기록(daily.log)에서 언제 돌았는지 보이게 시각을 먼저 적어요.
+  console.log(`\n[${kstNow().toISOString().slice(0, 16).replace('T', ' ')} KST] toss-sync ${args.join(' ')}`);
   try {
     if (cmd === 'check') await cmdCheck();
     else if (cmd === 'minutes') await cmdMinutes();
