@@ -270,6 +270,20 @@ const STRATEGY_DEFS = [
   }
 ];
 
+// 원인 분석·학습용: 산 순간의 상황을 숫자로 남겨요(시가 대비, 평균 체결가 대비, 고가에서 밀린 폭, 코스피, 시각).
+// 팔 때 기록에 그대로 옮겨서 "어떤 상황에서 산 게 잘 됐나/안 됐나"를 나중에 검색·분석할 수 있어요.
+const r2c = (v) => (typeof v === 'number' && Number.isFinite(v) ? Math.round(v * 100) / 100 : null);
+function entryContextOf(q, cfg) {
+  const kst = new Date(Date.now() + 9 * 3600 * 1000);
+  return {
+    hm: String(kst.getUTCHours()).padStart(2, '0') + ':' + String(kst.getUTCMinutes()).padStart(2, '0'),
+    fromOpen: q.open ? r2c((q.price / q.open - 1) * 100) : null,
+    vsVwap: q.vwap ? r2c((q.price / q.vwap - 1) * 100) : null,
+    offHigh: q.high ? r2c((1 - q.price / q.high) * 100) : null,
+    index: cfg._index && typeof cfg._index.changePct === 'number' ? r2c(cfg._index.changePct) : null
+  };
+}
+
 // 화면에서 조립한 전략(type:'rule')을 실제 매매 정의로 바꿔요. 백테스트(_strategy-sim.js)와 같은 ruleSignal로 판단해요.
 // 커스텀 전략 목록에 함께 저장돼서 켜기/끄기·삭제·계좌 키는 기존 커스텀 전략과 같아요. 자동조정 대상은 아니에요(규칙은 사용자가 정해요).
 function ruleDefOf(c) {
@@ -717,6 +731,11 @@ async function processStrategyMarket(strategyDef, marketKey, fetchQuote, cfg, ca
       entryChangePct: typeof pos.entryChangePct === 'number' ? pos.entryChangePct : null, // 산 날의 전일 대비 등락률(고점 매수 분석용)
       // 채점표 상세 분석용: 산 날·산 때 시장 상황 → 보유 기간, 시장 상황별 성적을 계산해요
       entryDate: pos.entryDate || null, entryRegime: pos.entryRegime || null, regime: cfg._regime || null,
+      // 원인 분석·학습용: 산 순간의 상황, 보유 시간(분), 들고 있는 동안 최고(mfe)·최저(mae) 수익률
+      entryCtx: pos.entryCtx || null,
+      holdMin: pos.entryTs ? Math.round((nowMs - pos.entryTs) / 60000) : null,
+      mfePct: pos.avgPrice ? r2c(((Math.max(pos.peak || 0, q.price) / pos.avgPrice) - 1) * 100) : null,
+      maePct: pos.avgPrice ? r2c(((Math.min(pos.trough || pos.avgPrice, q.price) / pos.avgPrice) - 1) * 100) : null,
       ...(partial ? { partial: true } : {})
     };
     actions.push(entry);
@@ -768,6 +787,9 @@ async function processStrategyMarket(strategyDef, marketKey, fetchQuote, cfg, ca
     // 따라가는 손절에 쓰는 "산 뒤 최고가"는 0.5% 넘게 올랐을 때만 새로 적어요(1분마다 저장하지 않게).
     if (q.price > (pos.peak || pos.avgPrice) * 1.005) {
       positions[symbol] = Object.assign({}, pos, { peak: q.price });
+      dirty = true;
+    } else if (q.price < (pos.trough || pos.avgPrice) * 0.995) {
+      positions[symbol] = Object.assign({}, pos, { trough: q.price });
       dirty = true;
     }
   }
@@ -857,6 +879,7 @@ async function processStrategyMarket(strategyDef, marketKey, fetchQuote, cfg, ca
         entryDate: today, name: displayName, excd: q.excd || null, reason,
         entryChangePct: q.changePct, // 산 순간 이미 어제보다 몇 % 올라 있었는지 — 팔 때 기록에 옮겨 "고점 매수" 여부를 따져요
         entryRegime: cfg._regime || null, // 산 날의 시장 상황(상승장·하락장…) — 시장 상황별 성적용
+        entryTs: nowMs, entryCtx: marketKey === 'KR' ? entryContextOf(q, cfg) : null, // 원인 분석용(팔 때 기록에 옮겨요)
         ...(sized ? { stopPct: sized.stopPct, takePct: sized.takePct } : {}),
         ...newPositionFields(method, q.price, budget),
         method

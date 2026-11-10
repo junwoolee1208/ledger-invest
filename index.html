@@ -368,8 +368,32 @@
   .at-log-group[open] summary::before{ transform:rotate(90deg); }
   .at-log-count{ color:var(--muted-2); font-weight:400; font-size:12px; }
   .at-log-subtable{ width:100%; }
+  .at-log-subtable td{ white-space:nowrap; vertical-align:middle; }
+  .at-log-subtable td:last-child{ white-space:normal; min-width:220px; max-width:360px; }
+  .tag{ display:inline-block; font-size:11.5px; padding:1px 6px; border-radius:6px; background:var(--panel-2); color:var(--muted); border:1px solid var(--line); }
+  .tr-form{ display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:10px; align-items:end; }
+  .tr-form label{ font-size:13px; }
+  .tr-form input, .tr-form select{ width:100%; }
+  .tr-btns{ display:flex; gap:6px; }
+  .tr-btns .btn{ flex:1; white-space:nowrap; }
+  .tr-quick{ display:flex; gap:6px; flex-wrap:wrap; margin-top:10px; }
+  .tr-quick button{ border:1px solid var(--line); background:var(--panel); border-radius:999px; padding:5px 12px; font-size:13px; cursor:pointer; color:var(--muted); font-family:inherit; }
+  .tr-quick button:hover{ color:var(--brand); border-color:var(--brand); }
+  .tr-kpis{ display:grid; grid-template-columns:repeat(auto-fit,minmax(140px,1fr)); gap:10px; }
+  .tr-kpis div{ background:var(--panel-2); border-radius:10px; padding:10px 12px; }
+  .tr-kpis span{ display:block; font-size:13px; color:var(--muted); }
+  .tr-kpis b{ font-size:19px; }
+  .tr-compare{ display:grid; grid-template-columns:repeat(auto-fit,minmax(280px,1fr)); gap:10px; margin-top:10px; font-size:14px; }
+  .tr-compare > div{ border:1px solid var(--line); border-radius:10px; padding:10px 12px; }
+  .tr-table td, .tr-table th{ vertical-align:top; font-size:14px; }
+  .tr-table .nw{ white-space:nowrap; }
+  .tr-table .num{ text-align:right; white-space:nowrap; }
+  .tr-table td.ctx{ font-size:13px; min-width:290px; }
+  .tr-table td.rs{ min-width:200px; max-width:340px; }
+  .tr-reason{ display:-webkit-box; -webkit-line-clamp:1; -webkit-box-orient:vertical; overflow:hidden; cursor:pointer; color:var(--muted); font-size:13.5px; }
+  .tr-reason.open{ -webkit-line-clamp:unset; display:block; }
   .at-log-subtable th, .at-log-subtable td{ padding:8px 10px; font-size:12.5px; }
-  .at-reason-text{ display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
+  .at-reason-text{ display:-webkit-box; -webkit-line-clamp:1; -webkit-box-orient:vertical; overflow:hidden; }
   .at-reason-text.expanded{ -webkit-line-clamp:unset; display:block; }
   .at-reason-toggle{
     background:none; border:none; color:var(--muted-2); font-size:11px; cursor:pointer;
@@ -539,6 +563,7 @@
   <nav class="tabs" id="tabs">
     <button data-view="dashboard" data-group="home" class="active">오늘</button>
     <button data-view="autotrade" data-group="auto">전략 현황</button>
+    <button data-view="trades" data-group="auto">매매 기록</button>
     <button data-view="scorecard" data-group="auto">채점표</button>
     <button data-view="strategychanges" data-group="auto">변경 이력</button>
     <button data-view="strategylab" data-group="lab">전략연구실</button>
@@ -934,7 +959,7 @@
     </div>
 
     <div class="panel pad" style="margin-bottom:20px;">
-      <h3 style="margin-top:0; font-size:15px;" id="atTaxTitle">올해 실현손익과 해외주식 양도세(추정)</h3>
+      <details><summary style="cursor:pointer; font-weight:700; font-size:16px; list-style:revert;"><span id="atTaxTitle">올해 실현손익과 해외주식 양도세(추정)</span> <span style="color:var(--muted-2); font-weight:500; font-size:13.5px;">— 펼쳐 보기(해외 주식을 안 하면 볼 일이 거의 없어요. 전략별 손익은 채점표가 더 자세해요)</span></summary>
       <p class="easy">올해 팔아서 확정된 돈과, 미국 주식으로 번 돈에 붙는 세금을 미리 계산해 봤어요.</p>
       <details class="more"><summary>자세히 보기</summary><div class="more-body">
         <p><b>실현손익</b>: 주식을 팔아서 "확정된" 번 돈이나 잃은 돈이에요. 아직 갖고 있는 주식의 오르내림은 들어가지 않아요.</p>
@@ -949,6 +974,7 @@
       <div class="empty-state" id="atTaxEmpty" style="display:none; padding:24px 10px;">
         <p>올해 아직 매도로 확정된 손익이 없어요.</p>
       </div>
+      </details>
     </div>
 
     <div class="panel pad" style="margin-bottom:20px;">
@@ -979,6 +1005,47 @@
         <div class="glyph">§</div>
         <p>아직 매매 기록이 없습니다.</p>
       </div>
+    </div>
+  </section>
+
+  <!-- TRADES: 매매 기록 검색(지워지지 않는 날짜별 장부에서 찾기 + 원인 분석 숫자) -->
+  <section class="view" id="view-trades">
+    <div class="section-head">
+      <div>
+        <span class="eyebrow">자동매매</span>
+        <h2>매매 기록 검색</h2>
+      </div>
+    </div>
+    <div class="panel pad" style="margin-bottom:16px;">
+      <p class="easy" style="margin-top:0;">모든 매매는 날짜별로 지워지지 않게 저장돼요(전략을 초기화해도 남아요). 조건으로 골라 보고, 이긴 거래와 진 거래가 어떤 상황에서 샀는지 비교해 원인을 찾아요.</p>
+      <div class="tr-form">
+        <div><label>시작일</label><input type="date" id="trFrom"></div>
+        <div><label>종료일</label><input type="date" id="trTo"></div>
+        <div><label>전략</label><select id="trStrategy"><option value="">전체</option></select></div>
+        <div><label>종목(이름·코드)</label><input type="text" id="trQ" placeholder="예: 삼성전자"></div>
+        <div><label>구분</label><select id="trSide">
+          <option value="">전체</option><option value="buy">매수만</option><option value="sell">매도 전체</option>
+          <option value="win-side">익절·나눠 팔기</option><option value="loss-side">손절·따라가는 손절·위험 줄이기</option>
+          <option value="DAY_CLOSE">장마감 청산</option><option value="MAX_HOLD">보유 기한</option><option value="SIGNAL_EXIT">흐름 전환</option>
+        </select></div>
+        <div><label>결과</label><select id="trResult"><option value="">전체</option><option value="win">이익만</option><option value="loss">손실만</option></select></div>
+        <div><label>사유에 들어간 글자</label><input type="text" id="trText" placeholder="예: 반등"></div>
+        <div class="tr-btns"><button class="btn" type="button" id="trRun">검색</button><button class="btn ghost" type="button" id="trCsv" disabled>CSV로 저장</button></div>
+      </div>
+      <div class="tr-quick" id="trQuick">
+        <button type="button" data-tr-days="1">오늘</button><button type="button" data-tr-days="7">최근 1주</button><button type="button" data-tr-days="30">최근 1달</button><button type="button" data-tr-days="90">최근 3달</button>
+      </div>
+      <div id="trMsg" class="st-msg" style="margin-top:6px;"></div>
+    </div>
+    <div id="trSummary"></div>
+    <div class="panel pad" id="trTablePanel" style="display:none;">
+      <div style="overflow-x:auto;">
+        <table class="tr-table">
+          <thead><tr><th>날짜·시각</th><th>전략</th><th>종목</th><th>구분</th><th class="num">수량 × 가격</th><th class="num">손익</th><th>산 순간·보유 중 흐름</th><th>사유</th></tr></thead>
+          <tbody id="trBody"></tbody>
+        </table>
+      </div>
+      <div id="trMore" style="margin-top:8px; color:var(--muted); font-size:13.5px;"></div>
     </div>
   </section>
 
@@ -2263,6 +2330,115 @@
     if(go === 'universe'){ openGroup('auto'); setTimeout(function(){ var u = document.getElementById('uniBox'); if(u) u.scrollIntoView({ block:'center' }); }, 400); }
   });
   loadHomeTodo();
+
+  /* ---------------- 매매 기록 검색(자동매매 > 매매 기록) ---------------- */
+  var trRows = [], trNames = {}, trInited = false;
+  var TR_SIDE_LOSS = ['STOP_LOSS', 'TRAIL_STOP', 'RISK_CUT'];
+  function trDaysAgo(n){ return new Date(Date.now() + 9*3600*1000 - n*86400000).toISOString().slice(0,10); }
+  function trPctTxt(v){ return typeof v === 'number' ? (v >= 0 ? '+' : '') + fmt(v, 1) + '%' : '—'; }
+  function trInit(){
+    if(trInited) return;
+    trInited = true;
+    document.getElementById('trFrom').value = trDaysAgo(29);
+    document.getElementById('trTo').value = trDaysAgo(0);
+    var sel = document.getElementById('trStrategy');
+    sel.innerHTML = '<option value="">전체</option>' + Object.keys(AT_STRATEGY_NAMES).map(function(id){ return '<option value="'+escapeHtml(id)+'">'+escapeHtml(AT_STRATEGY_NAMES[id])+'</option>'; }).join('');
+    trSearch();
+  }
+  function trParams(){
+    var v = function(id){ return document.getElementById(id).value; };
+    return 'from='+encodeURIComponent(v('trFrom'))+'&to='+encodeURIComponent(v('trTo'))+'&strategy='+encodeURIComponent(v('trStrategy'))+'&q='+encodeURIComponent(v('trQ').trim())+
+      '&side='+encodeURIComponent(v('trSide'))+'&result='+encodeURIComponent(v('trResult'))+'&text='+encodeURIComponent(v('trText').trim())+'&limit=1000';
+  }
+  function trName(id){ return trNames[id] || AT_STRATEGY_NAMES[id] || id; }
+  // 원인 분석 숫자 한 줄: 산 시각·시가 대비·평균가 대비·코스피 / 보유 시간·최고·최저
+  function trCtxText(e){
+    var c = e.entryCtx, parts = [];
+    if(c){
+      if(c.hm) parts.push(c.hm+' 매수');
+      if(typeof c.fromOpen === 'number') parts.push('시가 '+trPctTxt(c.fromOpen));
+      if(typeof c.vsVwap === 'number') parts.push('평균가 '+trPctTxt(c.vsVwap));
+      if(typeof c.index === 'number') parts.push('코스피 '+trPctTxt(c.index));
+    } else if(typeof e.entryChangePct === 'number') parts.push('산 날 '+trPctTxt(e.entryChangePct));
+    var hold = [];
+    if(typeof e.holdMin === 'number') hold.push(e.holdMin >= 1440 ? fmt(e.holdMin/1440,1)+'일' : e.holdMin+'분');
+    if(typeof e.mfePct === 'number') hold.push('최고 '+trPctTxt(e.mfePct));
+    if(typeof e.maePct === 'number') hold.push('최저 '+trPctTxt(e.maePct));
+    if(!parts.length && !hold.length) return '<span style="color:var(--muted-2);">—</span>';
+    return '<div>'+parts.join(' · ')+'</div>'+(hold.length ? '<div style="color:var(--muted);">보유 '+hold.join(' · ')+'</div>' : '');
+  }
+  function trSearch(){
+    var btn = document.getElementById('trRun'), m = document.getElementById('trMsg');
+    btn.disabled = true; m.innerHTML = '<span class="spinner"></span>&nbsp; 찾는 중…';
+    fetch('/api/auto-trade-status?action=trades-search&'+trParams()).then(function(r){ return r.json().then(function(d){ if(!r.ok) throw new Error(d.error || '찾지 못했어요.'); return d; }); }).then(function(d){
+      btn.disabled = false; m.textContent = '';
+      trRows = d.rows || []; trNames = d.names || {};
+      document.getElementById('trCsv').disabled = !trRows.length;
+      var s = d.summary;
+      var prof = function(p){ return p && p.n ? '보유 '+(p.holdMin === null ? '—' : (p.holdMin >= 1440 ? fmt(p.holdMin/1440,1)+'일' : fmt(p.holdMin,0)+'분'))+' · 들고 있는 동안 최고 '+trPctTxt(p.mfePct)+' / 최저 '+trPctTxt(p.maePct)+
+        ' · 산 순간 시가 대비 '+trPctTxt(p.fromOpen)+', 평균가 대비 '+trPctTxt(p.vsVwap)+', 어제 대비 '+trPctTxt(p.entryChangePct)+', 코스피 '+trPctTxt(p.index) : '없음'; };
+      var sideList = Object.keys(s.bySide || {}).map(function(k){ return atSideLabel(k)+' '+s.bySide[k].n+'건'; }).join(' · ');
+      document.getElementById('trSummary').innerHTML = '<div class="panel pad" style="margin-bottom:16px;">' +
+        '<div class="tr-kpis"><div><span>찾은 기록</span><b>'+fmt(d.total,0)+'건</b></div><div><span>매수 / 매도</span><b>'+s.buys+' / '+s.sells+'</b></div>' +
+        '<div><span>승률(매도)</span><b>'+(s.winRate === null ? '—' : fmt(s.winRate,1)+'%')+'</b></div><div><span>실현 손익 합계</span><b class="'+(s.pnl>=0?'up':'down')+'">'+(s.pnl>=0?'+':'')+fmt(s.pnl,0)+'원</b></div><div><span>비용 합계</span><b>'+fmt(s.fees,0)+'원</b></div></div>' +
+        (sideList ? '<div style="margin-top:8px; color:var(--muted);">'+sideList+'</div>' : '') +
+        '<div class="tr-compare"><div><b style="color:var(--up);">이긴 거래 '+(s.win.n||0)+'건</b><br>'+prof(s.win)+'</div><div><b style="color:var(--down);">진 거래 '+(s.loss.n||0)+'건</b><br>'+prof(s.loss)+'</div></div>' +
+        '<div style="color:var(--muted-2); font-size:13px; margin-top:6px;">두 줄을 비교하면 원인이 보여요. 예: 진 거래가 "시가 대비 +3% 넘게 오른 뒤" 산 경우가 많다면 너무 늦게 산 거예요. "최고"가 꽤 높았는데 손해였다면 익절이나 따라가는 손절이 늦은 거예요. (원인 분석 숫자는 2026-11-11 이후 매매부터 쌓여요.)</div></div>';
+      var panel = document.getElementById('trTablePanel');
+      panel.style.display = trRows.length ? '' : 'none';
+      if(!trRows.length){ document.getElementById('trSummary').innerHTML += '<div class="empty-state"><p>조건에 맞는 기록이 없어요.</p></div>'; return; }
+      document.getElementById('trBody').innerHTML = trRows.map(function(e, i){
+        var sell = e.side !== 'BUY';
+        var pnl = sell && typeof e.pnlAmount === 'number' ? '<span class="'+(e.pnlAmount>=0?'up':'down')+'">'+trPctTxt(e.pnlPct)+'<br>'+(e.pnlAmount>=0?'+':'')+fmt(e.pnlAmount,0)+'원</span>' : '<span style="color:var(--muted-2);">—</span>';
+        var reason = escapeHtml(e.aiReason || e.reason || e.note || '');
+        return '<tr><td class="nw">'+escapeHtml(e.date || '')+'<br><span style="color:var(--muted);">'+escapeHtml(atFmtDate(e.ts).split(' ').pop())+'</span></td>' +
+          '<td class="nw">'+escapeHtml(trName(e.strategy || 'momentum'))+'</td><td class="nw"><b>'+escapeHtml(e.name || e.symbol)+'</b>'+(e.market === 'US' ? ' <span class="tag">해외</span>' : '')+'</td>' +
+          '<td class="nw '+(TR_SIDE_LOSS.indexOf(e.side) >= 0 ? 'down' : (e.side === 'TAKE_PROFIT' || e.side === 'PARTIAL_TAKE') ? 'up' : '')+'">'+atSideLabel(e.side)+(e.add ? ' (추가)' : '')+'</td>' +
+          '<td class="num nw">'+fmt(e.qty,0)+'주 × '+atFmtPrice(e.market||'KR', e.price)+'</td><td class="num nw">'+pnl+'</td>' +
+          '<td class="ctx">'+(sell ? trCtxText(e) : '')+'</td>' +
+          '<td class="rs"><span class="tr-reason" title="'+reason+'">'+reason+'</span></td></tr>';
+      }).join('');
+      document.getElementById('trMore').textContent = d.total > d.shown ? '최근 '+d.shown+'건만 보여줘요(모두 '+d.total+'건). 기간이나 조건을 좁혀 보세요.' : '';
+    }).catch(function(e){ btn.disabled = false; m.textContent = e.message; });
+  }
+  document.getElementById('trRun').addEventListener('click', trSearch);
+  ['trQ', 'trText'].forEach(function(id){ document.getElementById(id).addEventListener('keydown', function(e){ if(e.key === 'Enter') trSearch(); }); });
+  document.getElementById('trQuick').addEventListener('click', function(e){
+    var b = e.target.closest('[data-tr-days]');
+    if(!b) return;
+    var n = Number(b.getAttribute('data-tr-days'));
+    document.getElementById('trFrom').value = trDaysAgo(n - 1);
+    document.getElementById('trTo').value = trDaysAgo(0);
+    trSearch();
+  });
+  // 사유는 한 줄로 줄여 보여주고, 누르면 펼쳐요
+  document.getElementById('trBody').addEventListener('click', function(e){
+    var r = e.target.closest('.tr-reason');
+    if(r) r.classList.toggle('open');
+  });
+  // CSV(엑셀에서 열 수 있는 파일)로 저장 — 원인 분석 숫자까지 모두 담아요
+  document.getElementById('trCsv').addEventListener('click', function(){
+    if(!trRows.length) return;
+    var NL = String.fromCharCode(10);
+    var q = function(v){ var s = v === null || v === undefined ? '' : String(v); return '"' + s.split('"').join('""') + '"'; };
+    var head = ['날짜','시각','전략','종목코드','종목명','구분','수량','가격','금액','비용','손익률(%)','손익(원)','보유(분)','최고(%)','최저(%)','산 시각','산 순간 시가 대비(%)','산 순간 평균가 대비(%)','산 순간 코스피(%)','산 날 어제 대비(%)','산 날 시장','사유'];
+    var lines = [head.map(q).join(',')].concat(trRows.map(function(e){
+      var c = e.entryCtx || {};
+      return [e.date, atFmtDate(e.ts).split(' ').pop(), trName(e.strategy || 'momentum'), e.symbol, e.name, atSideLabelText(e.side), e.qty, e.price, e.amount, e.fee, e.pnlPct, e.pnlAmount,
+        e.holdMin, e.mfePct, e.maePct, c.hm, c.fromOpen, c.vsVwap, c.index, e.entryChangePct, e.entryRegime, e.aiReason || e.reason || ''].map(q).join(',');
+    }));
+    var blob = new Blob([String.fromCharCode(0xFEFF) + lines.join(NL)], { type: 'text/csv;charset=utf-8' });
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'ledger-매매기록-'+document.getElementById('trFrom').value+'_'+document.getElementById('trTo').value+'.csv';
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(function(){ URL.revokeObjectURL(a.href); }, 2000);
+  });
+  function atSideLabelText(side){ var d = document.createElement('div'); d.innerHTML = atSideLabel(side); return d.textContent; }
+  tabs.addEventListener('click', function(e){
+    var btn = e.target.closest('button[data-view]');
+    if(btn && btn.dataset.view === 'trades') trInit();
+  });
 
   /* ---------------- Ticker Tape ---------------- */
   var tapeTrack = document.getElementById('tapeTrack');
@@ -3748,23 +3924,22 @@
       return '<span class="at-reason-text">🤖 ' + escapeHtml(e.aiReason) + '</span>' +
         '<button type="button" class="at-reason-toggle">더보기</button>';
     }
-    return escapeHtml(e.reason || '');
+    // 긴 사유도 한 줄로 줄이고, 누르면 펼쳐요(표가 아래로 길게 밀리지 않게)
+    var r = escapeHtml(e.reason || '');
+    return r.length > 40 ? '<span class="at-reason-text">' + r + '</span><button type="button" class="at-reason-toggle">더보기</button>' : r;
   }
 
   // 그룹 보기에서는 이미 그룹 헤더에 나오는 항목(예: 전략별 보기의 "전략")은 표에서 또 안 보여줘요.
   var AT_LOG_COLUMNS = [
     { key:'ts', label:'일시', render: function(e){ return atFmtDate(e.ts); } },
     { key:'strategy', label:'전략', render: function(e){ return atStratLabel(e.strategy || 'momentum'); } },
-    { key:'market', label:'시장', render: function(e){ return (e.market||'KR')==='US' ? '해외' : '국내'; } },
-    { key:'symbol', label:'종목', render: function(e){ return escapeHtml(e.name||e.symbol); } },
+    { key:'symbol', label:'종목', render: function(e){ return '<b>'+escapeHtml(e.name||e.symbol)+'</b>'+((e.market||'KR')==='US' ? ' <span class="tag">해외</span>' : ''); } },
     { key:'side', label:'구분', render: function(e){ return atSideLabel(e.side); } },
-    { key:'qty', label:'수량', render: function(e){ return fmt(e.qty,0); } },
-    { key:'price', label:'가격', render: function(e){ return atFmtPrice(e.market||'KR', e.price); } },
-    { key:'amount', label:'금액', render: function(e){
+    { key:'qty', label:'수량 × 가격', render: function(e){
+        // 금액·비용은 마우스를 올리면 보여요(매수는 비용 포함 지출액, 매도는 비용 뺀 입금액)
         var amount=(e.amount!==undefined&&e.amount!==null)?e.amount:(e.qty*e.price);
-        // 비용(수수료·세금·환전)이 기록된 매매는 금액 아래에 작게 같이 보여줘요. 매수는 비용 포함 지출액, 매도는 비용 뺀 입금액이에요.
-        var feeLine = (e.fee!==undefined && e.fee!==null) ? '<div style="font-size:11px; color:var(--muted-2);">비용 '+atFmtPrice(e.market||'KR', e.fee)+'</div>' : '';
-        return atFmtPrice(e.market||'KR', amount) + feeLine;
+        var tip = '금액 '+atFmtPrice(e.market||'KR', amount)+((e.fee!==undefined && e.fee!==null) ? ' · 비용 '+atFmtPrice(e.market||'KR', e.fee) : '');
+        return '<span title="'+escapeHtml(tip)+'">'+fmt(e.qty,0)+'주 × '+atFmtPrice(e.market||'KR', e.price)+'</span>';
       } },
     { key:'pnl', label:'손익', render: atLogPnlCell },
     { key:'reason', label:'사유', render: atLogReasonCell, wide: true }

@@ -1421,6 +1421,78 @@ async function attachLivePrices(strategies, token, costs) {
   }
 }
 
+/* ==================== action=trades-search (매매 기록 검색) ====================
+   매매 기록은 날짜별 장부(autotrade:trades:YYYY-MM-DD, _ledger.js)에 지워지지 않게 쌓여 있어요(전략 초기화로도 안 지워져요).
+   기간·전략·종목·구분·결과·사유 글자로 골라 보고, 원인 분석용 숫자(산 순간 상황·보유 시간·최고/최저)까지 같이 돌려줘요.
+   query: from, to (YYYY-MM-DD, 최대 186일), strategy, q(종목명·코드), side(buy|sell|win-side|loss-side 또는 매도 종류),
+          result(win|loss), text(사유에 들어간 글자), limit(최대 2000) */
+const SEARCH_MAX_DAYS = 186;
+const WIN_SIDES = ['TAKE_PROFIT', 'PARTIAL_TAKE'];
+const LOSS_SIDES_S = ['STOP_LOSS', 'TRAIL_STOP', 'RISK_CUT'];
+async function handleTradesSearch(req, res) {
+  try {
+    const q = req.query || {};
+    const isDate = (s) => /^\d{4}-\d{2}-\d{2}$/.test(String(s || ''));
+    const to = isDate(q.to) ? String(q.to) : todayKST();
+    let from = isDate(q.from) ? String(q.from) : new Date(Date.parse(to) - 29 * 86400000).toISOString().slice(0, 10);
+    if (from > to) from = to;
+    const days = [];
+    for (let d = Date.parse(to); d >= Date.parse(from) && days.length < SEARCH_MAX_DAYS; d -= 86400000) days.push(new Date(d).toISOString().slice(0, 10));
+    await ensureBackfilled(await kvGetJson(LOG_KEY, []));
+    const all = [];
+    for (let i = 0; i < days.length; i += 31) {
+      const part = days.slice(i, i + 31);
+      const got = await kvMGetJson(part.map((d) => TRADES_KEY_PREFIX + d));
+      if (!got) { res.status(503).json({ error: '저장소를 읽지 못했어요. 잠시 뒤 다시 해 주세요.' }); return; }
+      part.forEach((d) => (got[TRADES_KEY_PREFIX + d] || []).forEach((e) => all.push(e)));
+    }
+    const strategy = String(q.strategy || ''), text = String(q.text || '').trim(), kw = String(q.q || '').trim().toLowerCase();
+    const side = String(q.side || ''), result = String(q.result || '');
+    const matched = all.filter((e) => {
+      if (strategy && (e.strategy || 'momentum') !== strategy) return false;
+      if (kw && !(String(e.symbol || '').toLowerCase().includes(kw) || String(e.name || '').toLowerCase().includes(kw))) return false;
+      const sell = isSellSide(e.side);
+      if (side === 'buy' && e.side !== 'BUY') return false;
+      if (side === 'sell' && !sell) return false;
+      if (side === 'win-side' && !WIN_SIDES.includes(e.side)) return false;
+      if (side === 'loss-side' && !LOSS_SIDES_S.includes(e.side)) return false;
+      if (side && !['buy', 'sell', 'win-side', 'loss-side'].includes(side) && e.side !== side) return false;
+      if (result === 'win' && !(sell && (e.pnlAmount || 0) > 0)) return false;
+      if (result === 'loss' && !(sell && (e.pnlAmount || 0) <= 0)) return false;
+      if (text && !(String(e.reason || '') + ' ' + String(e.aiReason || '') + ' ' + String(e.note || '')).includes(text)) return false;
+      return true;
+    }).sort((a, b) => (b.ts || 0) - (a.ts || 0));
+    // 요약: 매도 건수·승률·손익 합계, 매도 종류별, 그리고 원인 분석 숫자의 평균(이긴 거래 vs 진 거래)
+    const sells = matched.filter((e) => isSellSide(e.side) && !e.partial);
+    const sumOf = (list, f) => list.reduce((s, e) => s + (typeof e[f] === 'number' ? e[f] : 0), 0);
+    const avgOf = (list, fn) => { const xs = list.map(fn).filter((v) => typeof v === 'number' && Number.isFinite(v)); return xs.length ? Math.round((xs.reduce((s, v) => s + v, 0) / xs.length) * 100) / 100 : null; };
+    const profile = (list) => ({
+      n: list.length,
+      holdMin: avgOf(list, (e) => e.holdMin), mfePct: avgOf(list, (e) => e.mfePct), maePct: avgOf(list, (e) => e.maePct),
+      fromOpen: avgOf(list, (e) => e.entryCtx && e.entryCtx.fromOpen), vsVwap: avgOf(list, (e) => e.entryCtx && e.entryCtx.vsVwap),
+      entryChangePct: avgOf(list, (e) => e.entryChangePct), index: avgOf(list, (e) => e.entryCtx && e.entryCtx.index)
+    });
+    const wins = sells.filter((e) => (e.pnlAmount || 0) > 0), losses = sells.filter((e) => (e.pnlAmount || 0) <= 0);
+    const bySide = {};
+    matched.forEach((e) => { const k = e.side || '-'; bySide[k] = bySide[k] || { n: 0, pnl: 0 }; bySide[k].n++; bySide[k].pnl += e.pnlAmount || 0; });
+    Object.values(bySide).forEach((v) => { v.pnl = Math.round(v.pnl); });
+    const limit = Math.max(1, Math.min(2000, Number(q.limit) || 500));
+    res.status(200).json({
+      ok: true, from, to, total: matched.length, shown: Math.min(limit, matched.length), names: await strategyNameMap(),
+      summary: {
+        buys: matched.filter((e) => e.side === 'BUY' && !e.add).length, sells: sells.length,
+        winRate: sells.length ? Math.round((wins.length / sells.length) * 1000) / 10 : null,
+        pnl: Math.round(sumOf(sells, 'pnlAmount')), fees: Math.round(sumOf(matched, 'fee')),
+        bySide, win: profile(wins), loss: profile(losses)
+      },
+      rows: matched.slice(0, limit)
+    });
+  } catch (e) {
+    console.error('auto-trade-status.js(trades-search) error:', e);
+    res.status(500).json({ error: '서버 오류가 발생했습니다.' });
+  }
+}
+
 async function handleLog(req, res) {
   try {
     const customList = await kvGetJson(CUSTOM_KEY, []);
@@ -1595,6 +1667,7 @@ export default async function handler(req, res) {
   }
   const action = (req.query.action || 'config').trim();
   if (action === 'log') return handleLog(req, res);
+  if (action === 'trades-search') return handleTradesSearch(req, res);
   if (action === 'changes') return handleChanges(req, res);
   if (action === 'custom') return handleCustom(req, res);
   if (action === 'manual-edit') return handleManualEdit(req, res);
