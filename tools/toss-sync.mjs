@@ -164,7 +164,11 @@ async function syncSymbol(sym, from) {
       let jumped = false;
       while ((complete.has(cd) || !isWeekday(cd)) && cd >= from) { cd = addDays(cd, -1); jumped = true; }
       if (jumped) before = cd + 'T15:31:00+09:00';
-      if (cd < from) break;
+      if (cd < from) {
+        // 시작 날짜(FROM_DATE)까지 다 내려왔으면, 이번에 받은 날짜는 모두 "다 받음"이에요(시작 날짜 하루가 빠지던 문제).
+        changedDates.forEach((d) => { if (d >= from && (d < today || todayDone)) complete.add(d); });
+        break;
+      }
       if (cache.startReached && cd < cache.startReached) break; // 토스가 이보다 옛날 분봉은 안 준다는 걸 이미 알아요
     }
     const res = await tossGet(candlesPath(sym, before));
