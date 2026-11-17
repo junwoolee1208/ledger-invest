@@ -465,7 +465,24 @@
   .st-head{ display:flex; justify-content:space-between; align-items:flex-start; gap:10px; }
   .st-name{ font-weight:700; font-size:14.5px; }
   .st-tag{ display:inline-block; font-size:10.5px; font-weight:600; color:var(--brand); background:var(--brand-dim); border-radius:999px; padding:1px 7px; margin-left:4px; vertical-align:middle; }
-  .st-easy{ font-size:12.5px; color:var(--muted); line-height:1.5; margin-top:3px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .st-easy{ font-size:12.5px; color:var(--muted); line-height:1.5; margin-top:3px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; cursor:pointer; }
+  .st-easy:hover{ color:var(--ink); }
+  .st-easy.open{ white-space:normal; overflow:visible; color:var(--ink); }
+  .st-off{ font-size:13px; line-height:1.5; background:var(--panel-2); border-radius:8px; padding:6px 9px; color:var(--muted); }
+  .st-learn{ font-size:13px; line-height:1.55; }
+  .st-card.flash{ box-shadow:0 0 0 3px var(--brand); transition:box-shadow .3s; }
+  .seg{ display:inline-flex; background:var(--panel-2); border-radius:999px; padding:3px; gap:2px; }
+  .seg button{ border:none; background:transparent; font-family:inherit; font-size:13px; font-weight:600; color:var(--muted); padding:5px 12px; border-radius:999px; cursor:pointer; }
+  .seg button.on{ background:var(--panel); color:var(--ink); box-shadow:0 1px 3px rgba(0,0,0,.08); }
+  .rail-sub{ font-size:12.5px; color:var(--muted-2); margin:-2px 0 8px; }
+  .pos-table td, .pos-table th{ white-space:nowrap; vertical-align:middle; }
+  .pos-table .num{ text-align:right; }
+  .pos-reason{ display:inline-block; max-width:220px; overflow:hidden; text-overflow:ellipsis; vertical-align:bottom; color:var(--muted-2); font-size:13px; }
+  .lesson-list{ margin:6px 0 0; padding:0; list-style:none; }
+  .lesson-list li{ border-top:1px dashed var(--line); padding:7px 0; font-size:13.5px; }
+  .lesson-list .l-meta{ color:var(--muted-2); font-size:12.5px; }
+  /* 입력칸 아래 설명이 있는 줄은 위쪽으로 맞춰야 이름·입력칸 높이가 나란해요 */
+  [style*="display:grid"]:has(> div > .field-hint){ align-items:start !important; }
   .st-card{ min-height:210px; }
   .st-card.editing{ min-height:0; }
   .st-big{ font-size:24px; font-weight:800; line-height:1.1; letter-spacing:-0.02em; }
@@ -797,6 +814,8 @@
   <!-- SETTINGS -->
   <!-- AUTO TRADE -->
   <section class="view" id="view-autotrade">
+    <div class="with-rail">
+    <div class="rail-main">
     <div class="section-head">
       <div>
         <span class="eyebrow">자동매매</span>
@@ -821,7 +840,8 @@
 
     <div class="panel pad" style="margin-bottom:20px;">
       <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:10px; flex-wrap:wrap;">
-        <h3 style="margin:0; font-size:15px;">내 전략</h3>
+        <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;"><h3 style="margin:0; font-size:15px;">내 전략</h3>
+          <div class="seg" id="atPeriodSeg" title="카드의 수익률을 어느 기간으로 볼지"><button type="button" data-p="all" class="on">전체</button><button type="button" data-p="1">오늘</button><button type="button" data-p="7">1주</button><button type="button" data-p="30">1달</button></div></div>
         <div style="display:flex; gap:6px; flex-wrap:wrap;">
           <button class="btn ghost" id="atResetAll" type="button" style="font-size:12px; padding:6px 12px;">모든 전략 처음부터 다시</button>
           <button class="btn ghost" id="atShowHidden" type="button" style="font-size:12px; padding:6px 12px;">숨긴 전략 보기</button>
@@ -839,7 +859,22 @@
       <p style="color:var(--muted-2); font-size:11.5px; margin:12px 0 0;">새 전략을 만들거나 과거 데이터로 실험해보고 싶으면 <b style="color:var(--ink);">전략연구실</b> 탭을 이용하세요.</p>
     </div>
 
-    <!-- 데이트레이딩 설정 입력칸 — 평소엔 숨겨두고, "내 전략"에서 데이트레이딩 카드의 [수정]을 누르면 그 카드 안으로 옮겨서 보여줘요. -->
+    <div class="panel pad" style="margin-bottom:20px;">
+      <h3 style="margin-top:0; font-size:15px;">지금 갖고 있는 주식</h3>
+      <p class="easy">전략들이 사서 아직 팔지 않은 주식이에요. "평가손익"은 지금 판다면 벌거나 잃을 돈(수수료·세금 뺀 금액)이에요.</p>
+      <div style="overflow-x:auto;"><table id="atPosTable" class="pos-table">
+        <thead><tr><th>전략</th><th>종목</th><th class="num">수량 × 평균가</th><th class="num">현재가</th><th class="num">평가손익</th><th>산 이유</th></tr></thead>
+        <tbody id="atPosBody"></tbody>
+      </table></div>
+      <div class="empty-state" id="atPosEmpty" style="display:none;">
+        <div class="glyph">§</div>
+        <p>현재 보유 중인 종목이 없습니다.</p>
+      </div>
+    </div>
+
+    <!-- 설정은 자주 안 바꾸니 맨 아래에 모아 둬요(위쪽은 전략·성적·기록처럼 매일 보는 것) -->
+    <div class="settings-divider">⚙ 설정</div>
+<!-- 데이트레이딩 설정 입력칸 — 평소엔 숨겨두고, "내 전략"에서 데이트레이딩 카드의 [수정]을 누르면 그 카드 안으로 옮겨서 보여줘요. -->
     <div id="atDtFormHome" style="display:none;"><div id="atDtForm">
       <p class="easy" style="font-size:12px;">시간은 장중(09:00~15:15) 안으로 맞춰지고, "매수 시작 → 매수 끝 → 청산 시각" 순서가 되게 자동으로 정리돼요.</p>
       <div style="font-size:12px; font-weight:700; color:var(--ink); margin:4px 0 6px;">사는 조건</div>
@@ -877,80 +912,6 @@
       </div>
     </div></div>
 
-    <div class="panel pad" style="margin-bottom:20px;">
-      <h3 style="margin-top:0; font-size:15px;">오늘 단타 성적</h3>
-      <p class="easy">"데이트레이딩" 전략이 오늘 하루 몇 번 사고팔았고, 얼마를 벌거나 잃었는지예요.</p>
-      <details class="more"><summary>자세히 보기</summary><div class="more-body">
-        <p><b>승률</b>: 판 횟수 중에서 돈을 번 횟수의 비율이에요. 10번 팔아서 6번 벌었으면 60%예요.</p>
-        <p><b>비용</b>: 단타는 자주 사고팔아서 수수료·세금이 금방 쌓여요. 번 돈(실현손익)은 이 비용을 이미 뺀 금액이에요. 비용이 번 돈보다 크다면 너무 자주 사고팔고 있다는 신호일 수 있어요.</p>
-      </div></details>
-      <div id="atDaytradeToday" style="font-size:13.5px;">—</div>
-    </div>
-
-    <div class="panel pad" style="margin-bottom:20px;">
-      <h3 style="margin-top:0; font-size:15px;">전략 성적 순위</h3>
-      <p class="easy">처음 받은 가짜 돈에 비해 지금 몇 % 늘었는지(줄었는지) 비교해요. 1등에 표시가 붙어요.</p>
-      <details class="more"><summary>자세히 보기</summary><div class="more-body">
-        <p>예를 들어 1,000만원으로 시작해서 지금 1,050만원이 됐으면 <span class="up">+5%</span>예요.</p>
-        <p>지금 갖고 있는 주식은 "지금 바로 판다면 손에 남는 돈"(수수료·세금을 뺀 금액)으로 계산해요. 그래서 실제 계좌와 비슷해요.</p>
-        <p><b>종합</b>: 국내 계좌(원)와 해외 계좌(달러)는 돈 단위가 달라서 그냥 더할 수 없어요. 그래서 각 계좌의 % 성적을 시작 금액 크기에 맞춰 섞어서 하나의 %로 만들었어요.</p>
-      </div></details>
-      <table id="atStrategyTable">
-        <thead><tr><th>전략</th><th>국내 손익률</th><th>해외 손익률</th><th>종합 손익률</th><th></th></tr></thead>
-        <tbody id="atStrategyBody"></tbody>
-      </table>
-    </div>
-
-    <div class="panel pad" style="margin-bottom:20px;">
-      <details><summary style="cursor:pointer; font-weight:700; font-size:16px; list-style:revert;"><span id="atTaxTitle">올해 실현손익과 해외주식 양도세(추정)</span> <span style="color:var(--muted-2); font-weight:500; font-size:13.5px;">— 펼쳐 보기(해외 주식을 안 하면 볼 일이 거의 없어요. 전략별 손익은 채점표가 더 자세해요)</span></summary>
-      <p class="easy">올해 팔아서 확정된 돈과, 미국 주식으로 번 돈에 붙는 세금을 미리 계산해 봤어요.</p>
-      <details class="more"><summary>자세히 보기</summary><div class="more-body">
-        <p><b>실현손익</b>: 주식을 팔아서 "확정된" 번 돈이나 잃은 돈이에요. 아직 갖고 있는 주식의 오르내림은 들어가지 않아요.</p>
-        <p><b>해외주식 <span class="term" data-term="양도세">양도세</span></b>: 1년 동안 미국 주식으로 번 돈과 잃은 돈을 합친 뒤, 250만원을 빼고 남은 금액의 22%예요. 예를 들어 1년에 300만원을 벌었으면 (300만 − 250만) × 22% = 11만원이에요.</p>
-        <p>전략마다 계좌가 따로라서 "이 전략 하나만 썼다면 낼 세금"으로 계산했어요. 달러는 판 날의 환율로 원화로 바꿨어요.</p>
-        <p>실제 신고할 금액은 꼭 증권사·국세청 안내로 다시 확인하세요.</p>
-      </div></details>
-      <table id="atTaxTable">
-        <thead><tr><th>전략</th><th>국내 실현손익</th><th>해외 실현손익</th><th>원화 환산</th><th>예상 양도세</th><th>해외 세후 손익</th></tr></thead>
-        <tbody id="atTaxBody"></tbody>
-      </table>
-      <div class="empty-state" id="atTaxEmpty" style="display:none; padding:24px 10px;">
-        <p>올해 아직 매도로 확정된 손익이 없어요.</p>
-      </div>
-      </details>
-    </div>
-
-    <div class="panel pad" style="margin-bottom:20px;">
-      <h3 style="margin-top:0; font-size:15px;">지금 갖고 있는 주식</h3>
-      <p class="easy">전략들이 사서 아직 팔지 않은 주식이에요. "평가손익"은 지금 판다면 벌거나 잃을 돈(수수료·세금 뺀 금액)이에요.</p>
-      <table id="atPosTable">
-        <thead><tr><th>전략</th><th>시장</th><th>종목</th><th>수량</th><th>평균단가</th><th>현재가</th><th>평가금액</th><th>평가손익</th><th>선정사유</th></tr></thead>
-        <tbody id="atPosBody"></tbody>
-      </table>
-      <div class="empty-state" id="atPosEmpty" style="display:none;">
-        <div class="glyph">§</div>
-        <p>현재 보유 중인 종목이 없습니다.</p>
-      </div>
-    </div>
-
-    <div class="panel pad">
-      <h3 style="margin-top:0; font-size:15px;">매매 기록</h3>
-      <p class="easy">최근에 사고판 기록이에요. 위 버튼으로 날짜별·전략별 등으로 묶어서 볼 수 있어요. 지난 기록은 "캘린더" 탭에서 달력으로 볼 수 있어요.</p>
-      <div class="at-log-tabs" id="atLogGroupTabs">
-        <button type="button" data-group="date" class="active">날짜별</button>
-        <button type="button" data-group="strategy">전략별</button>
-        <button type="button" data-group="market">시장별</button>
-        <button type="button" data-group="symbol">종목별</button>
-        <button type="button" data-group="side">구분별</button>
-      </div>
-      <div id="atLogGroups"></div>
-      <div class="empty-state" id="atLogEmpty" style="display:none;">
-        <div class="glyph">§</div>
-        <p>아직 매매 기록이 없습니다.</p>
-      </div>
-    </div>
-    <!-- 설정은 자주 안 바꾸니 맨 아래에 모아 둬요(위쪽은 전략·성적·기록처럼 매일 보는 것) -->
-    <div class="settings-divider">⚙ 설정</div>
     <div class="panel pad" style="margin-bottom:20px;">
       <h3 style="margin-top:0; font-size:15px;">기본 설정</h3>
       <p class="easy">자동매매를 켜고 끄는 곳이에요. 전략별 설정은 아래 "내 전략"에서 바꿔요.</p>
@@ -1058,7 +1019,77 @@
         <span id="atCostMsg" style="font-size:12.5px; color:var(--muted);"></span>
       </div>
     </div>
+    <!-- 예전 패널(오늘 단타 성적·양도세·매매 기록·순위 표): 화면에서 뺐지만 다른 코드가 채우는 칸이라 숨겨만 둬요 -->
+    <div hidden id="atRetired">
+    <div class="panel pad" style="margin-bottom:20px;">
+      <h3 style="margin-top:0; font-size:15px;">오늘 단타 성적</h3>
+      <p class="easy">"데이트레이딩" 전략이 오늘 하루 몇 번 사고팔았고, 얼마를 벌거나 잃었는지예요.</p>
+      <details class="more"><summary>자세히 보기</summary><div class="more-body">
+        <p><b>승률</b>: 판 횟수 중에서 돈을 번 횟수의 비율이에요. 10번 팔아서 6번 벌었으면 60%예요.</p>
+        <p><b>비용</b>: 단타는 자주 사고팔아서 수수료·세금이 금방 쌓여요. 번 돈(실현손익)은 이 비용을 이미 뺀 금액이에요. 비용이 번 돈보다 크다면 너무 자주 사고팔고 있다는 신호일 수 있어요.</p>
+      </div></details>
+      <div id="atDaytradeToday" style="font-size:13.5px;">—</div>
+    </div>
 
+    <div class="panel pad" style="margin-bottom:20px;">
+      <h3 style="margin-top:0; font-size:15px;">전략 성적 순위</h3>
+      <p class="easy">처음 받은 가짜 돈에 비해 지금 몇 % 늘었는지(줄었는지) 비교해요. 1등에 표시가 붙어요.</p>
+      <details class="more"><summary>자세히 보기</summary><div class="more-body">
+        <p>예를 들어 1,000만원으로 시작해서 지금 1,050만원이 됐으면 <span class="up">+5%</span>예요.</p>
+        <p>지금 갖고 있는 주식은 "지금 바로 판다면 손에 남는 돈"(수수료·세금을 뺀 금액)으로 계산해요. 그래서 실제 계좌와 비슷해요.</p>
+        <p><b>종합</b>: 국내 계좌(원)와 해외 계좌(달러)는 돈 단위가 달라서 그냥 더할 수 없어요. 그래서 각 계좌의 % 성적을 시작 금액 크기에 맞춰 섞어서 하나의 %로 만들었어요.</p>
+      </div></details>
+      <table id="atStrategyTable">
+        <thead><tr><th>전략</th><th>국내 손익률</th><th>해외 손익률</th><th>종합 손익률</th><th></th></tr></thead>
+        <tbody id="atStrategyBody"></tbody>
+      </table>
+    </div>
+
+    <div class="panel pad" style="margin-bottom:20px;">
+      <details><summary style="cursor:pointer; font-weight:700; font-size:16px; list-style:revert;"><span id="atTaxTitle">올해 실현손익과 해외주식 양도세(추정)</span> <span style="color:var(--muted-2); font-weight:500; font-size:13.5px;">— 펼쳐 보기(해외 주식을 안 하면 볼 일이 거의 없어요. 전략별 손익은 채점표가 더 자세해요)</span></summary>
+      <p class="easy">올해 팔아서 확정된 돈과, 미국 주식으로 번 돈에 붙는 세금을 미리 계산해 봤어요.</p>
+      <details class="more"><summary>자세히 보기</summary><div class="more-body">
+        <p><b>실현손익</b>: 주식을 팔아서 "확정된" 번 돈이나 잃은 돈이에요. 아직 갖고 있는 주식의 오르내림은 들어가지 않아요.</p>
+        <p><b>해외주식 <span class="term" data-term="양도세">양도세</span></b>: 1년 동안 미국 주식으로 번 돈과 잃은 돈을 합친 뒤, 250만원을 빼고 남은 금액의 22%예요. 예를 들어 1년에 300만원을 벌었으면 (300만 − 250만) × 22% = 11만원이에요.</p>
+        <p>전략마다 계좌가 따로라서 "이 전략 하나만 썼다면 낼 세금"으로 계산했어요. 달러는 판 날의 환율로 원화로 바꿨어요.</p>
+        <p>실제 신고할 금액은 꼭 증권사·국세청 안내로 다시 확인하세요.</p>
+      </div></details>
+      <table id="atTaxTable">
+        <thead><tr><th>전략</th><th>국내 실현손익</th><th>해외 실현손익</th><th>원화 환산</th><th>예상 양도세</th><th>해외 세후 손익</th></tr></thead>
+        <tbody id="atTaxBody"></tbody>
+      </table>
+      <div class="empty-state" id="atTaxEmpty" style="display:none; padding:24px 10px;">
+        <p>올해 아직 매도로 확정된 손익이 없어요.</p>
+      </div>
+      </details>
+    </div>
+
+    <div class="panel pad">
+      <h3 style="margin-top:0; font-size:15px;">매매 기록</h3>
+      <p class="easy">최근에 사고판 기록이에요. 위 버튼으로 날짜별·전략별 등으로 묶어서 볼 수 있어요. 지난 기록은 "캘린더" 탭에서 달력으로 볼 수 있어요.</p>
+      <div class="at-log-tabs" id="atLogGroupTabs">
+        <button type="button" data-group="date" class="active">날짜별</button>
+        <button type="button" data-group="strategy">전략별</button>
+        <button type="button" data-group="market">시장별</button>
+        <button type="button" data-group="symbol">종목별</button>
+        <button type="button" data-group="side">구분별</button>
+      </div>
+      <div id="atLogGroups"></div>
+      <div class="empty-state" id="atLogEmpty" style="display:none;">
+        <div class="glyph">§</div>
+        <p>아직 매매 기록이 없습니다.</p>
+      </div>
+    </div>
+    </div>
+    </div>
+    <aside class="side-rail">
+      <div class="panel rail-card">
+        <h3 class="rail-title">전략 성적 순위</h3>
+        <div class="rail-sub" id="atRankRailSub">전체 기간 수익률</div>
+        <div id="atRankRail" style="color:var(--muted);">불러오는 중…</div>
+      </div>
+    </aside>
+    </div>
   </section>
 
   <!-- TRADES: 매매 기록 검색(지워지지 않는 날짜별 장부에서 찾기 + 원인 분석 숫자) -->
@@ -3721,10 +3752,7 @@
     var tag = s.kind === 'custom' ? '내가 만든 전략' : (def ? def.tag : '');
     var easy = s.isRule ? '전략연구실 "전략 조립"으로 직접 만든 전략이에요.' : s.kind === 'custom' ? '전략연구실에서 찾은 조합을 저장해 둔 전략이에요.' : (def ? def.easy : '');
     // 가장 중요한 수익률은 크게, 숫자 규칙은 작은 회색 한 줄로
-    var p = atPerf[s.id];
-    var big = p
-      ? '<div class="st-big '+(p.pct>=0?'up':'down')+'">'+(p.pct>=0?'+':'')+fmt(p.pct,2)+'%</div><div class="st-sub">수익률'+(p.holding ? ' · 보유 '+p.holding+'종목' : '')+'</div>'
-      : '<div class="st-big" style="color:var(--muted-2);">—</div><div class="st-sub">수익률</div>';
+    var big = atBigHtml(s.id);
     var rules = s.kind === 'fixed' ? (def ? def.rules : '')
       : s.risk
       ? '손절 '+fmt(s.risk.stopLossPct,1)+'% · 익절 '+fmt(s.risk.takeProfitPct,1)+'% · 비중 '+fmt(s.risk.positionPct,0)+'% · 하루 '+fmt(s.risk.maxTradesPerDay,0)+'번'
@@ -3735,7 +3763,7 @@
       var idxPct = (lt.lastIndex / lt.startIndex - 1) * 100;
       rules += '<br>코스피200 같은 기간('+escapeHtml(lt.startDate || '')+'부터) '+(idxPct>=0?'+':'')+fmt(idxPct,2)+'%';
     }
-    var learnLine = atLearningLine(s);
+    var learnLine = (!s.enabled && !s.hidden) ? atOffLine(s) : atLearningLine(s);
     function btn(act, label, extra){
       var on = atOpen.id === s.id && atOpen.panel === act;
       return '<button type="button" data-act="'+act+'" class="'+(extra||'')+(on?' on':'')+'">'+label+'</button>';
@@ -3745,7 +3773,7 @@
     var menuOpen = atMenuOpen === s.id;
     var actions = s.hidden
       ? [btn('unhide','다시 보이기')]
-      : (canEdit ? [btn('edit','수정')] : []).concat([btn('detail','자세히'),
+      : (canEdit ? [btn('edit','수정')] : []).concat([btn('detail','자세히'), (s.kind === 'builtin' && s.id !== 'baseline' ? btn('learn','학습 기록') : ''),
           '<span class="st-more-wrap"><button type="button" data-act="more" aria-label="더보기" class="'+(menuOpen?'on':'')+'">⋯</button>' +
           (menuOpen ? '<span class="st-menu">'+btn('reset','기록 초기화')+(s.kind === 'custom' ? btn('delete','삭제','danger') : btn('hide','숨기기'))+'</span>' : '') + '</span>']);
     var sw = s.hidden ? '<span style="font-size:11.5px; color:var(--muted-2);">숨김</span>'
@@ -3754,13 +3782,109 @@
     return '<div class="st-card'+(s.enabled?'':' off')+(editing?' editing':'')+'" data-id="'+escapeHtml(s.id)+'">' +
       '<div class="st-head"><div style="min-width:0;"><div class="st-name">'+escapeHtml(s.name)+(tag?'<span class="st-tag">'+escapeHtml(tag)+'</span>':'')+
         (s.enabled || s.hidden ? '' : ' <span style="font-size:11px; color:var(--muted-2); font-weight:400;">꺼짐</span>')+'</div>' +
-        '<div class="st-easy" title="'+escapeHtml(easy)+'">'+escapeHtml(easy)+'</div></div>'+sw+'</div>' +
+        '<div class="st-easy" data-expand title="누르면 전체 설명이 펼쳐져요">'+escapeHtml(easy)+'</div></div>'+sw+'</div>' +
       '<div>'+big+'</div>' +
       '<div class="st-rules">'+rules+'</div>' +
       (learnLine ? '<div style="font-size:12px; line-height:1.5;">'+learnLine+'</div>' : '') +
       '<div class="st-actions">'+actions.join('')+'</div>' +
       '<div class="st-panel"></div>' +
     '</div>';
+  }
+
+  // ---- 카드 수익률의 기간: 전체(처음 돈 대비 지금 계좌) / 오늘·1주·1달(그 기간에 판 것만) ----
+  var atPerfMode = 'all', atPeriod = {};
+  try { var savedP = localStorage.getItem('ledger.atPeriod'); if(['all','1','7','30'].indexOf(savedP) >= 0) atPerfMode = savedP; } catch(e){}
+  var AT_PERIOD_TEXT = { all: '전체 기간', '1': '오늘', '7': '최근 1주', '30': '최근 1달' };
+  function atMetric(id){
+    if(atPerfMode === 'all') return atPerf[id] ? { pct: atPerf[id].pct } : null;
+    var p = atPeriod[id];
+    return p ? { pct: p.pct, pnl: p.pnl, sells: p.sells, wins: p.wins } : { pct: 0, pnl: 0, sells: 0, wins: 0, none: true };
+  }
+  function atBigHtml(id){
+    var m = atMetric(id), hold = atPerf[id] && atPerf[id].holding;
+    if(!m) return '<div class="st-big" style="color:var(--muted-2);">—</div><div class="st-sub">수익률 · '+AT_PERIOD_TEXT[atPerfMode]+'</div>';
+    var sub = atPerfMode === 'all'
+      ? '전체 기간 수익률(처음 돈 대비 지금 계좌)'+(hold ? ' · 보유 '+hold+'종목' : '')
+      : (m.none ? AT_PERIOD_TEXT[atPerfMode]+' 판 것 없음' : AT_PERIOD_TEXT[atPerfMode]+' 판 것 '+(m.pnl>=0?'+':'')+fmt(m.pnl,0)+'원 · '+m.wins+'/'+m.sells+'승');
+    return '<div class="st-big '+(m.pct>=0?'up':'down')+'">'+(m.pct>=0?'+':'')+fmt(m.pct,2)+'%</div><div class="st-sub">'+sub+'</div>';
+  }
+  function atSetPeriod(p){
+    atPerfMode = p;
+    try { localStorage.setItem('ledger.atPeriod', p); } catch(e){}
+    Array.prototype.forEach.call(document.querySelectorAll('#atPeriodSeg button'), function(b){ b.classList.toggle('on', b.getAttribute('data-p') === p); });
+    if(p === 'all'){ renderStrategyCards(); renderRankRail(); return; }
+    fetch('/api/auto-trade-status?action=strategy-pnl&days='+p).then(function(r){ return r.json(); }).then(function(d){
+      atPeriod = d.strategies || {};
+      renderStrategyCards(); renderRankRail();
+    }).catch(function(){ atPeriod = {}; renderStrategyCards(); renderRankRail(); });
+  }
+  document.getElementById('atPeriodSeg').addEventListener('click', function(e){
+    var b = e.target.closest('button[data-p]');
+    if(b) atSetPeriod(b.getAttribute('data-p'));
+  });
+  if(atPerfMode !== 'all') setTimeout(function(){ atSetPeriod(atPerfMode); }, 0);
+
+  // ---- 오른쪽 옆 칸: 전략 성적 순위(고른 기간 기준, 켜진 전략만) ----
+  function renderRankRail(){
+    var box = document.getElementById('atRankRail');
+    if(!box) return;
+    document.getElementById('atRankRailSub').textContent = AT_PERIOD_TEXT[atPerfMode] + (atPerfMode === 'all' ? ' 수익률' : ' 판 것 기준');
+    var ids = (atCards || []).filter(function(s){ return s.enabled && !s.hidden; }).map(function(s){ return s.id; });
+    var rows = ids.map(function(id){ var m = atMetric(id); return m ? { id: id, m: m } : null; }).filter(Boolean).sort(function(a, b){ return b.m.pct - a.m.pct; });
+    if(!rows.length){ box.innerHTML = '<div class="rk-empty">아직 성적이 없어요.</div>'; return; }
+    var maxAbs = Math.max.apply(null, rows.map(function(r){ return Math.abs(r.m.pct); }).concat([0.01]));
+    box.innerHTML = rows.map(function(r, i){
+      var w = Math.max(3, Math.round(Math.abs(r.m.pct) / maxAbs * 100));
+      var sub = atPerfMode === 'all' ? '' : (r.m.none ? '판 것 없음' : r.m.wins+'/'+r.m.sells+'승');
+      return '<div class="rk-row"><span class="rk-no">'+(i+1)+'</span><span class="rk-name" data-card="'+escapeHtml(r.id)+'" title="'+escapeHtml(AT_STRATEGY_NAMES[r.id] || r.id)+' 카드로 이동">'+escapeHtml(AT_STRATEGY_NAMES[r.id] || r.id)+'</span>' +
+        '<span class="rk-num '+(r.m.pct>=0?'up':'down')+'">'+(r.m.pct>=0?'+':'')+fmt(r.m.pct,2)+'%</span>' +
+        '<span class="rk-bar"><i class="'+(r.m.pct>=0?'bar-up':'bar-down')+'" style="width:'+w+'%"></i></span><span class="rk-sub">'+sub+'</span></div>';
+    }).join('') + '<div class="rk-note">켜진 전략만 · 이름을 누르면 그 카드로 가요</div>';
+  }
+  document.getElementById('atRankRail').addEventListener('click', function(e){
+    var n = e.target.closest('[data-card]');
+    if(!n) return;
+    var card = atCardEl(n.getAttribute('data-card'));
+    if(card){ card.scrollIntoView({ block: 'center', behavior: 'smooth' }); card.classList.add('flash'); setTimeout(function(){ card.classList.remove('flash'); }, 1200); }
+  });
+
+  // ---- 카드 설명: 눌러서 펼치기 ----
+  document.getElementById('atCards').addEventListener('click', function(e){
+    var ez = e.target.closest('[data-expand]');
+    if(ez) ez.classList.toggle('open');
+  });
+
+  // ---- 꺼진 전략: 왜·언제 꺼졌는지 ----
+  function atOffLine(s){
+    var o = s.off || {};
+    var why = o.by === 'lineup'
+      ? '11/8 새 전략 구성(고정 50종목)으로 바꿀 때 기본으로 꺼 둔 전략이에요.'
+      : (o.date ? escapeHtml(o.date.slice(5).replace('-', '/'))+'에 직접 껐어요' : '직접 껐어요') + (o.note ? ' — "'+escapeHtml(o.note)+'"' : ' (이유는 안 적었어요)');
+    return '<div class="st-off">⏸ <b>꺼짐</b> · '+why+' 켜면 다음 매매부터 다시 사요.</div>';
+  }
+
+  // ---- 학습 기록 전체: 실험마다 날짜·바꾼 숫자·가설·결과·교훈 ----
+  function atLoadLessonsFull(id, holder){
+    fetch('/api/auto-trade-status?action=experiments&strategy='+encodeURIComponent(id)).then(function(r){ return r.json(); }).then(function(d){
+      var list = (d.experiments || []).slice().sort(function(a, b){ return String(b.startDate || '').localeCompare(String(a.startDate || '')); });
+      var flag = d.flags && d.flags[id];
+      if(!list.length && !flag){ holder.innerHTML = '<p style="margin:6px 0; color:var(--muted);">아직 학습 기록이 없어요. 지금 설정으로 거래가 쌓이면(처음엔 매도 30번) 첫 실험을 시작해요.</p>'; return; }
+      var STATUS = { observing: '👀 지켜보는 중', running: '🧪 실험 중', judged: '📏 채점 끝', cancelled: '⏹ 중단' };
+      var counts = { improved: 0, worse: 0, other: 0 };
+      list.forEach(function(e){ if(e.status === 'judged' && e.result){ if(e.result.verdict === 'improved') counts.improved++; else if(e.result.verdict === 'worse') counts.worse++; else counts.other++; } });
+      var html = '<div style="font-weight:700; margin-bottom:4px;">학습 기록 — 실험 '+list.length+'번 · 좋아짐 '+counts.improved+' · 나빠짐 '+counts.worse+' · 기타 '+counts.other+'</div>';
+      if(flag) html += '<div class="st-off" style="margin:6px 0; color:var(--up);">⚠️ '+escapeHtml(flag.note || '사는 조건 문제가 의심돼서 숫자 조정을 멈췄어요.')+'</div>';
+      html += '<ul class="lesson-list">' + list.map(function(e){
+        var v = e.verdictText || '';
+        var change = atDescribeChange(e.before, e.after);
+        return '<li><div><b>'+(STATUS[e.status] || escapeHtml(e.status))+'</b>'+(v && e.status !== 'running' && e.status !== 'observing' ? ' · <b style="color:'+(AT_VERDICT_COLOR[v]||'inherit')+';">'+escapeHtml(v)+'</b>' : '')+
+          ' <span class="l-meta">'+escapeHtml(e.startDate || '')+(e.endDate ? ' ~ '+escapeHtml(e.endDate) : '')+(e.sampleCount !== undefined && e.needed ? ' · '+e.sampleCount+'/'+e.needed+'건' : '')+'</span></div>' +
+          (change ? '<div>바꾼 것: '+escapeHtml(change)+(e.result && e.result.rolledBackTo ? ' <span class="l-meta">(되돌림)</span>' : '')+'</div>' : '') +
+          (e.hypothesis ? '<div class="l-meta">가설: '+escapeHtml(e.hypothesis)+'</div>' : '') +
+          (e.lesson ? '<div>교훈: '+escapeHtml(e.lesson)+'</div>' : '') + '</li>';
+      }).join('') + '</ul>';
+      holder.innerHTML = html;
+    }).catch(function(){ holder.innerHTML = '<p style="color:var(--muted-2);">학습 기록을 불러오지 못했어요.</p>'; });
   }
 
   // 보유 기간별 묶음(이 순서대로 보여줘요). 묶음 안에서는 수익률 높은 순. 채점표도 같은 묶음을 써요.
@@ -3791,7 +3915,14 @@
   }
   var AT_VERDICT_COLOR = { '좋아짐':'var(--up)', '나빠짐':'var(--down)', '효과 없음':'var(--muted)', '근거 부족':'var(--muted-2)', '중단됨':'var(--muted-2)' };
   // 카드에 한 줄: 경고 > 실험 중 > 지켜보는 중 > 지난 결과
+  // 카드의 학습 한 줄 + 지금까지 실험 수(좋아짐·나빠짐). [학습 기록]을 누르면 전체가 보여요.
   function atLearningLine(s){
+    var core = atLearningLineCore(s);
+    var L = s.learning, c = L && L.counts;
+    var hist = L && L.judgedCount ? '📚 실험 '+L.judgedCount+'번(좋아짐 '+(c ? c.improved : 0)+' · 나빠짐 '+(c ? c.worse : 0)+')' : '';
+    return core && hist ? core + '<br>' + hist : (core || hist);
+  }
+  function atLearningLineCore(s){
     if(s.id === 'baseline') return '<span style="color:var(--muted-2);">📏 대조군 — 다른 전략과 비교하는 기준이라 숫자가 바뀌지 않아요</span>';
     var L = s.learning;
     if(!L) return '';
@@ -3804,7 +3935,8 @@
   }
 
   // "자세히 보기" 안의 학습 기록: 지금 실험의 가설, 지금까지 배운 것(채점된 실험 목록)
-  function atLoadLessons(id, holder){
+  function atLoadLessons(id, holder, full){
+    if(full) return atLoadLessonsFull(id, holder);
     fetch('/api/auto-trade-status?action=experiments&strategy='+encodeURIComponent(id)).then(function(r){ return r.json(); }).then(function(d){
       var list = d.experiments || [];
       var flag = d.flags && d.flags[id];
@@ -3845,7 +3977,7 @@
       box.innerHTML = '<div style="color:var(--muted-2); font-size:12.5px;">'+(atShowHidden ? '숨긴 전략이 없어요.' : '보이는 전략이 없어요. "숨긴 전략 보기"에서 다시 꺼낼 수 있어요.')+'</div>';
       return;
     }
-    var pct = function(s){ return atPerf[s.id] ? atPerf[s.id].pct : -Infinity; };
+    var pct = function(s){ var m = atMetric(s.id); return m ? m.pct : -Infinity; };
     box.innerHTML = AT_GROUPS.map(function(g){
       var items = list.filter(g.test).sort(function(a, b){ return pct(b) - pct(a); });
       if(!items.length) return '';
@@ -3853,6 +3985,7 @@
         '<div class="st-cards">'+items.map(atCardHtml).join('')+'</div>';
     }).join('');
     if(atOpen.id) fillCardPanel(atOpen.id, atOpen.panel);
+    renderRankRail();
   }
 
   function atCardEl(id){
@@ -3864,6 +3997,11 @@
     if(!card || !s) return;
     var el = card.querySelector('.st-panel');
     var def = AT_STRATEGY_DEF[id];
+    if(panel === 'learn'){
+      el.innerHTML = '<div class="st-lessons">불러오는 중…</div>';
+      atLoadLessons(id, el.querySelector('.st-lessons'), true);
+      return;
+    }
     if(panel === 'detail'){
       var text = s.isRule ? '조립한 규칙: ' + (s.ruleText || '') + ' (고치려면 전략연구실 "전략 조립"에서 불러와 저장하세요.)'
         : s.kind === 'custom'
@@ -3921,7 +4059,14 @@
     if(!input) return;
     var id = input.closest('.st-card').dataset.id, s = atFindCard(id);
     var want = input.checked;
-    atPost('strategy-toggle', { strategyId: id, enabled: want }).then(function(){
+    var note = '';
+    if(!want){
+      var ans = window.prompt('"'+s.name+'"을(를) 끌게요. 끄는 이유를 적어 두면 카드에 남아요(비워도 돼요).', '');
+      if(ans === null){ input.checked = true; return; } // 취소하면 끄지 않아요
+      note = ans;
+    }
+    atPost('strategy-toggle', { strategyId: id, enabled: want, note: note }).then(function(){
+      s.off = want ? null : { by: 'manual', date: todayKST(), note: note || null };
       s.enabled = want;
       renderStrategyCards();
     }).catch(function(err){
@@ -3943,7 +4088,7 @@
       return;
     }
     atMenuOpen = null; // 다른 버튼을 누르면 ⋯ 메뉴는 닫아요
-    if(act === 'edit' || act === 'detail'){
+    if(act === 'edit' || act === 'detail' || act === 'learn'){
       atOpen = (atOpen.id === id && atOpen.panel === act) ? { id:null, panel:null } : { id:id, panel:act };
       renderStrategyCards();
       return;
@@ -4041,9 +4186,9 @@
       var cls = p.unrealizedPnlPct>=0 ? 'up' : 'down';
       plCell = '<span class="'+cls+'">'+(p.unrealizedPnlPct>=0?'+':'')+fmt(p.unrealizedPnlPct,2)+'% ('+(p.unrealizedPnlAmount>=0?'+':'')+atFmtPrice(marketCode, p.unrealizedPnlAmount)+')</span>';
     }
-    var reasonCell = '<span style="color:var(--muted-2); font-size:12px;">'+escapeHtml(p.reason || '—')+'</span>';
-    return '<tr><td>'+stratLabel+'</td><td>'+marketLabel+'</td><td>'+escapeHtml(p.name||sym)+' <span style="color:var(--muted-2); font-size:11px;">'+sym+'</span></td>' +
-      '<td>'+fmt(p.qty,0)+'</td><td>'+atFmtPrice(marketCode, p.avgPrice)+'</td><td>'+curCell+'</td><td>'+evalCell+'</td><td>'+plCell+'</td><td>'+reasonCell+'</td></tr>';
+    var reasonCell = '<span class="pos-reason" title="'+escapeHtml(p.reason || '')+'">'+escapeHtml(p.reason || '—')+'</span>';
+    return '<tr><td>'+stratLabel+'</td><td><b title="'+escapeHtml(sym)+'">'+escapeHtml(p.name||sym)+'</b>'+(marketCode === 'US' ? ' <span class="tag">해외</span>' : '')+'</td>' +
+      '<td class="num">'+fmt(p.qty,0)+'주 × '+atFmtPrice(marketCode, p.avgPrice)+'</td><td class="num">'+curCell+'</td><td class="num" title="평가금액 '+escapeHtml(hasLive ? atFmtPrice(marketCode, p.evalAmount) : '—')+'">'+plCell+'</td><td>'+reasonCell+'</td></tr>';
   }
 
   /* ---------------- 매매 기록: 날짜/전략/시장/종목/구분별로 묶어서 보기 ---------------- */
@@ -4226,6 +4371,7 @@
         atPerf[r.id] = { pct: r.combinedPct, holding: Object.keys((s.kr && s.kr.positions) || {}).length + Object.keys((s.us && s.us.positions) || {}).length };
       });
       renderStrategyCards();
+      renderRankRail();
 
       var stratBody = document.getElementById('atStrategyBody');
       stratBody.innerHTML = rows.map(function(r){

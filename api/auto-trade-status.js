@@ -166,6 +166,7 @@ async function handleConfig(req, res) {
       daytrade: normalizeDaytrade(prev.daytrade),
       screen: normalizeScreen(prev.screen),
       hidden: Array.isArray(prev.hidden) ? prev.hidden : [],
+      offInfo: prev.offInfo || {}, // 전략을 끈 이유(카드 스위치에서 저장) — 설정 저장으로 지워지지 않게 이어받아요
       enabled: !!body.enabled,
       mode: 'dryrun', // 실거래 전환은 모의투자 검증 후 서버 코드에서 명시적으로만 바꿉니다.
       symbols: Array.isArray(body.symbols) ? body.symbols.slice(0, 50) : [],
@@ -275,10 +276,13 @@ async function buildStrategyList() {
       const mine = experiments.filter((e) => e.strategyId === id);
       const active = mine.find((e) => e.status === 'running') || mine.find((e) => e.status === 'observing');
       const lastJudged = mine.find((e) => e.status === 'judged');
+      const judged = mine.filter((e) => e.status === 'judged' && e.result);
       return {
         active: active ? slimExperiment(active) : null,
         lastJudged: lastJudged ? slimExperiment(lastJudged) : null,
-        judgedCount: mine.filter((e) => e.status === 'judged').length,
+        judgedCount: judged.length,
+        counts: { improved: judged.filter((e) => e.result.verdict === 'improved').length, worse: judged.filter((e) => e.result.verdict === 'worse').length,
+          other: judged.filter((e) => !['improved', 'worse'].includes(e.result.verdict)).length },
         flag: flags[id] || null
       };
     }
@@ -298,7 +302,11 @@ async function buildStrategyList() {
         risk = clipRisk(Object.assign({}, base, overrides[id] || {}), base);
       }
       const method = WEIGHT_BASED_IDS.includes(id) && id !== 'evolved' || id === 'longterm' ? null : methodOf(id, methods);
-      return { id, name: STRATEGY_NAMES[id], kind, horizon: horizonOf(id), bear: BEAR_IDS.includes(id), enabled: enabledMap[id] !== false, hidden: hidden.includes(id), risk, daytrade, learning: learningOf(id),
+      // 꺼진 이유: 직접 끈 기록이 있으면 그것, 없으면 11/8 새 구성에서 기본으로 꺼 둔 전략인지
+      const off = enabledMap[id] === false
+        ? ((cfg.offInfo && cfg.offInfo[id]) || (LINEUP_DEFAULTS[id] === false ? { by: 'lineup', date: '2026-11-08' } : { by: 'manual', date: null }))
+        : null;
+      return { id, name: STRATEGY_NAMES[id], kind, horizon: horizonOf(id), bear: BEAR_IDS.includes(id), enabled: enabledMap[id] !== false, hidden: hidden.includes(id), risk, daytrade, learning: learningOf(id), off,
         method, methodText: method ? describeMethod(method) : null,
         ...(id === 'longterm' ? { longterm } : {}) };
     });
@@ -422,8 +430,20 @@ async function handleStrategyToggle(req, res) {
     }
     if (typeof body.enabled === 'boolean') cfg.strategies[id] = body.enabled;
     cfg.hidden = hidden;
+    // 끈 이유: 사용자가 적은 이유(없으면 "직접 끔")와 날짜. 다시 켜면 지워요.
+    cfg.offInfo = Object.assign({}, cfg.offInfo || {});
+    if (cfg.strategies[id] === false) cfg.offInfo[id] = { at: Date.now(), date: todayKST(), by: 'manual', note: String(body.note || '').trim().slice(0, 200) || null };
+    else delete cfg.offInfo[id];
     cfg.updatedAt = Date.now();
     await kvSetJson(CONFIG_KEY, cfg);
+    if (typeof body.enabled === 'boolean') {
+      const changes = await kvGetJson(CHANGES_KEY, []);
+      changes.unshift({ id: Date.now() + '-toggle-' + id, ts: Date.now(), date: todayKST(), strategyId: id, strategyName: STRATEGY_NAMES[id] || id, source: 'manual',
+        diagnosis: body.enabled ? '전략을 다시 켰어요.' : '전략을 껐어요.' + (cfg.offInfo[id] && cfg.offInfo[id].note ? ' 이유: ' + cfg.offInfo[id].note : ''),
+        statsAtChange: null, beforeDescription: body.enabled ? '꺼짐' : '켜짐', afterDescription: body.enabled ? '켜짐' : '꺼짐' });
+      if (changes.length > MAX_CHANGES) changes.length = MAX_CHANGES;
+      await kvSetJson(CHANGES_KEY, changes);
+    }
     res.status(200).json({ ok: true, enabled: cfg.strategies[id] !== false, hidden: hidden.includes(id) });
   } catch (e) {
     console.error('auto-trade-status.js(strategy-toggle) error:', e);
@@ -1631,6 +1651,33 @@ async function handleHome(req, res) {
   }
 }
 
+/* ==================== action=strategy-pnl (기간별 전략 손익) ====================
+   days=1(오늘)·7·30: 그 기간에 판 것(실현 손익)만 전략별로 합쳐요. 아직 들고 있는 종목의 오르내림은 빠져요.
+   수익률은 전략 하나의 처음 돈(국내 1,000만원) 대비예요. */
+async function handlePeriodPnl(req, res) {
+  try {
+    const days = Math.max(1, Math.min(31, Number(req.query.days) || 1));
+    const today = todayKST();
+    const dates = [];
+    for (let i = 0; i < days; i++) dates.push(new Date(Date.parse(today) - i * 86400000).toISOString().slice(0, 10));
+    const got = await kvMGetJson(dates.map((d) => TRADES_KEY_PREFIX + d));
+    if (!got) { res.status(503).json({ error: '저장소를 읽지 못했어요.' }); return; }
+    const by = {};
+    dates.forEach((d) => (got[TRADES_KEY_PREFIX + d] || []).forEach((e) => {
+      if ((e.market || 'KR') !== 'KR') return;
+      const id = e.strategy || 'momentum';
+      const s = by[id] = by[id] || { pnl: 0, sells: 0, wins: 0, buys: 0 };
+      if (e.side === 'BUY' && !e.add) s.buys++;
+      if (isSellSide(e.side)) { s.pnl += e.pnlAmount || 0; if (!e.partial) { s.sells++; if ((e.pnlAmount || 0) > 0) s.wins++; } }
+    }));
+    Object.keys(by).forEach((id) => { by[id].pnl = Math.round(by[id].pnl); by[id].pct = Math.round((by[id].pnl / 10_000_000) * 10000) / 100; });
+    res.status(200).json({ ok: true, days, from: dates[dates.length - 1], to: today, strategies: by });
+  } catch (e) {
+    console.error('auto-trade-status.js(strategy-pnl) error:', e);
+    res.status(500).json({ error: '서버 오류가 발생했습니다.' });
+  }
+}
+
 async function handleLog(req, res) {
   try {
     const customList = await kvGetJson(CUSTOM_KEY, []);
@@ -1807,6 +1854,7 @@ export default async function handler(req, res) {
   if (action === 'log') return handleLog(req, res);
   if (action === 'trades-search') return handleTradesSearch(req, res);
   if (action === 'home') return handleHome(req, res);
+  if (action === 'strategy-pnl') return handlePeriodPnl(req, res);
   if (action === 'changes') return handleChanges(req, res);
   if (action === 'custom') return handleCustom(req, res);
   if (action === 'manual-edit') return handleManualEdit(req, res);
