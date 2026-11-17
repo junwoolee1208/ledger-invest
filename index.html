@@ -417,7 +417,8 @@
   .tr-form{ display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:10px; align-items:end; }
   .tr-form label{ font-size:13px; }
   .tr-form input, .tr-form select{ width:100%; }
-  .tr-btns{ display:flex; gap:6px; }
+  .tr-btns{ display:flex; gap:6px; flex-wrap:wrap; }
+  .tr-btns .btn{ padding-left:12px; padding-right:12px; }
   .tr-btns .btn{ flex:1; white-space:nowrap; }
   .tr-quick{ display:flex; gap:6px; flex-wrap:wrap; margin-top:10px; }
   .tr-quick button{ border:1px solid var(--line); background:var(--panel); border-radius:999px; padding:5px 12px; font-size:13px; cursor:pointer; color:var(--muted); font-family:inherit; }
@@ -482,7 +483,18 @@
   .lesson-list li{ border-top:1px dashed var(--line); padding:7px 0; font-size:13.5px; }
   .lesson-list .l-meta{ color:var(--muted-2); font-size:12.5px; }
   /* 입력칸 아래 설명이 있는 줄은 위쪽으로 맞춰야 이름·입력칸 높이가 나란해요 */
-  [style*="display:grid"]:has(> div > .field-hint){ align-items:start !important; }
+  /* ---- 입력칸 줄 맞추기(사이트 전체 공통) ----
+     입력칸이 나란한 줄은 모두 "위쪽 맞춤"으로 해요. 이름(라벨)은 한 줄·같은 높이라서 입력칸이 같은 높이에 놓이고,
+     어떤 칸 아래에 작은 설명(.field-hint)이 붙어도 옆 칸이 밀리지 않아요(전엔 "아래쪽 맞춤"이라 설명 붙은 칸만 위로 솟았어요).
+     이름이 없는 칸(버튼·체크박스)은 이름 높이만큼 내려서 입력칸과 같은 줄에 오게 해요. */
+  input:not([type=checkbox]):not([type=radio]):not([type=range]):not([type=color]):not([type=file]), select{ height:42px; box-sizing:border-box; padding-top:0; padding-bottom:0; }
+  .tr-form, .st-panel .row, [style*="display:grid"]:has(> div > label){ align-items:start !important; }
+  :is(.tr-form, .st-panel .row, [style*="display:grid"]:has(> div > label)) > div > label:first-child,
+  :is(.tr-form, .st-panel .row, [style*="display:grid"]:has(> div > label)) > div > .rb-l:first-child{ line-height:18px; height:18px; margin-bottom:6px; }
+  :is(.tr-form, .st-panel .row, [style*="display:grid"]:has(> div > label)) > div:not(:has(> label, > .rb-l)):has(button, .btn),
+  :is(.tr-form, .st-panel .row, [style*="display:grid"]:has(> div > label)) > :is(button, .btn){ margin-top:24px; }
+  :is(.tr-form, .st-panel .row, [style*="display:grid"]:has(> div > label)) button.btn{ height:42px; padding-top:0; padding-bottom:0; } /* 입력칸(42px)과 같은 높이 */
+  :is(.tr-form, .st-panel .row, [style*="display:grid"]:has(> div > label)) > div:has(> label > input[type=checkbox]):not(:has(> input, > select, > label + input, > label + select)){ padding-top:24px; min-height:66px; box-sizing:border-box; display:flex; flex-direction:column; justify-content:center; }
   .st-card{ min-height:210px; }
   .st-card.editing{ min-height:0; }
   .st-big{ font-size:24px; font-weight:800; line-height:1.1; letter-spacing:-0.02em; }
@@ -1417,7 +1429,7 @@
       </div>
 
       <div style="margin-bottom:12px;">
-        <label style="font-size:11.5px; color:var(--muted-2); display:block; margin-bottom:4px;">종목 (쉼표로 구분, 국내는 6자리 코드 / 해외는 티커)</label>
+        <label style="font-size:11.5px; color:var(--muted-2); display:block; margin-bottom:4px;">종목</label><div class="field-hint" style="margin:-2px 0 6px;">쉼표로 구분 · 국내 6자리 코드, 해외 티커</div>
         <div style="display:flex; gap:6px;">
           <input type="text" id="daSymbols" style="flex:1;" placeholder="예: 005930,000660">
           <button class="btn ghost" id="daWatchlistBtn" type="button" style="white-space:nowrap;">관심종목 불러오기</button>
