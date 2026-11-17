@@ -15,7 +15,8 @@ $logDir = Join-Path $root 'tools\.toss-data'
 New-Item -ItemType Directory -Force -Path $logDir | Out-Null
 $log = Join-Path $logDir 'daily.log'
 
-$cmd = "Set-Location -LiteralPath '$root'; & '$node' tools\toss-sync.mjs all *>> '$log'"
+# OutputEncoding UTF8: node prints UTF-8; without this, Korean in the log is garbled (decoded as cp949).
+$cmd = "[Console]::OutputEncoding = [Text.Encoding]::UTF8; Set-Location -LiteralPath '$root'; & '$node' tools\toss-sync.mjs all *>> '$log'"
 $action = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument "-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -Command `"$cmd`""
 $trigger = New-ScheduledTaskTrigger -Weekly -DaysOfWeek Monday, Tuesday, Wednesday, Thursday, Friday -At '16:10'
 $settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit (New-TimeSpan -Hours 3)

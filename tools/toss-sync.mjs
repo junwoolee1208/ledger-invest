@@ -382,9 +382,24 @@ async function main() {
     else if (cmd === 'meta') await cmdMeta();
     else if (cmd === 'all') { await cmdMinutes(); await cmdMeta(); }
     else { console.log('명령: check | minutes | meta | all'); process.exit(1); }
+    if (cmd !== 'check' && !flag('no-upload')) await reportStatus({ ok: true, cmd });
   } catch (e) {
     console.error('\n✗ ' + (e.message === 'IP_NOT_ALLOWED' ? e.hint : e.message));
+    // 실패도 사이트에 알려서 홈 "지금 할 일"에 바로 보이게 해요(예전엔 일주일 동안 아무도 몰랐어요).
+    // IP 문제면 지금 이 PC의 주소를 같이 적어서, 토스에 무엇을 등록하면 되는지 알 수 있게 해요.
+    const ip = e.message === 'IP_NOT_ALLOWED' ? await publicIp() : null;
+    await reportStatus({ ok: false, cmd, error: e.message === 'IP_NOT_ALLOWED' ? 'IP_NOT_ALLOWED' : 'ERROR', ip, hint: e.message === 'IP_NOT_ALLOWED' ? null : String(e.message).slice(0, 280) });
     process.exit(1);
   }
+}
+
+// 이 PC의 인터넷 주소(토스 허용 IP에 등록할 값). 실패하면 null.
+async function publicIp() {
+  try { const r = await fetch('https://api.ipify.org'); return r.ok ? (await r.text()).trim().slice(0, 45) : null; } catch (e) { return null; }
+}
+// 성공·실패를 사이트에 남겨요. 사이트에 못 올려도(인터넷 끊김 등) 조용히 넘어가요.
+async function reportStatus(status) {
+  if (!ENV || !ENV.LEDGER_UPLOAD_KEY) return;
+  try { await upload({ kind: 'status', status }); } catch (e) { /* 상태 보고 실패는 무시 */ }
 }
 main();

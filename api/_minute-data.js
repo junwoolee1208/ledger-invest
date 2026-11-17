@@ -12,7 +12,9 @@ export const MIN5_PREFIX = 'bt:min5:v1:'; // + 종목 + ':' + YYYY-MM → { v:1,
 export const MIN5_INDEX_KEY = 'bt:min5:v1:index'; // { updatedAt, months: { 종목: ['2026-10', ...] } }
 export const TOSS_META_KEY = 'toss:meta:v1'; // { updatedAt, ranking1mo, warnings, sectorOf }
 export const KR_HOLIDAYS_KEY = 'market:kr-holidays'; // { updatedAt, from, to, dates: ['2026-12-25', ...] } — 자동매매가 휴장일에 쉬게
-export const INDEX_MIN_SYMBOL = 'KOSPI'; // 시장 필터용 지수(토스는 코스피200 대신 코스피를 줘요)
+export const INDEX_MIN_SYMBOL = 'KOSPI';
+export const TOSS_SYNC_STATUS_KEY = 'toss:sync-status'; // { ok, at, cmd, error, ip, hint } — PC의 toss-sync가 성공·실패를 올려요(홈 "지금 할 일"용)
+export const HEARTBEAT_KEY = 'autotrade:heartbeat'; // { at } — 자동매매 엔진이 장중 10분마다 "살아 있음"을 남겨요 // 시장 필터용 지수(토스는 코스피200 대신 코스피를 줘요)
 
 export const BAR_MIN = 5; // 묶음 크기(분)
 export const DAY_START_MIN = 9 * 60; // 09:00

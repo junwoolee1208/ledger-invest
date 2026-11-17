@@ -40,6 +40,7 @@ import {
 } from './_strategies.js';
 import { METHODS_KEY, DEFAULT_METHODS, methodOf, normalizeMethod, describeMethod } from './_methods.js';
 import { normalizeRule, describeRule } from './_rules.js'; // 전략연구실 "전략 조립"으로 만든 전략
+import { MIN5_INDEX_KEY, TOSS_META_KEY, KR_HOLIDAYS_KEY, TOSS_SYNC_STATUS_KEY, HEARTBEAT_KEY, INDEX_MIN_SYMBOL } from './_minute-data.js';
 import {
   FIXED_UNIVERSE, INVERSE_ETF, UNIVERSE_CHOSEN_AT, UNIVERSE_RULE, UNIVERSE_REVIEW_KEY, UNIVERSE_REVIEW_DAYS, fetchUniverseStats
 } from './_universe.js';
@@ -1493,6 +1494,143 @@ async function handleTradesSearch(req, res) {
   }
 }
 
+/* ==================== action=home (홈 화면: "지금 할 일" + 오늘 전략 순위) ====================
+   여러 곳을 한 번에 모아서, 사용자가 직접 챙겨야 하는 일만 급한 순서로 돌려줘요.
+   - 급함(urgent): 토스 연결 실패, 자동매매 꺼짐·멈춤
+   - 주의(warn): 분봉이 밀림, 전략이 오늘 하루 손실 한도에 닿음
+   - 제안(suggest): 최근 연패 중인 전략 검토, 50종목 월간 점검
+   - 알림(info): 다가오는 휴장일, 투자 유의 종목
+   읽기는 명령 3번(MGET 2번 + 이름표)으로 끝내요. 홈을 열 때만 불려서 저장소 한도에 부담이 없어요. */
+const HOME_LEVELS = ['urgent', 'warn', 'suggest', 'info'];
+function kstNowParts() {
+  const d = new Date(Date.now() + 9 * 3600 * 1000);
+  return { date: d.toISOString().slice(0, 10), min: d.getUTCHours() * 60 + d.getUTCMinutes() };
+}
+const isoAddDays = (iso, n) => new Date(Date.parse(iso) + n * 86400000).toISOString().slice(0, 10);
+const ymdToIso = (s) => (s ? s.slice(0, 4) + '-' + s.slice(4, 6) + '-' + s.slice(6, 8) : null);
+function agoText(ms) {
+  const m = Math.round((Date.now() - ms) / 60000);
+  if (m < 60) return m + '분 전';
+  if (m < 1440) return Math.round(m / 60) + '시간 전';
+  return Math.round(m / 1440) + '일 전';
+}
+const wonText = (v) => (v >= 0 ? '+' : '') + Math.round(v).toLocaleString('ko-KR') + '원';
+
+async function handleHome(req, res) {
+  try {
+    const now = kstNowParts();
+    const days = [];
+    for (let i = 0; i < 10; i++) days.push(isoAddDays(now.date, -i));
+    const [snap, tradesGot, names] = await Promise.all([
+      kvMGetJson([CONFIG_KEY, MIN5_INDEX_KEY, TOSS_META_KEY, KR_HOLIDAYS_KEY, TOSS_SYNC_STATUS_KEY, HEARTBEAT_KEY, UNIVERSE_REVIEW_KEY]),
+      kvMGetJson(days.map((d) => TRADES_KEY_PREFIX + d)),
+      strategyNameMap()
+    ]);
+    if (!snap || !tradesGot) { res.status(503).json({ error: '저장소를 읽지 못했어요. 잠시 뒤 다시 해 주세요.' }); return; }
+    const holidays = (snap[KR_HOLIDAYS_KEY] && snap[KR_HOLIDAYS_KEY].dates) || [];
+    const isTradingDay = (d) => { const w = new Date(d + 'T00:00:00Z').getUTCDay(); return w >= 1 && w <= 5 && !holidays.includes(d); };
+    const todayTrading = isTradingDay(now.date);
+    const marketOpen = todayTrading && now.min >= 9 * 60 && now.min < 15 * 60 + 30;
+    const todos = [];
+    const add = (level, icon, title, text, go) => todos.push({ level, icon, title, text, go: go || null });
+
+    // 1) 토스 데이터: PC가 올린 성공·실패 상태와, 분봉이 마지막 거래일까지 왔는지
+    const sync = snap[TOSS_SYNC_STATUS_KEY];
+    const idx = snap[MIN5_INDEX_KEY];
+    let lastMin = null;
+    if (idx && idx.ranges) Object.keys(idx.ranges).forEach((s) => { if (s !== INDEX_MIN_SYMBOL) { const l = idx.ranges[s].last; if (l && (!lastMin || l > lastMin)) lastMin = l; } });
+    // 분봉이 있어야 하는 마지막 날: 오늘이 거래일이고 오후 4시 30분이 지났으면 오늘, 아니면 그 전 거래일
+    let expect = now.date;
+    if (!(todayTrading && now.min >= 16 * 60 + 30)) { expect = isoAddDays(expect, -1); while (!isTradingDay(expect)) expect = isoAddDays(expect, -1); }
+    const lastIso = ymdToIso(lastMin);
+    let behind = 0;
+    if (lastIso) for (let d = isoAddDays(lastIso, 1); d <= expect && behind < 60; d = isoAddDays(d, 1)) if (isTradingDay(d)) behind++;
+    if (sync && !sync.ok) {
+      const ipText = sync.error === 'IP_NOT_ALLOWED'
+        ? '토스가 이 PC의 인터넷 주소' + (sync.ip ? '(' + sync.ip + ')' : '') + '를 막았어요. 토스증권 웹 → 설정 → Open API → 허용 IP 관리에 이 주소를 추가해 주세요. 집 인터넷 주소는 공유기를 다시 켜면 바뀔 수 있어요.'
+        : (sync.hint || sync.error || '이유를 알 수 없어요.');
+      add('urgent', '🔌', '토스 데이터 받기가 실패했어요', ipText + ' (' + agoText(sync.at) + ')', 'data');
+    } else if (!lastIso) {
+      add('urgent', '📥', '토스 분봉이 아직 없어요', '이 PC에서 node tools/toss-sync.mjs all 을 실행해 주세요.', 'data');
+    } else if (behind >= 2) {
+      add('warn', '📥', '토스 분봉이 ' + behind + '거래일 밀렸어요', '마지막 분봉 ' + lastIso + '. PC가 꺼져 있었을 수 있어요. PC를 켜 두면 평일 오후 4시 10분에 저절로 받아요.', 'data');
+    }
+
+    // 2) 자동매매 엔진: 꺼짐 / 장중인데 멈춤(10분마다 남기는 기록이 25분 넘게 없음)
+    const cfg = snap[CONFIG_KEY];
+    if (!cfg || !cfg.enabled) add('urgent', '⏸️', '자동매매가 꺼져 있어요', '자동매매 탭 맨 위의 설정에서 켤 수 있어요.', 'auto');
+    else if (marketOpen && now.min >= 9 * 60 + 30) {
+      const hb = snap[HEARTBEAT_KEY];
+      const agoMin = hb ? (Date.now() - hb.at) / 60000 : null;
+      if (hb && agoMin > 25) add('urgent', '🛑', '자동매매가 멈춘 것 같아요', '장중인데 마지막으로 돈 지 ' + Math.round(agoMin) + '분 지났어요. cron-job.org에서 1분마다 부르는 작업이 켜져 있는지 확인해 주세요.', null);
+    }
+
+    // 3) 전략 순위(오늘, 아직 매매가 없으면 가장 최근 매매일) + 오늘 손실 한도에 닿은 전략
+    const SELLS = ['STOP_LOSS', 'TAKE_PROFIT', 'DAY_CLOSE', 'MAX_HOLD', 'REBALANCE', 'PARTIAL_TAKE', 'TRAIL_STOP', 'RISK_CUT', 'SIGNAL_EXIT'];
+    const statsOf = (list) => {
+      const by = {};
+      list.forEach((e) => {
+        const id = e.strategy || 'momentum';
+        const s = by[id] = by[id] || { id, name: names[id] || id, pnl: 0, buys: 0, sells: 0, wins: 0 };
+        if (e.side === 'BUY' && !e.add) s.buys++;
+        if (SELLS.includes(e.side) && (e.market || 'KR') === 'KR') {
+          s.pnl += e.pnlAmount || 0;
+          if (!e.partial) { s.sells++; if ((e.pnlAmount || 0) > 0) s.wins++; }
+        }
+      });
+      return Object.values(by).map((s) => Object.assign(s, { pnl: Math.round(s.pnl) }));
+    };
+    let rankDay = null, rankList = [];
+    for (const d of days) {
+      const list = tradesGot[TRADES_KEY_PREFIX + d] || [];
+      const st = statsOf(list).filter((s) => s.sells > 0 || s.buys > 0);
+      if (st.length) { rankDay = d; rankList = st; break; }
+    }
+    const lossLimit = 10_000_000 * 0.015; // 모든 전략 공통 하루 손실 한도 1.5%(_strategies.js COMMON_RULES)
+    if (rankDay === now.date) rankList.filter((s) => s.pnl <= -lossLimit).forEach((s) => {
+      add('warn', '🧯', s.name + ' — 오늘 하루 손실 한도에 닿았어요', '오늘 ' + wonText(s.pnl) + '(매도 ' + s.sells + '번 중 이익 ' + s.wins + '번). 오늘은 더 사지 않아요. 왜 잃었는지 매매 기록에서 볼 수 있어요.', 'trades:' + s.id);
+    });
+
+    // 4) 최근 10일 동안 계속 지는 전략(매도 8번 이상, 이긴 비율 20% 미만) — 가장 많이 잃은 3개만
+    const all10 = [];
+    days.forEach((d) => (tradesGot[TRADES_KEY_PREFIX + d] || []).forEach((e) => all10.push(e)));
+    statsOf(all10).filter((s) => s.sells >= 8 && s.wins / s.sells < 0.2).sort((a, b) => a.pnl - b.pnl).slice(0, 3).forEach((s) => {
+      add('suggest', '🔍', s.name + ' — 최근 ' + s.sells + '번 팔아 ' + s.wins + '번만 이익', '10일 손익 ' + wonText(s.pnl) + '. 백테스트와 여러 구간 검증으로 계속 쓸지, 끌지 확인해 보세요.', 'lab:verify');
+    });
+
+    // 5) 50종목 월간 점검
+    const review = snap[UNIVERSE_REVIEW_KEY];
+    const reviewAge = review && review.at ? Math.floor((Date.now() - review.at) / 86400000) : null;
+    if (reviewAge === null || reviewAge >= UNIVERSE_REVIEW_DAYS) add('suggest', '🗓️', '고정 50종목을 점검할 때예요', (reviewAge === null ? '아직 한 번도 점검하지 않았어요.' : reviewAge + '일 전에 점검했어요.') + ' 거래대금·시가총액 기준에서 벗어난 종목이 있는지 확인해요.', 'universe');
+
+    // 6) 7일 안의 휴장일
+    const soon = holidays.filter((d) => d >= now.date && d <= isoAddDays(now.date, 7));
+    if (soon.length) add('info', '🏖️', soon.join(', ') + ' 휴장', '이날은 장이 열리지 않아 자동매매가 쉬어요.', null);
+
+    // 7) 투자 유의 종목
+    const meta = snap[TOSS_META_KEY];
+    const warns = meta && meta.warnings ? Object.keys(meta.warnings) : [];
+    if (warns.length) {
+      const nm = {}; FIXED_UNIVERSE.forEach((u) => { nm[u.symbol] = u.name; });
+      add('info', '🚨', '투자 유의 종목 ' + warns.length + '개', warns.map((s) => nm[s] || s).join(', ') + ' — 단기과열·투자경고 지정이라 값이 크게 흔들릴 수 있어요.', null);
+    }
+
+    todos.sort((a, b) => HOME_LEVELS.indexOf(a.level) - HOME_LEVELS.indexOf(b.level));
+    const sorted = rankList.slice().sort((a, b) => b.pnl - a.pnl);
+    res.status(200).json({
+      ok: true, now, marketOpen, todos,
+      ranking: rankDay ? {
+        date: rankDay, isToday: rankDay === now.date, total: Math.round(rankList.reduce((s, x) => s + x.pnl, 0)), count: rankList.length,
+        top: sorted.filter((s) => s.pnl > 0).slice(0, 5), bottom: sorted.filter((s) => s.pnl < 0).reverse().slice(0, 5)
+      } : null,
+      data: { lastMinute: lastIso, expect, sync: sync ? { ok: sync.ok, at: sync.at } : null }
+    });
+  } catch (e) {
+    console.error('auto-trade-status.js(home) error:', e);
+    res.status(500).json({ error: '서버 오류가 발생했습니다.' });
+  }
+}
+
 async function handleLog(req, res) {
   try {
     const customList = await kvGetJson(CUSTOM_KEY, []);
@@ -1668,6 +1806,7 @@ export default async function handler(req, res) {
   const action = (req.query.action || 'config').trim();
   if (action === 'log') return handleLog(req, res);
   if (action === 'trades-search') return handleTradesSearch(req, res);
+  if (action === 'home') return handleHome(req, res);
   if (action === 'changes') return handleChanges(req, res);
   if (action === 'custom') return handleCustom(req, res);
   if (action === 'manual-edit') return handleManualEdit(req, res);

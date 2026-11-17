@@ -42,7 +42,7 @@ import {
   summarize, clampProposal, liftToFloors, judge, readyToJudge, forbiddenDirections, applyForbidden, lessonLine
 } from './_learning.js';
 import { DEEPEVAL_LATEST_KEY } from './_deepeval.js';
-import { KR_HOLIDAYS_KEY } from './_minute-data.js';
+import { KR_HOLIDAYS_KEY, HEARTBEAT_KEY } from './_minute-data.js';
 import { normalizeRule, ruleSignal, ruleDayRules } from './_rules.js'; // 화면에서 조립한 전략(전략연구실 "전략 조립") // 토스증권 장 운영 달력에서 받아 둔 국내 휴장일(tools/toss-sync.mjs meta)
 
 export const config = { maxDuration: 30 };
@@ -1337,6 +1337,11 @@ export default async function handler(req, res) {
       } catch (e) {
         console.error('auto-trade-check.js(realized ledger) error:', e);
       }
+    }
+
+    // 홈 "지금 할 일"이 "자동매매가 멈췄는지"를 알 수 있게 장중 10분마다 한 번 시각을 남겨요(매번 쓰면 저장소 한도를 써서).
+    if (krOpen && marketClock('KR').minutes % 10 === 0) {
+      try { await kvSetJson(HEARTBEAT_KEY, { at: Date.now(), date: today }); } catch (e) { /* 기록 실패는 매매와 상관없어요 */ }
     }
 
     res.status(200).json({ ok: true, actions: allActions, strategies: results, checkedAt: Date.now() });

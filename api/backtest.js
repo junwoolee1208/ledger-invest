@@ -31,7 +31,7 @@ import { prepareData, simulateStrategy, searchMethods, walkForward, benchmarks, 
 import { normalizeRule, describeRule } from './_rules.js';
 import { strategyEnabled } from './_strategies.js';
 import {
-  MIN5_PREFIX, MIN5_INDEX_KEY, TOSS_META_KEY, KR_HOLIDAYS_KEY, INDEX_MIN_SYMBOL,
+  MIN5_PREFIX, MIN5_INDEX_KEY, TOSS_META_KEY, KR_HOLIDAYS_KEY, INDEX_MIN_SYMBOL, TOSS_SYNC_STATUS_KEY,
   validPacked, validMonth, validYmd, monthsBetween, minuteAccessor, unpackDay, MIN5_SUM_PREFIX, daySummary
 } from './_minute-data.js';
 const CUSTOM_KEY = 'autotrade:custom-strategies'; // auto-trade-status.js와 같은 키 — 조립한 전략(type:'rule')도 여기 있어요
@@ -934,7 +934,15 @@ async function handleTossUpload(req, res) {
       res.status(200).json({ ok: true, holidays: dates.length });
       return;
     }
-    res.status(400).json({ error: 'kind는 min5 또는 meta여야 해요.' });
+    if (body.kind === 'status') {
+      // PC의 toss-sync가 끝날 때마다 성공·실패를 올려요. 실패 이유(예: 허용 IP 아님)와 그때 PC 주소를 홈에 보여줘요.
+      const st = body.status || {};
+      const clean = (v, n) => (v === null || v === undefined ? null : String(v).slice(0, n));
+      const ok = await kvSetJson(TOSS_SYNC_STATUS_KEY, { ok: !!st.ok, at: Date.now(), cmd: clean(st.cmd, 40), error: clean(st.error, 200), ip: clean(st.ip, 45), hint: clean(st.hint, 300) });
+      res.status(ok ? 200 : 503).json({ ok: !!ok });
+      return;
+    }
+    res.status(400).json({ error: 'kind는 min5, meta, status 중 하나여야 해요.' });
   } catch (e) {
     console.error('backtest.js(toss-upload) error:', e);
     res.status(500).json({ error: '서버 오류가 발생했습니다.' });
@@ -943,7 +951,7 @@ async function handleTossUpload(req, res) {
 
 async function handleTossStatus(req, res) {
   try {
-    const got = (await kvMGetJson([MIN5_INDEX_KEY, TOSS_META_KEY, KR_HOLIDAYS_KEY])) || {};
+    const got = (await kvMGetJson([MIN5_INDEX_KEY, TOSS_META_KEY, KR_HOLIDAYS_KEY, TOSS_SYNC_STATUS_KEY])) || {};
     const index = got[MIN5_INDEX_KEY] || null;
     const meta = got[TOSS_META_KEY] || null;
     let first = null, last = null, symbols = 0;
@@ -960,7 +968,8 @@ async function handleTossStatus(req, res) {
       ok: true,
       minutes: index ? { updatedAt: index.updatedAt, symbols, first, last, hasIndex: !!(index.ranges && index.ranges[INDEX_MIN_SYMBOL]) } : null,
       meta: meta ? { updatedAt: meta.updatedAt, ranking1mo: meta.ranking1mo || null, warnings: meta.warnings || {}, sectorOf: meta.sectorOf || {} } : null,
-      holidays: got[KR_HOLIDAYS_KEY] || null
+      holidays: got[KR_HOLIDAYS_KEY] || null,
+      sync: got[TOSS_SYNC_STATUS_KEY] || null
     });
   } catch (e) {
     res.status(500).json({ error: '서버 오류가 발생했습니다.' });
