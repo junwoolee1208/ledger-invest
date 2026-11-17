@@ -85,6 +85,11 @@
   .verdict.v-bad{ background:#FFF0F1; border-color:#FFC9CE; }
 
   /* ---- 홈 "지금 할 일" ---- */
+  /* ---- 칸 맞추기(입력칸 이름은 한 줄, 긴 괄호 설명은 입력칸 아래로, 표 머리글은 줄바꿈 없이) ---- */
+  .stat > .k, .tr-form label, .rb-l, [style*="display:grid"] > div > label{ white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .field-hint{ font-size:12px; color:var(--muted-2); margin-top:4px; line-height:1.35; }
+  th{ white-space:nowrap; }
+  .settings-divider{ margin:34px 0 14px; padding-top:18px; border-top:1px solid var(--line); font-weight:700; font-size:15px; color:var(--muted); }
   /* ---- 넓은 화면은 양옆 공백을 써요: 가운데 본문 + 오른쪽 옆 칸(따라 내려오는 카드) ----
      본문 폭(1180px)은 그대로 두고, 화면이 넉넉할 때만 옆 칸을 붙여요. 좁으면 옆 칸은 본문 아래로 내려가요. */
   .with-rail{ display:grid; grid-template-columns:minmax(0,1fr); gap:20px; }
@@ -815,67 +820,6 @@
     <div id="atAiAlert" class="banner" style="display:none; border-color:var(--up); background:#FFF5F5;"></div>
 
     <div class="panel pad" style="margin-bottom:20px;">
-      <h3 style="margin-top:0; font-size:15px;">기본 설정</h3>
-      <p class="easy">자동매매를 켜고 끄는 곳이에요. 전략별 설정은 아래 "내 전략"에서 바꿔요.</p>
-      <details class="more"><summary>자세히 보기</summary><div class="more-body">
-        <p>지켜보는 주식은 <b style="color:var(--ink);">관심종목 전체</b>와, 켜두면 <b style="color:var(--ink);">AI가 추천한 주식</b>이에요.</p>
-        <p>외부 알람 서비스(cron-job.org)가 몇 분마다 이 사이트를 깨워서, 여기 설정대로 사고팔지 판단하게 해요. 1분마다 깨우도록 설정해 두면 단타 전략의 손절·익절이 더 빨리 반응해요.</p>
-      </div></details>
-      <label style="display:flex; align-items:center; gap:8px; margin-bottom:14px; font-size:13px;">
-        <input type="checkbox" id="atEnabled" style="width:16px; height:16px;">
-        자동매매 실행 켜기
-      </label>
-      <label style="display:flex; align-items:center; gap:8px; margin-bottom:16px; font-size:13px;">
-        <input type="checkbox" id="atUseAi" style="width:16px; height:16px;">
-        거래대금 상위 안전 종목도 감시 대상에 포함
-      </label>
-      <div style="border-top:1px solid var(--line); padding-top:14px; margin-bottom:16px;">
-        <div style="font-size:13px; font-weight:600; margin-bottom:4px;">자동 점검 주기</div>
-        <p class="easy" style="font-size:12px;">AI가 전략을 스스로 고치거나, 더 좋은 전략을 찾아보는 일을 몇 시간마다 할지 정해요.</p>
-        <details class="more"><summary>자세히 보기</summary><div class="more-body">
-          <p><b>전략 자동조정(실험)</b>: 전략마다 "지켜보기 → 실험 → 채점"을 반복해요. 지금 설정으로 거래 10건을 지켜본 뒤, AI가 지난 실험 결과를 참고해 가설을 세우고 <span class="term" data-term="손절">손절</span>·<span class="term" data-term="익절">익절</span> 같은 숫자를 조금 바꿔요. 새 설정으로 거래 10건이 쌓이면 바꾸기 전과 비교해 채점하고, 나빠졌으면 되돌려요. 이 주기는 "얼마나 자주 확인할지"예요. 확인할 때 거래가 덜 쌓였으면 그냥 넘어가요.</p>
-          <p><b>진화형 탐색</b>: 전략연구실에서 과거 데이터로 여러 조합을 시험해 보고 더 나은 조합을 찾아요.</p>
-          <p>알람 서비스가 더 자주 깨워도 괜찮아요. 여기 정한 시간이 지나지 않았으면 그냥 넘어가요.</p>
-        </div></details>
-        <div class="stat-grid">
-          <div class="stat">
-            <div class="k">전략 자동조정 주기(시간)</div>
-            <input type="number" id="atAdjustInterval" class="mono" style="width:100%; margin-top:4px;" min="1" max="168">
-          </div>
-          <div class="stat">
-            <div class="k">진화형 탐색 주기(시간)</div>
-            <input type="number" id="atEvolveInterval" class="mono" style="width:100%; margin-top:4px;" min="1" max="168">
-          </div>
-        </div>
-      </div>
-      <div style="border-top:1px solid var(--line); padding-top:14px; margin-bottom:16px;">
-        <div style="font-size:13px; font-weight:600; margin-bottom:4px;">자동매매 종목: 고정 50종목</div>
-        <p class="easy" style="font-size:12px;">자동매매는 꾸준히 거래가 많은 큰 회사 50곳만 사고팔아요(최근 20거래일 평균 거래대금 상위 + 시가총액 5조 원 이상). 관심종목은 자동매매에 쓰지 않아요. 한 달에 한 번 기준에서 벗어난 종목이 없는지 점검해요.</p>
-        <div id="uniBox" style="font-size:12.5px; line-height:1.7; margin-bottom:14px;"><span style="color:var(--muted-2);">불러오는 중…</span></div>
-        <div style="font-size:13px; font-weight:600; margin-bottom:4px;">거래대금 순위 보기(참고용)</div>
-        <p class="easy" style="font-size:12px;">그날 거래대금이 많은 종목을 안전 기준으로 걸러 보여줘요. 지금은 참고용이고, 자동매매는 위 50종목만 써요.</p>
-        <details class="more"><summary>자세히 보기</summary><div class="more-body">
-          <p><b>거래대금</b>: 오늘 사고판 돈의 합이에요. 많을수록 원하는 가격에 사고팔기 쉬워요. 다만 급등 테마주도 많이 올라오니 안전 기준으로 걸러요.</p>
-          <p><b>자동으로 빼는 종목</b>: 관리종목, 거래정지, 투자주의·경고·위험, 단기과열, 정리매매, 우선주, ETF·ETN, 스팩이에요. 시가총액이나 위험 표시를 확인하지 못한 종목도 빼요.</p>
-          <p><b>언제 고르나요</b>: 평일 09:30 뒤 한 번, 12시 뒤 한 번 골라요. 장 시작 직후엔 거래대금이 아직 얼마 안 쌓여서 09:30까지 기다려요. 관심종목은 이 기준과 상관없이 계속 지켜봐요.</p>
-          <p><b>단타 전용 후보</b>: 스윙 기준보다 많이 움직였지만 단타 기준 안에 있는 종목은 최대 10개까지 더 뽑아요. 단타 전략만 사고, 등락이 큰 만큼 손절은 넓히고 사는 금액은 줄여요.</p>
-          <p>"안전"은 크게 흔들릴 위험을 줄인다는 뜻이고, 손해가 안 난다는 뜻은 아니에요.</p>
-        </div></details>
-        <div class="stat-grid">
-          <div class="stat"><div class="k">거래대금 상위 몇 개를 볼까요</div><input type="number" id="pickTopN" class="mono" style="width:100%; margin-top:4px;" min="5" max="30"></div>
-          <div class="stat"><div class="k">시가총액 최소(억 원, 10000 = 1조)</div><input type="number" id="pickMinCap" class="mono" style="width:100%; margin-top:4px;" min="0" step="1000"></div>
-          <div class="stat"><div class="k">스윙 후보 오늘 등락폭 최대(±%)</div><input type="number" id="pickMaxChange" class="mono" style="width:100%; margin-top:4px;" min="1" max="30"></div>
-          <div class="stat"><div class="k">단타 후보 오늘 등락폭 최대(±%)</div><input type="number" id="pickDayMaxChange" class="mono" style="width:100%; margin-top:4px;" min="1" max="30"></div>
-          <div class="stat"><div class="k">스윙 후보 최대 개수</div><input type="number" id="pickMax" class="mono" style="width:100%; margin-top:4px;" min="1" max="30"></div>
-        </div>
-        <div style="margin-top:10px;"><button class="btn ghost" id="pickSave" type="button">기준 저장</button><span id="pickMsg" class="st-msg"></span></div>
-        <div id="pickLast" style="font-size:12.5px; line-height:1.7; margin-top:10px;"></div>
-      </div>
-      <button class="btn" id="atSave">설정 저장</button>
-      <span id="atSaveMsg" style="margin-left:10px; font-size:12.5px; color:var(--muted);"></span>
-    </div>
-
-    <div class="panel pad" style="margin-bottom:20px;">
       <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:10px; flex-wrap:wrap;">
         <h3 style="margin:0; font-size:15px;">내 전략</h3>
         <div style="display:flex; gap:6px; flex-wrap:wrap;">
@@ -932,53 +876,6 @@
         <span id="atDtMsg" style="font-size:12.5px; color:var(--muted);"></span>
       </div>
     </div></div>
-
-    <div class="panel pad" style="margin-bottom:20px;">
-      <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:10px; flex-wrap:wrap;">
-        <div>
-          <h3 style="margin-top:0; font-size:15px;">사고팔 때 드는 돈(수수료·세금)</h3>
-          <p class="easy">주식을 사고팔 때마다 증권사와 나라에 내는 돈이에요. 가짜 계좌도 이만큼 빼서 실제와 비슷하게 계산해요.</p>
-        </div>
-        <span id="atCostBroker" class="mono" style="font-size:11.5px; color:var(--brand); border:1px solid var(--brand-dim); border-radius:999px; padding:2px 10px; white-space:nowrap;"></span>
-      </div>
-      <div style="max-width:260px; margin-bottom:6px;">
-        <div><label>증권사 이름</label><input type="text" id="atCostBrokerName" style="width:100%;" maxlength="30"></div>
-      </div>
-      <div style="font-size:12px; font-weight:700; color:var(--ink); margin:12px 0 6px;">국내 주식</div>
-      <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:10px; align-items:end;">
-        <div><label>매수 수수료(%)</label><input type="number" step="0.001" id="atCostKrBuy" class="mono" style="width:100%;"></div>
-        <div><label>매도 수수료(%)</label><input type="number" step="0.001" id="atCostKrSell" class="mono" style="width:100%;"></div>
-        <div><label>증권거래세(%, 매도 시)</label><input type="number" step="0.01" id="atCostKrTax" class="mono" style="width:100%;"></div>
-        <div><label>슬리피지(%, 살 때·팔 때 각각)</label><input type="number" step="0.01" id="atCostKrSlip" class="mono" style="width:100%;"></div>
-      </div>
-      <div style="font-size:12px; font-weight:700; color:var(--ink); margin:14px 0 6px;">해외 주식 (미국)</div>
-      <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:10px; align-items:end;">
-        <div><label>매수 수수료(%)</label><input type="number" step="0.001" id="atCostUsBuy" class="mono" style="width:100%;"></div>
-        <div><label>매도 수수료(%)</label><input type="number" step="0.001" id="atCostUsSell" class="mono" style="width:100%;"></div>
-        <div><label>SEC Fee(%, 매도 시)</label><input type="number" step="0.00001" id="atCostUsSec" class="mono" style="width:100%;"></div>
-        <div><label>환전 비용(%, 1회당)</label><input type="number" step="0.01" id="atCostUsFx" class="mono" style="width:100%;"></div>
-        <div><label>슬리피지(%, 살 때·팔 때 각각)</label><input type="number" step="0.01" id="atCostUsSlip" class="mono" style="width:100%;"></div>
-      </div>
-      <div style="font-size:12px; font-weight:700; color:var(--ink); margin:14px 0 6px;">해외주식 양도소득세 (1년 단위)</div>
-      <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:10px; align-items:end;">
-        <div><label>세율(%, 지방세 포함)</label><input type="number" step="0.1" id="atCostTaxRate" class="mono" style="width:100%;"></div>
-        <div><label>기본공제(원)</label><input type="number" step="10000" id="atCostTaxDeduct" class="mono" style="width:100%;"></div>
-      </div>
-      <details class="more" style="margin-top:10px;"><summary>각 항목이 무슨 뜻인지 자세히 보기</summary><div class="more-body">
-        <p><b>수수료</b>: 증권사가 "주문을 대신 넣어준 값"으로 가져가는 돈이에요. 100만원어치를 사면 0.015%인 150원을 내요. 증권사나 이벤트마다 달라서, 쓰는 곳에 맞게 바꿔주세요.</p>
-        <p><b>증권거래세</b>: 국내 주식을 <u>팔 때만</u> 나라에 내는 세금이에요(0.20%). 100만원어치를 팔면 2,000원이에요.</p>
-        <p><b><span class="term" data-term="슬리피지">슬리피지</span></b>: 생각한 가격보다 조금 손해 보고 사지거나 팔리는 차이예요. 1만원에 사려 했는데 10,005원에 사지는 식이죠. 가짜 계좌는 늘 원하는 가격에 바로 사진다고 계산해서, 매매가 많을수록 실제보다 좋아 보여요. 그래서 이만큼 미리 빼요.</p>
-        <p><b>SEC Fee</b>: 미국 주식을 팔 때 미국 금융당국에 내는 아주 작은 수수료예요.</p>
-        <p><b>환전 비용</b>: 원화를 달러로(살 때), 달러를 원화로(팔 때) 바꿀 때마다 빠지는 돈이에요. 토스증권은 평일 낮에 약 0.05%, 그 외 시간엔 약 0.5%예요. 달러를 계속 갖고 거래하면 0으로 두세요.</p>
-        <p><b>해외주식 <span class="term" data-term="양도세">양도세</span></b>: 미국 주식으로 1년 동안 번 돈에서 250만원을 뺀 나머지의 22%를 다음 해 5월에 내요. 국내 주식은 큰손(대주주)이 아니면 이 세금이 없어요.</p>
-        <p>저장하면 다음 매매부터 적용돼요. 이미 끝난 매매 기록은 바뀌지 않아요.</p>
-      </div></details>
-      <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-top:12px;">
-        <button class="btn" id="atCostSave">저장</button>
-        <button class="btn ghost" id="atCostReset">토스증권 기본값으로</button>
-        <span id="atCostMsg" style="font-size:12.5px; color:var(--muted);"></span>
-      </div>
-    </div>
 
     <div class="panel pad" style="margin-bottom:20px;">
       <h3 style="margin-top:0; font-size:15px;">오늘 단타 성적</h3>
@@ -1052,6 +949,116 @@
         <p>아직 매매 기록이 없습니다.</p>
       </div>
     </div>
+    <!-- 설정은 자주 안 바꾸니 맨 아래에 모아 둬요(위쪽은 전략·성적·기록처럼 매일 보는 것) -->
+    <div class="settings-divider">⚙ 설정</div>
+    <div class="panel pad" style="margin-bottom:20px;">
+      <h3 style="margin-top:0; font-size:15px;">기본 설정</h3>
+      <p class="easy">자동매매를 켜고 끄는 곳이에요. 전략별 설정은 아래 "내 전략"에서 바꿔요.</p>
+      <details class="more"><summary>자세히 보기</summary><div class="more-body">
+        <p>지켜보는 주식은 <b style="color:var(--ink);">관심종목 전체</b>와, 켜두면 <b style="color:var(--ink);">AI가 추천한 주식</b>이에요.</p>
+        <p>외부 알람 서비스(cron-job.org)가 몇 분마다 이 사이트를 깨워서, 여기 설정대로 사고팔지 판단하게 해요. 1분마다 깨우도록 설정해 두면 단타 전략의 손절·익절이 더 빨리 반응해요.</p>
+      </div></details>
+      <label style="display:flex; align-items:center; gap:8px; margin-bottom:14px; font-size:13px;">
+        <input type="checkbox" id="atEnabled" style="width:16px; height:16px;">
+        자동매매 실행 켜기
+      </label>
+      <label style="display:flex; align-items:center; gap:8px; margin-bottom:16px; font-size:13px;">
+        <input type="checkbox" id="atUseAi" style="width:16px; height:16px;">
+        거래대금 상위 안전 종목도 감시 대상에 포함
+      </label>
+      <div style="border-top:1px solid var(--line); padding-top:14px; margin-bottom:16px;">
+        <div style="font-size:13px; font-weight:600; margin-bottom:4px;">자동 점검 주기</div>
+        <p class="easy" style="font-size:12px;">AI가 전략을 스스로 고치거나, 더 좋은 전략을 찾아보는 일을 몇 시간마다 할지 정해요.</p>
+        <details class="more"><summary>자세히 보기</summary><div class="more-body">
+          <p><b>전략 자동조정(실험)</b>: 전략마다 "지켜보기 → 실험 → 채점"을 반복해요. 지금 설정으로 거래 10건을 지켜본 뒤, AI가 지난 실험 결과를 참고해 가설을 세우고 <span class="term" data-term="손절">손절</span>·<span class="term" data-term="익절">익절</span> 같은 숫자를 조금 바꿔요. 새 설정으로 거래 10건이 쌓이면 바꾸기 전과 비교해 채점하고, 나빠졌으면 되돌려요. 이 주기는 "얼마나 자주 확인할지"예요. 확인할 때 거래가 덜 쌓였으면 그냥 넘어가요.</p>
+          <p><b>진화형 탐색</b>: 전략연구실에서 과거 데이터로 여러 조합을 시험해 보고 더 나은 조합을 찾아요.</p>
+          <p>알람 서비스가 더 자주 깨워도 괜찮아요. 여기 정한 시간이 지나지 않았으면 그냥 넘어가요.</p>
+        </div></details>
+        <div class="stat-grid">
+          <div class="stat">
+            <div class="k">전략 자동조정 주기(시간)</div>
+            <input type="number" id="atAdjustInterval" class="mono" style="width:100%; margin-top:4px;" min="1" max="168">
+          </div>
+          <div class="stat">
+            <div class="k">진화형 탐색 주기(시간)</div>
+            <input type="number" id="atEvolveInterval" class="mono" style="width:100%; margin-top:4px;" min="1" max="168">
+          </div>
+        </div>
+      </div>
+      <div style="border-top:1px solid var(--line); padding-top:14px; margin-bottom:16px;">
+        <div style="font-size:13px; font-weight:600; margin-bottom:4px;">자동매매 종목: 고정 50종목</div>
+        <p class="easy" style="font-size:12px;">자동매매는 꾸준히 거래가 많은 큰 회사 50곳만 사고팔아요(최근 20거래일 평균 거래대금 상위 + 시가총액 5조 원 이상). 관심종목은 자동매매에 쓰지 않아요. 한 달에 한 번 기준에서 벗어난 종목이 없는지 점검해요.</p>
+        <div id="uniBox" style="font-size:12.5px; line-height:1.7; margin-bottom:14px;"><span style="color:var(--muted-2);">불러오는 중…</span></div>
+        <div style="font-size:13px; font-weight:600; margin-bottom:4px;">거래대금 순위 보기(참고용)</div>
+        <p class="easy" style="font-size:12px;">그날 거래대금이 많은 종목을 안전 기준으로 걸러 보여줘요. 지금은 참고용이고, 자동매매는 위 50종목만 써요.</p>
+        <details class="more"><summary>자세히 보기</summary><div class="more-body">
+          <p><b>거래대금</b>: 오늘 사고판 돈의 합이에요. 많을수록 원하는 가격에 사고팔기 쉬워요. 다만 급등 테마주도 많이 올라오니 안전 기준으로 걸러요.</p>
+          <p><b>자동으로 빼는 종목</b>: 관리종목, 거래정지, 투자주의·경고·위험, 단기과열, 정리매매, 우선주, ETF·ETN, 스팩이에요. 시가총액이나 위험 표시를 확인하지 못한 종목도 빼요.</p>
+          <p><b>언제 고르나요</b>: 평일 09:30 뒤 한 번, 12시 뒤 한 번 골라요. 장 시작 직후엔 거래대금이 아직 얼마 안 쌓여서 09:30까지 기다려요. 관심종목은 이 기준과 상관없이 계속 지켜봐요.</p>
+          <p><b>단타 전용 후보</b>: 스윙 기준보다 많이 움직였지만 단타 기준 안에 있는 종목은 최대 10개까지 더 뽑아요. 단타 전략만 사고, 등락이 큰 만큼 손절은 넓히고 사는 금액은 줄여요.</p>
+          <p>"안전"은 크게 흔들릴 위험을 줄인다는 뜻이고, 손해가 안 난다는 뜻은 아니에요.</p>
+        </div></details>
+        <div class="stat-grid">
+          <div class="stat"><div class="k">거래대금 상위 몇 개를 볼까요</div><input type="number" id="pickTopN" class="mono" style="width:100%; margin-top:4px;" min="5" max="30"></div>
+          <div class="stat"><div class="k">시가총액 최소(억 원, 10000 = 1조)</div><input type="number" id="pickMinCap" class="mono" style="width:100%; margin-top:4px;" min="0" step="1000"></div>
+          <div class="stat"><div class="k">스윙 후보 오늘 등락폭 최대(±%)</div><input type="number" id="pickMaxChange" class="mono" style="width:100%; margin-top:4px;" min="1" max="30"></div>
+          <div class="stat"><div class="k">단타 후보 오늘 등락폭 최대(±%)</div><input type="number" id="pickDayMaxChange" class="mono" style="width:100%; margin-top:4px;" min="1" max="30"></div>
+          <div class="stat"><div class="k">스윙 후보 최대 개수</div><input type="number" id="pickMax" class="mono" style="width:100%; margin-top:4px;" min="1" max="30"></div>
+        </div>
+        <div style="margin-top:10px;"><button class="btn ghost" id="pickSave" type="button">기준 저장</button><span id="pickMsg" class="st-msg"></span></div>
+        <div id="pickLast" style="font-size:12.5px; line-height:1.7; margin-top:10px;"></div>
+      </div>
+      <button class="btn" id="atSave">설정 저장</button>
+      <span id="atSaveMsg" style="margin-left:10px; font-size:12.5px; color:var(--muted);"></span>
+    </div>
+
+    <div class="panel pad" style="margin-bottom:20px;">
+      <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:10px; flex-wrap:wrap;">
+        <div>
+          <h3 style="margin-top:0; font-size:15px;">사고팔 때 드는 돈(수수료·세금)</h3>
+          <p class="easy">주식을 사고팔 때마다 증권사와 나라에 내는 돈이에요. 가짜 계좌도 이만큼 빼서 실제와 비슷하게 계산해요.</p>
+        </div>
+        <span id="atCostBroker" class="mono" style="font-size:11.5px; color:var(--brand); border:1px solid var(--brand-dim); border-radius:999px; padding:2px 10px; white-space:nowrap;"></span>
+      </div>
+      <div style="max-width:260px; margin-bottom:6px;">
+        <div><label>증권사 이름</label><input type="text" id="atCostBrokerName" style="width:100%;" maxlength="30"></div>
+      </div>
+      <div style="font-size:12px; font-weight:700; color:var(--ink); margin:12px 0 6px;">국내 주식</div>
+      <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:10px; align-items:end;">
+        <div><label>매수 수수료(%)</label><input type="number" step="0.001" id="atCostKrBuy" class="mono" style="width:100%;"></div>
+        <div><label>매도 수수료(%)</label><input type="number" step="0.001" id="atCostKrSell" class="mono" style="width:100%;"></div>
+        <div><label>증권거래세(%, 매도 시)</label><input type="number" step="0.01" id="atCostKrTax" class="mono" style="width:100%;"></div>
+        <div><label>슬리피지(%, 살 때·팔 때 각각)</label><input type="number" step="0.01" id="atCostKrSlip" class="mono" style="width:100%;"></div>
+      </div>
+      <div style="font-size:12px; font-weight:700; color:var(--ink); margin:14px 0 6px;">해외 주식 (미국)</div>
+      <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:10px; align-items:end;">
+        <div><label>매수 수수료(%)</label><input type="number" step="0.001" id="atCostUsBuy" class="mono" style="width:100%;"></div>
+        <div><label>매도 수수료(%)</label><input type="number" step="0.001" id="atCostUsSell" class="mono" style="width:100%;"></div>
+        <div><label>SEC Fee(%, 매도 시)</label><input type="number" step="0.00001" id="atCostUsSec" class="mono" style="width:100%;"></div>
+        <div><label>환전 비용(%, 1회당)</label><input type="number" step="0.01" id="atCostUsFx" class="mono" style="width:100%;"></div>
+        <div><label>슬리피지(%, 살 때·팔 때 각각)</label><input type="number" step="0.01" id="atCostUsSlip" class="mono" style="width:100%;"></div>
+      </div>
+      <div style="font-size:12px; font-weight:700; color:var(--ink); margin:14px 0 6px;">해외주식 양도소득세 (1년 단위)</div>
+      <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:10px; align-items:end;">
+        <div><label>세율(%, 지방세 포함)</label><input type="number" step="0.1" id="atCostTaxRate" class="mono" style="width:100%;"></div>
+        <div><label>기본공제(원)</label><input type="number" step="10000" id="atCostTaxDeduct" class="mono" style="width:100%;"></div>
+      </div>
+      <details class="more" style="margin-top:10px;"><summary>각 항목이 무슨 뜻인지 자세히 보기</summary><div class="more-body">
+        <p><b>수수료</b>: 증권사가 "주문을 대신 넣어준 값"으로 가져가는 돈이에요. 100만원어치를 사면 0.015%인 150원을 내요. 증권사나 이벤트마다 달라서, 쓰는 곳에 맞게 바꿔주세요.</p>
+        <p><b>증권거래세</b>: 국내 주식을 <u>팔 때만</u> 나라에 내는 세금이에요(0.20%). 100만원어치를 팔면 2,000원이에요.</p>
+        <p><b><span class="term" data-term="슬리피지">슬리피지</span></b>: 생각한 가격보다 조금 손해 보고 사지거나 팔리는 차이예요. 1만원에 사려 했는데 10,005원에 사지는 식이죠. 가짜 계좌는 늘 원하는 가격에 바로 사진다고 계산해서, 매매가 많을수록 실제보다 좋아 보여요. 그래서 이만큼 미리 빼요.</p>
+        <p><b>SEC Fee</b>: 미국 주식을 팔 때 미국 금융당국에 내는 아주 작은 수수료예요.</p>
+        <p><b>환전 비용</b>: 원화를 달러로(살 때), 달러를 원화로(팔 때) 바꿀 때마다 빠지는 돈이에요. 토스증권은 평일 낮에 약 0.05%, 그 외 시간엔 약 0.5%예요. 달러를 계속 갖고 거래하면 0으로 두세요.</p>
+        <p><b>해외주식 <span class="term" data-term="양도세">양도세</span></b>: 미국 주식으로 1년 동안 번 돈에서 250만원을 뺀 나머지의 22%를 다음 해 5월에 내요. 국내 주식은 큰손(대주주)이 아니면 이 세금이 없어요.</p>
+        <p>저장하면 다음 매매부터 적용돼요. 이미 끝난 매매 기록은 바뀌지 않아요.</p>
+      </div></details>
+      <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-top:12px;">
+        <button class="btn" id="atCostSave">저장</button>
+        <button class="btn ghost" id="atCostReset">토스증권 기본값으로</button>
+        <span id="atCostMsg" style="font-size:12.5px; color:var(--muted);"></span>
+      </div>
+    </div>
+
   </section>
 
   <!-- TRADES: 매매 기록 검색(지워지지 않는 날짜별 장부에서 찾기 + 원인 분석 숫자) -->
@@ -2531,6 +2538,39 @@
     var btn = e.target.closest('button[data-view]');
     if(btn && btn.dataset.view === 'trades') trInit();
   });
+
+  /* ---------------- 칸 맞추기: 입력칸 이름이 길어 두 줄로 밀리며 칸이 어긋나지 않게 ----------------
+     입력칸 이름 끝의 괄호 설명이 5글자 이상이면(예: "시가총액 최소(억 원, 10000 = 1조)") 이름은 한 줄로 두고
+     괄호 설명은 입력칸 아래 작은 글씨로 옮겨요. 짧은 단위(시간·%·원 등)는 이름에 그대로 둬요.
+     그래도 이름이 칸보다 길면 "…"로 줄이고, 마우스를 올리면 전체가 보여요.
+     화면이 나중에 새로 그려져도(목록 새로고침 등) 알아서 다시 맞춰요. 새 입력칸도 같은 모양이면 자동으로 적용돼요. */
+  var FIELD_LABEL_SEL = '.stat > .k, .tr-form label, .rb-l, [style*="display:grid"] > div > label';
+  var PAREN_TAIL = /^(.*?)\s*\(([^()]*)\)\s*$/;
+  function tidyFieldLabels(root){
+    Array.prototype.forEach.call((root || document).querySelectorAll(FIELD_LABEL_SEL), function(lb){
+      if(lb.getAttribute('data-tidy')) return;
+      lb.setAttribute('data-tidy', '1');
+      var full = lb.textContent.trim();
+      if(!full) return;
+      var m = PAREN_TAIL.exec(full);
+      if(m && m[1] && m[2].length > 4 && lb.children.length === 0){
+        lb.textContent = m[1];
+        var hint = document.createElement('div');
+        hint.className = 'field-hint';
+        hint.textContent = m[2];
+        lb.parentElement.appendChild(hint);
+      }
+      lb.title = full;
+    });
+  }
+  tidyFieldLabels();
+  (function(){
+    var pending = null;
+    new MutationObserver(function(){
+      if(pending) return;
+      pending = setTimeout(function(){ pending = null; tidyFieldLabels(); }, 150);
+    }).observe(document.body, { childList: true, subtree: true });
+  })();
 
   /* ---------------- Ticker Tape ---------------- */
   var tapeTrack = document.getElementById('tapeTrack');
