@@ -85,31 +85,49 @@
   .verdict.v-bad{ background:#FFF0F1; border-color:#FFC9CE; }
 
   /* ---- 홈 "지금 할 일" ---- */
-  .home-grid{ display:grid; grid-template-columns:minmax(0,1.15fr) minmax(0,1fr); gap:16px; margin-bottom:18px; align-items:start; }
-  @media (max-width:900px){ .home-grid{ grid-template-columns:1fr; } }
-  .todo-panel{ margin-bottom:0; }
-  .todo-head{ display:flex; justify-content:space-between; align-items:center; gap:8px; margin-bottom:10px; flex-wrap:wrap; }
-  .lv-chip{ display:inline-block; font-size:12.5px; font-weight:700; padding:2px 9px; border-radius:999px; margin-left:4px; }
-  .lv-chip.lv-urgent{ background:#FFE3E5; color:#C8102E; } .lv-chip.lv-warn{ background:#FFF1D6; color:#A15C00; }
-  .lv-chip.lv-suggest{ background:#E8F3FF; color:#1B64DA; } .lv-chip.lv-info{ background:var(--panel-2); color:var(--muted); }
-  .todo-item{ display:flex; gap:10px; align-items:flex-start; padding:10px 12px; margin-bottom:8px; border-radius:10px; background:var(--panel-2); font-size:14.5px; border-left:4px solid var(--line); }
-  .todo-item.lv-urgent{ background:#FFF4F5; border-left-color:#F04452; } .todo-item.lv-warn{ background:#FFFAF0; border-left-color:#F5A623; }
-  .todo-item.lv-suggest{ border-left-color:#3182F6; } .todo-item.lv-info{ border-left-color:var(--line); }
-  .todo-item .t-ic{ font-size:19px; line-height:1.3; }
-  .todo-item .t-text{ color:var(--muted); font-size:14px; margin-top:2px; }
-  .todo-item button{ margin-left:auto; flex-shrink:0; font-size:13px; padding:5px 12px; }
-  .todo-status{ display:flex; gap:14px; flex-wrap:wrap; color:var(--muted); font-size:13px; margin-top:6px; }
-  .rk-total{ font-size:14.5px; margin-bottom:10px; }
-  .rk-cols{ display:grid; grid-template-columns:1fr; gap:12px; }
-  .rk-h{ font-weight:700; font-size:14px; margin-bottom:6px; }
-  .rk-row{ display:grid; grid-template-columns:16px minmax(0,1fr) 54px auto; grid-template-areas:"no name bar num" ". sub sub sub"; column-gap:6px; align-items:center; padding:5px 0; border-top:1px dashed var(--line); font-size:13.5px; }
-  .rk-row:first-of-type{ border-top:none; }
-  .rk-no{ grid-area:no; color:var(--muted-2); font-weight:700; } .rk-name{ grid-area:name; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; cursor:pointer; }
+  /* ---- 넓은 화면은 양옆 공백을 써요: 가운데 본문 + 오른쪽 옆 칸(따라 내려오는 카드) ----
+     본문 폭(1180px)은 그대로 두고, 화면이 넉넉할 때만 옆 칸을 붙여요. 좁으면 옆 칸은 본문 아래로 내려가요. */
+  .with-rail{ display:grid; grid-template-columns:minmax(0,1fr); gap:20px; }
+  .side-rail{ min-width:0; }
+  @media (min-width:1500px){
+    main:has(> .view.active > .with-rail){ max-width:1500px; }
+    .with-rail{ grid-template-columns:minmax(0,1fr) 300px; gap:24px; align-items:start; }
+    .side-rail{ position:sticky; top:96px; }
+  }
+  .rail-card{ padding:16px 16px 12px; }
+  .rail-title{ margin:0 0 6px; font-size:16px !important; }
+
+  /* ---- 지금 할 일: 위쪽 한 줄 ---- */
+  .todo-strip{ display:flex; align-items:center; gap:10px; flex-wrap:wrap; background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:9px 14px; margin-bottom:18px; font-size:14px; }
+  .ts-label{ font-weight:700; white-space:nowrap; display:flex; align-items:center; gap:6px; }
+  .ts-count{ font-size:12px; color:#fff; border-radius:999px; padding:1px 7px; background:var(--muted-2); }
+  .ts-count.lv-urgent{ background:#F04452; } .ts-count.lv-warn{ background:#F5A623; } .ts-count.lv-suggest{ background:#3182F6; }
+  .ts-items{ display:flex; gap:6px; flex:1 1 auto; min-width:0; overflow:hidden; flex-wrap:nowrap; }
+  .ts-item{ border:none; font-family:inherit; font-size:13.5px; padding:4px 10px; border-radius:999px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:360px; flex-shrink:1; min-width:0; background:var(--panel-2); color:var(--ink); }
+  button.ts-item{ cursor:pointer; } button.ts-item:hover{ filter:brightness(0.97); text-decoration:underline; }
+  .ts-item.lv-urgent{ background:#FFE3E5; color:#B4232F; } .ts-item.lv-warn{ background:#FFF1D6; color:#8A4F00; } .ts-item.lv-suggest{ background:#E8F3FF; color:#1B5BC7; }
+  .ts-ok{ flex:1; color:var(--muted); }
+  .ts-more{ border:none; background:transparent; color:var(--muted); font-family:inherit; font-size:13px; cursor:pointer; white-space:nowrap; padding:4px 6px; }
+  .ts-more:hover{ color:var(--brand); }
+  .ts-status{ margin-left:auto; color:var(--muted-2); font-size:12.5px; white-space:nowrap; }
+  .ts-detail{ flex-basis:100%; border-top:1px dashed var(--line); padding-top:8px; margin-top:2px; }
+  .ts-row{ display:flex; gap:10px; align-items:flex-start; padding:6px 0; }
+  .ts-row .t-text{ color:var(--muted); font-size:13.5px; margin-top:1px; }
+  .ts-row .btn{ margin-left:auto; flex-shrink:0; font-size:13px; padding:4px 12px; }
+
+  /* ---- 전략 순위(옆 칸) ---- */
+  .rk-total{ font-size:13.5px; color:var(--muted); margin-bottom:8px; }
+  .rk-h{ font-weight:700; font-size:13px; margin:10px 0 2px; }
+  .rk-row{ display:grid; grid-template-columns:16px minmax(0,1fr) auto; grid-template-areas:"no name num" ". bar sub"; column-gap:8px; row-gap:3px; align-items:center; padding:6px 0; border-top:1px solid var(--panel-2); font-size:13.5px; }
+  .rk-no{ grid-area:no; color:var(--muted-2); font-weight:700; font-size:12.5px; }
+  .rk-name{ grid-area:name; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; cursor:pointer; }
   .rk-name:hover{ color:var(--brand); text-decoration:underline; }
-  .rk-bar{ grid-area:bar; height:8px; background:var(--panel-2); border-radius:4px; overflow:hidden; } .rk-bar i{ display:block; height:100%; border-radius:4px; }
+  .rk-num{ grid-area:num; font-weight:700; white-space:nowrap; text-align:right; font-variant-numeric:tabular-nums; }
+  .rk-bar{ grid-area:bar; height:5px; background:var(--panel-2); border-radius:3px; overflow:hidden; } .rk-bar i{ display:block; height:100%; border-radius:3px; }
   .bar-up{ background:var(--up); } .bar-down{ background:var(--down); }
-  .rk-num{ grid-area:num; font-weight:700; white-space:nowrap; text-align:right; } .rk-sub{ grid-area:sub; color:var(--muted-2); font-size:12.5px; }
-  .rk-empty{ color:var(--muted-2); font-size:13.5px; padding:6px 0; }
+  .rk-sub{ grid-area:sub; color:var(--muted-2); font-size:12px; text-align:right; }
+  .rk-note{ color:var(--muted-2); font-size:12px; margin-top:8px; cursor:help; }
+  .rk-empty{ color:var(--muted-2); font-size:13px; padding:6px 0; }
 
   /* ---- 휴대폰: 큰 탭은 아래 막대로, 위는 간단하게 ---- */
   @media (max-width:760px){
@@ -601,16 +619,9 @@
 
   <!-- DASHBOARD -->
   <section class="view active" id="view-dashboard">
-    <div class="home-grid">
-      <div class="panel pad todo-panel" id="homeTodoPanel">
-        <div class="todo-head"><h3 style="margin:0;">지금 할 일</h3><div id="homeTodoHead"></div></div>
-        <div id="homeTodo" style="color:var(--muted);">확인하는 중…</div>
-      </div>
-      <div class="panel pad todo-panel" id="homeRankPanel">
-        <div class="todo-head"><h3 style="margin:0;" id="homeRankTitle">오늘 전략 순위</h3></div>
-        <div id="homeRank" style="color:var(--muted);">불러오는 중…</div>
-      </div>
-    </div>
+    <div class="with-rail">
+    <div class="rail-main">
+    <div class="todo-strip" id="homeTodoStrip"><span class="ts-label">지금 할 일</span><span class="ts-ok" style="color:var(--muted-2);">확인하는 중…</span></div>
     <div class="section-head">
       <div>
         <span class="eyebrow">관심종목</span>
@@ -658,6 +669,14 @@
         <div class="glyph">§</div>
         <p>아직 관심종목이 없습니다. 위 입력창에 티커를 입력해 추가해보세요. (예: AAPL, MSFT, NVDA)</p>
       </div>
+    </div>
+    </div>
+    <aside class="side-rail">
+      <div class="panel rail-card" id="homeRankPanel">
+        <h3 class="rail-title" id="homeRankTitle">오늘 전략 순위</h3>
+        <div id="homeRank" style="color:var(--muted);">불러오는 중…</div>
+      </div>
+    </aside>
     </div>
   </section>
 
@@ -2321,44 +2340,47 @@
 
   /* ---------------- 홈 "지금 할 일": 데이터가 끊겼는지, 점검할 때인지, 곧 휴장인지 ---------------- */
   function loadHomeTodo(){
-    var box = document.getElementById('homeTodo'), rk = document.getElementById('homeRank'), head = document.getElementById('homeTodoHead');
-    if(!box) return;
+    var strip = document.getElementById('homeTodoStrip'), rk = document.getElementById('homeRank');
+    if(!strip) return;
     fetch('/api/auto-trade-status?action=home').then(function(r){ return r.json().then(function(d){ if(!r.ok) throw new Error(d.error || '불러오지 못했어요.'); return d; }); }).then(function(d){
-      // 지금 할 일: 급한 것부터. 급함·주의는 색 띠로 눈에 띄게, 제안·알림은 차분하게
-      var LV = { urgent: ['급함', 'lv-urgent'], warn: ['주의', 'lv-warn'], suggest: ['제안', 'lv-suggest'], info: ['알림', 'lv-info'] };
-      var counts = {};
-      d.todos.forEach(function(t){ counts[t.level] = (counts[t.level] || 0) + 1; });
-      head.innerHTML = d.todos.length
-        ? ['urgent','warn','suggest','info'].filter(function(k){ return counts[k]; }).map(function(k){ return '<span class="lv-chip '+LV[k][1]+'">'+LV[k][0]+' '+counts[k]+'</span>'; }).join('')
-        : '';
-      var dataLine = '<div class="todo-status">' +
-        '<span>📊 분봉 '+(d.data.lastMinute ? escapeHtml(d.data.lastMinute)+'까지' : '없음')+'</span>' +
-        '<span>'+(d.marketOpen ? '🟢 장 열림' : '⚪ 장 닫힘')+'</span>' +
-        (d.data.sync ? '<span>'+(d.data.sync.ok ? '✅' : '❌')+' 토스 연결 '+(d.data.sync.ok ? '정상' : '실패')+'</span>' : '') + '</div>';
+      // 지금 할 일: 위쪽 한 줄. 급한 것부터 짧은 제목만 보여주고, [자세히]를 누르면 설명과 버튼이 펼쳐져요.
+      var status = '<span class="ts-status" title="분봉 데이터·장 상태">📊 분봉 '+(d.data.lastMinute ? escapeHtml(d.data.lastMinute.slice(5).replace('-', '/'))+'까지' : '없음')+' · '+(d.marketOpen ? '🟢 장중' : '장 닫힘')+'</span>';
       if(!d.todos.length){
-        box.innerHTML = '<div class="todo-item"><span class="t-ic">👍</span><div><b>지금은 챙길 일이 없어요.</b><div class="t-text">데이터도 잘 올라오고, 자동매매도 잘 돌고 있어요.</div></div></div>' + dataLine;
-      } else {
-        box.innerHTML = d.todos.map(function(t){
-          var btn = t.go ? '<button type="button" class="btn ghost" data-todo-go="'+escapeHtml(t.go)+'">'+(t.go.indexOf('trades:') === 0 ? '기록 보기' : '바로 가기')+'</button>' : '';
-          return '<div class="todo-item '+LV[t.level][1]+'"><span class="t-ic">'+t.icon+'</span><div><b>'+escapeHtml(t.title)+'</b><div class="t-text">'+escapeHtml(t.text)+'</div></div>'+btn+'</div>';
-        }).join('') + dataLine;
+        strip.innerHTML = '<span class="ts-label">지금 할 일</span><span class="ts-ok">👍 챙길 일이 없어요</span>' + status;
+        return renderRank(d);
       }
-      // 전략 순위: 가장 많이 번 5개, 가장 많이 잃은 5개(판 것만 — 아직 들고 있는 종목의 오르내림은 안 들어가요)
+      var items = d.todos.map(function(t){
+        var tip = escapeHtml(t.title + ' — ' + t.text);
+        return t.go
+          ? '<button type="button" class="ts-item lv-'+t.level+'" data-todo-go="'+escapeHtml(t.go)+'" title="'+tip+'">'+t.icon+' '+escapeHtml(t.title)+' ›</button>'
+          : '<span class="ts-item lv-'+t.level+'" title="'+tip+'">'+t.icon+' '+escapeHtml(t.title)+'</span>';
+      }).join('');
+      var detail = d.todos.map(function(t){
+        return '<div class="ts-row lv-'+t.level+'"><span>'+t.icon+'</span><div><b>'+escapeHtml(t.title)+'</b><div class="t-text">'+escapeHtml(t.text)+'</div></div>' +
+          (t.go ? '<button type="button" class="btn ghost" data-todo-go="'+escapeHtml(t.go)+'">'+(t.go.indexOf('trades:') === 0 ? '기록 보기' : '바로 가기')+'</button>' : '') + '</div>';
+      }).join('');
+      strip.innerHTML = '<span class="ts-label">지금 할 일 <b class="ts-count lv-'+d.todos[0].level+'">'+d.todos.length+'</b></span><div class="ts-items">'+items+'</div>' +
+        '<button type="button" class="ts-more" aria-expanded="false">자세히 ▾</button>' + status + '<div class="ts-detail" hidden>'+detail+'</div>';
+      renderRank(d);
+    }).catch(function(e){ strip.innerHTML = '<span class="ts-label">지금 할 일</span><span class="ts-ok" style="color:var(--muted-2);">'+escapeHtml(e.message)+'</span>'; });
+
+    // 전략 순위(옆 칸): 이름·손익 한 줄, 아래에 얇은 막대와 승률
+    function renderRank(d){
       var r = d.ranking;
-      if(!r){ rk.innerHTML = '<div style="color:var(--muted);">최근 10일 동안 매매가 없어요.</div>'; return; }
+      if(!r){ rk.innerHTML = '<div class="rk-empty">최근 10일 동안 매매가 없어요.</div>'; return; }
       var maxAbs = Math.max.apply(null, r.top.concat(r.bottom).map(function(s){ return Math.abs(s.pnl); }).concat([1]));
       var row = function(s, i){
         var w = Math.max(3, Math.round(Math.abs(s.pnl) / maxAbs * 100));
-        return '<div class="rk-row"><span class="rk-no">'+(i+1)+'</span><span class="rk-name" data-id="'+escapeHtml(s.id)+'" data-name="'+escapeHtml(s.name)+'" title="'+escapeHtml(s.name)+'">'+escapeHtml(s.name)+'</span>' +
-          '<span class="rk-bar"><i class="'+(s.pnl>=0?'bar-up':'bar-down')+'" style="width:'+w+'%"></i></span>' +
-          '<span class="rk-num '+(s.pnl>=0?'up':'down')+'">'+(s.pnl>=0?'+':'')+fmt(s.pnl,0)+'원</span><span class="rk-sub">'+s.wins+'/'+s.sells+'승</span></div>';
+        return '<div class="rk-row"><span class="rk-no">'+(i+1)+'</span><span class="rk-name" data-id="'+escapeHtml(s.id)+'" data-name="'+escapeHtml(s.name)+'" title="'+escapeHtml(s.name)+' — 매매 기록 보기">'+escapeHtml(s.name)+'</span>' +
+          '<span class="rk-num '+(s.pnl>=0?'up':'down')+'">'+(s.pnl>=0?'+':'')+fmt(s.pnl,0)+'</span>' +
+          '<span class="rk-bar"><i class="'+(s.pnl>=0?'bar-up':'bar-down')+'" style="width:'+w+'%"></i></span><span class="rk-sub">'+s.wins+'/'+s.sells+'승</span></div>';
       };
-      document.getElementById('homeRankTitle').textContent = (r.isToday ? '오늘' : r.date) + ' 전략 순위';
-      rk.innerHTML = '<div class="rk-total">'+r.count+'개 전략 · 실현 손익 합계 <b class="'+(r.total>=0?'up':'down')+'">'+(r.total>=0?'+':'')+fmt(r.total,0)+'원</b>'+(r.isToday ? '' : ' <span style="color:var(--muted-2);">(오늘은 아직 매매가 없어서 가장 최근 매매일)</span>')+'</div>' +
-        '<div class="rk-cols"><div><div class="rk-h up">가장 많이 번 전략</div>'+(r.top.length ? r.top.map(row).join('') : '<div class="rk-empty">이익 낸 전략이 없어요</div>')+'</div>' +
-        '<div><div class="rk-h down">가장 많이 잃은 전략</div>'+(r.bottom.length ? r.bottom.map(row).join('') : '<div class="rk-empty">손해 본 전략이 없어요</div>')+'</div></div>' +
-        '<div style="color:var(--muted-2); font-size:13px; margin-top:6px;">판 것만 셌어요(아직 들고 있는 종목의 오르내림은 빠져요). "3/8승"은 8번 팔아 3번 이익이라는 뜻이에요. 전략 이름을 누르면 그 전략의 매매 기록을 봐요.</div>';
-    }).catch(function(e){ box.innerHTML = '<span style="color:var(--muted-2);">'+escapeHtml(e.message)+'</span>'; });
+      document.getElementById('homeRankTitle').textContent = (r.isToday ? '오늘' : r.date.slice(5).replace('-', '/')) + ' 전략 순위';
+      rk.innerHTML = '<div class="rk-total">실현 손익 <b class="'+(r.total>=0?'up':'down')+'">'+(r.total>=0?'+':'')+fmt(r.total,0)+'원</b> · '+r.count+'개 전략</div>' +
+        '<div class="rk-h up">많이 번 전략</div>'+(r.top.length ? r.top.map(row).join('') : '<div class="rk-empty">이익 낸 전략이 없어요</div>') +
+        '<div class="rk-h down">많이 잃은 전략</div>'+(r.bottom.length ? r.bottom.map(row).join('') : '<div class="rk-empty">손해 본 전략이 없어요</div>') +
+        '<div class="rk-note" title="판 것만 셌어요(아직 들고 있는 종목의 오르내림은 빠져요). 2/3승 = 3번 팔아 2번 이익">판 것만 · 이름을 누르면 매매 기록</div>';
+    }
   }
   // 바로 가기: 데이터 점검 / 자동매매 / 50종목 점검 / 검증 / 특정 전략의 오늘 매매 기록
   function homeGo(go){
@@ -2379,7 +2401,15 @@
       }, 300);
     }
   }
-  document.getElementById('homeTodo').addEventListener('click', function(e){
+  document.getElementById('homeTodoStrip').addEventListener('click', function(e){
+    var more = e.target.closest('.ts-more');
+    if(more){
+      var det = this.querySelector('.ts-detail');
+      det.hidden = !det.hidden;
+      more.textContent = det.hidden ? '자세히 ▾' : '접기 ▴';
+      more.setAttribute('aria-expanded', String(!det.hidden));
+      return;
+    }
     var b = e.target.closest('[data-todo-go]');
     if(b) homeGo(b.getAttribute('data-todo-go'));
   });
